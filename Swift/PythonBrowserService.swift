@@ -7,6 +7,15 @@ class PythonBrowserService {
     private let maxRetries = 5
     private let baseDelay: TimeInterval = 1.0
     
+    // MARK: - Command Types
+    
+    struct CommandResult {
+        let success: Bool
+        let output: String?
+        let error: String?
+        let returnCode: Int?
+    }
+    
     func connect() {
         guard !isConnected else { return }
         
@@ -35,6 +44,13 @@ class PythonBrowserService {
         return .success([:]) // Actual response handled via message listener
     }
     
+    // MARK: - CLI Operations
+    
+    func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
+        let result = try await sendCommand("runCommand", payload: ["command": command])
+        return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
+    }
+    
     private func handleResponse(_ response: [String: Any]) {
         guard let action = response["action"] as? String else { return }
         
@@ -46,6 +62,13 @@ class PythonBrowserService {
         
         // Handle successful responses based on action type
         switch action {
+        case "runCommand":
+            if let output = response["output"] as? String {
+                print("Command output: \(output)")
+                if let error = response["error"] as? String, !error.isEmpty {
+                    print("Command error: \(error)")
+                }
+            }
         case "openPage":
             if let title = response["title"] as? String {
                 print("Page opened: \(title)")
@@ -139,9 +162,7 @@ extension PythonBrowserService {
             "dialog_params": params
         ])
     }
-}
-
-
+    
     func disconnect() {
         socketTask?.cancel(with: .goingAway, reason: nil)
         isConnected = false
