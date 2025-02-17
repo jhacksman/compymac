@@ -2,8 +2,9 @@
 
 import pytest
 import pytest_asyncio
-from unittest.mock import patch, MagicMock
-from datetime import datetime
+from unittest.mock import patch, MagicMock, AsyncMock
+from datetime import datetime, timezone
+from typing import Any, Dict
 
 from ..memory.venice_api import VeniceAPI
 from ..memory.exceptions import VeniceAPIError
@@ -18,21 +19,29 @@ def venice_api(api_key):
 
 @pytest_asyncio.fixture
 async def mock_session():
-    with patch("aiohttp.ClientSession") as mock:
-        yield mock
+    mock_session = AsyncMock()
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
+    mock_session.post = AsyncMock()
+    mock_session.get = AsyncMock()
+    mock_session.patch = AsyncMock()
+    mock_session.delete = AsyncMock()
+    
+    with patch("aiohttp.ClientSession", return_value=mock_session):
+        yield mock_session
 
 @pytest.mark.asyncio
 async def test_store_memory_success(venice_api, mock_session):
     """Test successful memory storage."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 201
     mock_response.json.return_value = {
         "id": "test_id",
         "content": "test memory",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
-    mock_session.return_value.__aenter__.return_value.post.return_value.__aenter__.return_value = mock_response
+    mock_session.post.return_value = mock_response
     
     result = await venice_api.store_memory(
         "test memory",
@@ -45,11 +54,14 @@ async def test_store_memory_success(venice_api, mock_session):
 @pytest.mark.asyncio
 async def test_store_memory_error(venice_api, mock_session):
     """Test memory storage error handling."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 400
+    mock_response.text = AsyncMock()
     mock_response.text.return_value = "Invalid request"
+    mock_response.json = AsyncMock()
+    mock_response.json.side_effect = Exception("Should not be called")
     
-    mock_session.return_value.__aenter__.return_value.post.return_value.__aenter__.return_value = mock_response
+    mock_session.post.return_value = mock_response
     
     with pytest.raises(VeniceAPIError):
         await venice_api.store_memory(
@@ -60,15 +72,15 @@ async def test_store_memory_error(venice_api, mock_session):
 @pytest.mark.asyncio
 async def test_retrieve_context_success(venice_api, mock_session):
     """Test successful context retrieval."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json.return_value = [{
         "id": "test_id",
         "content": "test memory",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }]
     
-    mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.return_value = mock_response
+    mock_session.get.return_value = mock_response
     
     result = await venice_api.retrieve_context(
         "test query",
@@ -81,11 +93,14 @@ async def test_retrieve_context_success(venice_api, mock_session):
 @pytest.mark.asyncio
 async def test_retrieve_context_error(venice_api, mock_session):
     """Test context retrieval error handling."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 500
+    mock_response.text = AsyncMock()
     mock_response.text.return_value = "Server error"
+    mock_response.json = AsyncMock()
+    mock_response.json.side_effect = Exception("Should not be called")
     
-    mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.return_value = mock_response
+    mock_session.get.return_value = mock_response
     
     with pytest.raises(VeniceAPIError):
         await venice_api.retrieve_context("test query")
@@ -93,15 +108,15 @@ async def test_retrieve_context_error(venice_api, mock_session):
 @pytest.mark.asyncio
 async def test_update_memory_success(venice_api, mock_session):
     """Test successful memory update."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json.return_value = {
         "id": "test_id",
         "content": "updated memory",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
-    mock_session.return_value.__aenter__.return_value.patch.return_value.__aenter__.return_value = mock_response
+    mock_session.patch = AsyncMock(return_value=mock_response)
     
     result = await venice_api.update_memory(
         "test_id",
@@ -113,9 +128,9 @@ async def test_update_memory_success(venice_api, mock_session):
 @pytest.mark.asyncio
 async def test_delete_memory_success(venice_api, mock_session):
     """Test successful memory deletion."""
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 204
     
-    mock_session.return_value.__aenter__.return_value.delete.return_value.__aenter__.return_value = mock_response
+    mock_session.delete = AsyncMock(return_value=mock_response)
     
     await venice_api.delete_memory("test_id")  # Should not raise

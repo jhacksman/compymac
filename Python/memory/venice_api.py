@@ -2,7 +2,7 @@
 
 import aiohttp
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
 from .exceptions import VeniceAPIError
@@ -41,20 +41,20 @@ class VeniceAPI:
                 payload = {
                     "content": content,
                     "metadata": metadata,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
-                async with session.post(
+                response = await session.post(
                     f"{self.base_url}/memories",
                     headers=self.headers,
                     json=payload
-                ) as response:
-                    if response.status != 201:
-                        error_body = await response.text()
-                        raise VeniceAPIError(f"Failed to store memory: {error_body}")
-                    
-                    return await response.json()
-                    
+                )
+                if response.status != 201:
+                    error_body = await response.text()
+                    raise VeniceAPIError(f"Failed to store memory: {error_body}")
+                
+                return await response.json()
+
         except aiohttp.ClientError as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
@@ -82,17 +82,17 @@ class VeniceAPI:
                     **(filters or {})
                 }
                 
-                async with session.get(
+                response = await session.get(
                     f"{self.base_url}/memories/search",
                     headers=self.headers,
                     params=params
-                ) as response:
-                    if response.status != 200:
-                        error_body = await response.text()
-                        raise VeniceAPIError(f"Failed to retrieve context: {error_body}")
-                    
-                    return await response.json()
-                    
+                )
+                if response.status != 200:
+                    error_body = await response.text()
+                    raise VeniceAPIError(f"Failed to retrieve context: {error_body}")
+                
+                return await response.json()
+
         except aiohttp.ClientError as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
@@ -115,17 +115,17 @@ class VeniceAPI:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.patch(
+                response = await session.patch(
                     f"{self.base_url}/memories/{memory_id}",
                     headers=self.headers,
                     json=updates
-                ) as response:
-                    if response.status != 200:
-                        error_body = await response.text()
-                        raise VeniceAPIError(f"Failed to update memory: {error_body}")
-                    
-                    return await response.json()
-                    
+                )
+                if response.status != 200:
+                    error_body = await response.text()
+                    raise VeniceAPIError(f"Failed to update memory: {error_body}")
+                
+                return await response.json()
+
         except aiohttp.ClientError as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
@@ -140,13 +140,13 @@ class VeniceAPI:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.delete(
+                response = await session.delete(
                     f"{self.base_url}/memories/{memory_id}",
                     headers=self.headers
-                ) as response:
-                    if response.status != 204:
-                        error_body = await response.text()
-                        raise VeniceAPIError(f"Failed to delete memory: {error_body}")
-                    
+                )
+                if response.status != 204:
+                    error_body = await response.text()
+                    raise VeniceAPIError(f"Failed to delete memory: {error_body}")
+                
         except aiohttp.ClientError as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
