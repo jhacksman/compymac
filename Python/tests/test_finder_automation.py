@@ -3,7 +3,9 @@ import asyncio
 import os
 from desktop_automation import DesktopAutomation
 
-@pytest.fixture
+import pytest_asyncio
+
+@pytest_asyncio.fixture
 async def automation():
     return DesktopAutomation()
 

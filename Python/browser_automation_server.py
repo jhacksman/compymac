@@ -14,7 +14,13 @@ class BrowserAutomationServer:
         
     def __del__(self):
         """Cleanup browser resources."""
-        self._cleanup_browser()
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                loop.run_until_complete(self._cleanup_browser())
+        except Exception as e:
+            print(f"Failed to cleanup browser: {e}")
         
     async def _cleanup_browser(self):
         """Clean up browser resources."""
