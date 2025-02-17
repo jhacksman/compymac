@@ -13,11 +13,11 @@ public class PythonBrowserService {
     
     // MARK: - Command Types
     
-    struct CommandResult {
-        let success: Bool
-        let output: String?
-        let error: String?
-        let returnCode: Int?
+    public struct CommandResult {
+        public let success: Bool
+        public let output: String?
+        public let error: String?
+        public let returnCode: Int?
     }
     
     func connect() {
@@ -57,15 +57,15 @@ public class PythonBrowserService {
     
     // MARK: - Browser Types
     
-    enum BrowserMode: String {
+    public enum BrowserMode: String {
         case webkit = "webkit"
     }
     
-    struct BrowserResult {
-        let success: Bool
-        let title: String?
-        let url: String?
-        let error: String?
+    public struct BrowserResult {
+        public let success: Bool
+        public let title: String?
+        public let url: String?
+        public let error: String?
     }
     
     // MARK: - Browser Operations
