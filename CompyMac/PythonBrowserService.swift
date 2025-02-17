@@ -20,7 +20,7 @@ public class PythonBrowserService {
         public let returnCode: Int?
     }
     
-    func connect() {
+    public func connect() {
         guard !isConnected else { return }
         
         let serverURL = URL(string: "ws://127.0.0.1:8765")!
@@ -33,7 +33,7 @@ public class PythonBrowserService {
         listenForMessages()
     }
     
-    func sendCommand(_ action: String, payload: [String: Any]) async throws -> Result<[String: Any], Error> {
+    public func sendCommand(_ action: String, payload: [String: Any]) async throws -> Result<[String: Any], Error> {
         if !isConnected {
             connect()
         }
@@ -50,7 +50,7 @@ public class PythonBrowserService {
     
     // MARK: - CLI Operations
     
-    func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
+    public func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
         let result = try await sendCommand("runCommand", payload: ["command": command])
         return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
     }
@@ -70,17 +70,17 @@ public class PythonBrowserService {
     
     // MARK: - Browser Operations
     
-    func openBrowser(url: String) async throws -> Result<BrowserResult, Error> {
+    public func openBrowser(url: String) async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("openBrowser", payload: ["url": url])
         return .success(BrowserResult(success: true, title: "", url: url, error: nil))
     }
     
-    func clickElement(selector: String) async throws -> Result<BrowserResult, Error> {
+    public func clickElement(selector: String) async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("clickElement", payload: ["selector": selector])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
-    func fillForm(fields: [String: String]) async throws -> Result<BrowserResult, Error> {
+    public func fillForm(fields: [String: String]) async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("fillForm", payload: ["fields": fields])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
