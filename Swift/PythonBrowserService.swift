@@ -3,13 +3,20 @@ class PythonBrowserService {
     static let shared = PythonBrowserService()
     private var socketTask: URLSessionWebSocketTask?
     private var isConnected = false
+    private var retryCount = 0
+    private let maxRetries = 5
+    private let baseDelay: TimeInterval = 1.0
     
     func connect() {
         guard !isConnected else { return }
+        
         let serverURL = URL(string: "ws://127.0.0.1:8765")!
         socketTask = URLSession.shared.webSocketTask(with: serverURL)
+        
         socketTask?.resume()
         isConnected = true
+        retryCount = 0  // Reset retry count on successful connection
+        
         listenForMessages()
     }
     
@@ -53,6 +60,7 @@ class PythonBrowserService {
             switch result {
             case .failure(let error):
                 print("WebSocket receive error: \(error)")
+                reconnect()
             case .success(let message):
                 switch message {
                 case .string(let text):
@@ -68,6 +76,29 @@ class PythonBrowserService {
         }
     }
     
+    private func reconnect() {
+        guard retryCount < maxRetries else {
+            notifyReconnectionFailed()
+            return
+        }
+        
+        let delay = baseDelay * pow(2.0, Double(retryCount))
+        retryCount += 1
+        isConnected = false
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.connect()
+        }
+    }
+    
+    private func notifyReconnectionFailed() {
+        let notification = NSUserNotification()
+        notification.title = "Connection Error"
+        notification.informativeText = "Failed to reconnect to automation service after multiple attempts"
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+    
+
     func disconnect() {
         socketTask?.cancel(with: .goingAway, reason: nil)
         isConnected = false
