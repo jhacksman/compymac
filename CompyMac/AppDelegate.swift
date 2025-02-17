@@ -25,6 +25,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
     
+    @objc private func showPermissionGuide() {
+        permissionGuideWindow.makeKeyAndOrderFront(nil)
+    }
+    
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "CompyMac"
