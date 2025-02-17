@@ -1,7 +1,7 @@
 import asyncio
 import json
 from websockets import serve
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 from desktop_automation import DesktopAutomation
 
 class BrowserAutomationServer:
@@ -10,7 +10,7 @@ class BrowserAutomationServer:
         self.browser = None
         self.page = None
         self.desktop = DesktopAutomation()
-        self._setup_browser()
+        self.server = None
         
     def __del__(self):
         """Cleanup browser resources."""
@@ -35,9 +35,16 @@ class BrowserAutomationServer:
             print(f"Failed to initialize browser: {e}")
     
     async def start_server(self):
-        async with serve(self.handle_client_message, "localhost", 8765):
-            print("Browser automation server listening on ws://localhost:8765")
-            await asyncio.Future()  # run forever
+        if self.server:
+            return
+        await self._setup_browser()
+        self.server = await serve(
+            self.handle_client_message,
+            "localhost",
+            8765,
+            reuse_port=True
+        )
+        print("Browser automation server listening on ws://localhost:8765")
     
     async def handle_client_message(self, websocket):
         print("Swift client connected")
