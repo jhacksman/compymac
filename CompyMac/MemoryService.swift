@@ -18,7 +18,6 @@ class MemoryService {
     /// Private initializer for singleton pattern.
     private init() {
         pythonService = PythonBrowserService.shared
-        pythonService = PythonBrowserService.shared
     }
     
     /// Store a new memory with content and metadata.
