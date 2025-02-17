@@ -81,6 +81,21 @@ class PythonBrowserService {
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
+    func navigateBack() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("navigateBack", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func navigateForward() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("navigateForward", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func refresh() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("refresh", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
     private func handleResponse(_ response: [String: Any]) {
         guard let action = response["action"] as? String else { return }
         

@@ -11,6 +11,19 @@ class BrowserAutomationServer:
         self.page = None
         self.desktop = DesktopAutomation()
         self._setup_browser()
+        
+    def __del__(self):
+        """Cleanup browser resources."""
+        self._cleanup_browser()
+        
+    def _cleanup_browser(self):
+        """Clean up browser resources."""
+        if self.page:
+            self.page.close()
+        if self.browser:
+            self.browser.close()
+        if self.playwright:
+            self.playwright.stop()
     
     def _setup_browser(self):
         """Initialize browser instance with Playwright."""
@@ -47,6 +60,72 @@ class BrowserAutomationServer:
     async def execute_browser_action(self, action: str, params: dict):
         if action.startswith("desktop_"):
             return await self.execute_desktop_action(action, params)
+        elif action == "navigateBack":
+            try:
+                if not self.page:
+                    return {
+                        "action": "navigateBack",
+                        "status": "error",
+                        "message": "No active browser page"
+                    }
+                
+                self.page.go_back()
+                return {
+                    "action": "navigateBack",
+                    "status": "success",
+                    "url": self.page.url
+                }
+            except Exception as e:
+                return {
+                    "action": "navigateBack",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
+        elif action == "navigateForward":
+            try:
+                if not self.page:
+                    return {
+                        "action": "navigateForward",
+                        "status": "error",
+                        "message": "No active browser page"
+                    }
+                
+                self.page.go_forward()
+                return {
+                    "action": "navigateForward",
+                    "status": "success",
+                    "url": self.page.url
+                }
+            except Exception as e:
+                return {
+                    "action": "navigateForward",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
+        elif action == "refresh":
+            try:
+                if not self.page:
+                    return {
+                        "action": "refresh",
+                        "status": "error",
+                        "message": "No active browser page"
+                    }
+                
+                self.page.reload()
+                return {
+                    "action": "refresh",
+                    "status": "success",
+                    "url": self.page.url
+                }
+            except Exception as e:
+                return {
+                    "action": "refresh",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
         elif action == "openBrowser":
             url = params.get("url")
             if not url:
