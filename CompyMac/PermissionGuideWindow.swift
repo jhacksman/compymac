@@ -51,7 +51,7 @@ class PermissionGuideWindow: NSWindow {
         stackView.addArrangedSubview(instructionsLabel)
         stackView.addArrangedSubview(openButton)
         
-        contentView.addSubview(stackView)
+        contentView?.addSubview(stackView)
         self.contentView = contentView
     }
     
