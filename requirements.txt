@@ -8,3 +8,4 @@ websockets>=11.0.3
 # pyobjc-framework-Cocoa>=11.0
 # pyobjc-framework-Quartz>=11.0
 # pyobjc-framework-ApplicationServices>=11.0
+aiohttp>=3.9.0  # For Venice.ai API calls
