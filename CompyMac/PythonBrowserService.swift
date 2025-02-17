@@ -72,32 +72,32 @@ public class PythonBrowserService {
     // MARK: - Browser Operations
     
     public func openBrowser(url: String) async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("openBrowser", payload: ["url": url])
+        _ = try await sendCommand("openBrowser", payload: ["url": url])
         return .success(BrowserResult(success: true, title: "", url: url, error: nil))
     }
     
     public func clickElement(selector: String) async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("clickElement", payload: ["selector": selector])
+        _ = try await sendCommand("clickElement", payload: ["selector": selector])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
     public func fillForm(fields: [String: String]) async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("fillForm", payload: ["fields": fields])
+        _ = try await sendCommand("fillForm", payload: ["fields": fields])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
     public func navigateBack() async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("navigateBack", payload: [:])
+        _ = try await sendCommand("navigateBack", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
     public func navigateForward() async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("navigateForward", payload: [:])
+        _ = try await sendCommand("navigateForward", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
     public func refresh() async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("refresh", payload: [:])
+        _ = try await sendCommand("refresh", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
@@ -138,7 +138,7 @@ public class PythonBrowserService {
             switch result {
             case .failure(let error):
                 print("WebSocket receive error: \(error)")
-                reconnect()
+                self?.reconnect()
             case .success(let message):
                 switch message {
                 case .string(let text):
@@ -174,7 +174,9 @@ public class PythonBrowserService {
         content.title = "Connection Error"
         content.body = "Failed to reconnect to automation service after multiple attempts"
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        Task {
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
     
     private func handleError(_ message: String, action: String) {
@@ -183,7 +185,9 @@ public class PythonBrowserService {
         content.subtitle = action.replacingOccurrences(of: "_", with: " ").capitalized
         content.body = message
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        Task {
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
     
     private func notifySuccess(_ message: String, subtitle: String? = nil) {
@@ -194,7 +198,9 @@ public class PythonBrowserService {
         }
         content.body = message
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        Task {
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
 // MARK: - Desktop Automation
