@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import websockets
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -26,11 +27,23 @@ class MockWebSocketServer:
         
     async def start(self):
         """Start the WebSocket server."""
-        self.server = await websockets.serve(
-            self.handle_connection,
-            self.host,
-            self.port
-        )
+        try:
+            self.server = await websockets.serve(
+                self.handle_connection,
+                self.host,
+                self.port,
+                reuse_address=True
+            )
+        except OSError as e:
+            if e.errno in (98, 48):  # Address already in use
+                await self.stop()  # Stop any existing server
+                await asyncio.sleep(0.1)  # Give time for socket to close
+                self.server = await websockets.serve(
+                    self.handle_connection,
+                    self.host,
+                    self.port,
+                    reuse_address=True
+                )
     
     async def stop(self):
         """Stop the WebSocket server."""
@@ -59,6 +72,20 @@ class MockWebSocketServer:
                         response = await self._handle_update_memory(request)
                     elif action == "delete_memory":
                         response = await self._handle_delete_memory(request)
+                    elif action == "desktop_create_folder":
+                        path = request.get("path")
+                        try:
+                            os.makedirs(path, exist_ok=True)
+                            response = {
+                                "action": "desktop_create_folder",
+                                "status": "success"
+                            }
+                        except Exception as e:
+                            response = {
+                                "action": "desktop_create_folder",
+                                "status": "error",
+                                "message": str(e)
+                            }
                     else:
                         response = {
                             "status": "error",
