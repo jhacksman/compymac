@@ -25,12 +25,12 @@ class BrowserAutomationServer:
         if self.playwright:
             self.playwright.stop()
     
-    def _setup_browser(self):
+    async def _setup_browser(self):
         """Initialize browser instance with Playwright."""
         try:
-            self.playwright = sync_playwright().start()
-            self.browser = self.playwright.webkit.launch(headless=False)
-            self.page = self.browser.new_page()
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.webkit.launch(headless=True)
+            self.page = await self.browser.new_page()
         except Exception as e:
             print(f"Failed to initialize browser: {e}")
     
@@ -263,12 +263,13 @@ class BrowserAutomationServer:
                 }
             
             try:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
-                    page = browser.new_page()
-                    page.goto(url)
-                    title = page.title()
-                    browser.close()
+                p = await async_playwright().start()
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                await page.goto(url)
+                title = await page.title()
+                await browser.close()
+                await p.stop()
                 return {
                     "action": "openPage",
                     "status": "success",
