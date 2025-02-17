@@ -20,9 +20,9 @@ def test_dir(tmp_path):
     return str(tmp_path)
 
 @pytest.mark.asyncio
-async def test_finder_websocket_roundtrip(test_dir):
+async def test_finder_websocket_roundtrip(server, test_dir):
     """Test complete WebSocket message round-trip with Finder actions."""
-    async with websockets.connect('ws://localhost:8765') as websocket:
+    async with websockets.connect('ws://localhost:8765', open_timeout=10) as websocket:
         # Create folder request
         folder_path = os.path.join(test_dir, "websocket_test")
         create_request = {

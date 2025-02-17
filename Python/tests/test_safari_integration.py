@@ -14,9 +14,9 @@ async def server():
     await server._cleanup_browser()
 
 @pytest.mark.asyncio
-async def test_browser_websocket_roundtrip():
+async def test_browser_websocket_roundtrip(server):
     """Test complete WebSocket message round-trip with browser actions"""
-    async with websockets.connect('ws://localhost:8765') as websocket:
+    async with websockets.connect('ws://localhost:8765', open_timeout=10) as websocket:
         # Open browser request
         open_request = {
             "action": "openBrowser",

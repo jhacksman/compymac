@@ -71,6 +71,9 @@ class BrowserAutomationServer:
             await websocket.send(json.dumps(response))
     
     async def execute_browser_action(self, action: str, params: dict):
+        if not self.page:
+            await self._setup_browser()
+            
         if action.startswith("desktop_"):
             return await self.execute_desktop_action(action, params)
         elif action == "navigateBack":
