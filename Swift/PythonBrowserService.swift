@@ -51,6 +51,29 @@ class PythonBrowserService {
         return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
     }
     
+    // MARK: - Browser Types
+    
+    enum BrowserMode: String {
+        case webkit = "webkit"
+    }
+    
+    struct BrowserResult {
+        let success: Bool
+        let title: String?
+        let url: String?
+        let error: String?
+    }
+    
+    // MARK: - Browser Operations
+    
+    func openBrowser(url: String, mode: BrowserMode = .webkit) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("openBrowser", payload: [
+            "url": url,
+            "mode": mode.rawValue
+        ])
+        return .success(BrowserResult(success: true, title: "", url: url, error: nil))
+    }
+    
     private func handleResponse(_ response: [String: Any]) {
         guard let action = response["action"] as? String else { return }
         
@@ -62,6 +85,11 @@ class PythonBrowserService {
         
         // Handle successful responses based on action type
         switch action {
+        case "openBrowser":
+            if let title = response["title"] as? String,
+               let url = response["url"] as? String {
+                print("Browser opened: \(title) at \(url)")
+            }
         case "runCommand":
             if let output = response["output"] as? String {
                 print("Command output: \(output)")

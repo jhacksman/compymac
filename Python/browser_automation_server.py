@@ -8,6 +8,7 @@ class BrowserAutomationServer:
     def __init__(self):
         self.playwright = None
         self.browser = None
+        self.page = None
         self.desktop = DesktopAutomation()
     
     async def start_server(self):
@@ -36,6 +37,45 @@ class BrowserAutomationServer:
     async def execute_browser_action(self, action: str, params: dict):
         if action.startswith("desktop_"):
             return await self.execute_desktop_action(action, params)
+        elif action == "openBrowser":
+            url = params.get("url")
+            mode = params.get("mode", "webkit")
+            
+            if not url:
+                return {
+                    "action": "openBrowser",
+                    "status": "error",
+                    "message": "URL not specified"
+                }
+            
+            try:
+                with sync_playwright() as p:
+                    if mode == "webkit":
+                        browser = p.webkit.launch(headless=False)
+                        page = browser.new_page()
+                        page.goto(url)
+                        title = page.title()
+                        browser.close()
+                        
+                        return {
+                            "action": "openBrowser",
+                            "status": "success",
+                            "title": title,
+                            "url": url
+                        }
+                    else:
+                        return {
+                            "action": "openBrowser",
+                            "status": "error",
+                            "message": "Unsupported browser mode"
+                        }
+            except Exception as e:
+                return {
+                    "action": "openBrowser",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
         elif action == "runCommand":
             command = params.get("command")
             if not command:
