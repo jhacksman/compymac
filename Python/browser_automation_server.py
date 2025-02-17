@@ -291,7 +291,68 @@ class BrowserAutomationServer:
             dict: Response containing action status and results
         """
         try:
-            if action == "desktop_launch_app":
+            if action == "desktop_open_folder":
+                path = params.get("path")
+                if not path:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Folder path not specified"
+                    }
+                success = await self.desktop.open_folder(path)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Folder {'opened' if success else 'failed to open'}"
+                }
+                
+            elif action == "desktop_create_folder":
+                path = params.get("path")
+                if not path:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Folder path not specified"
+                    }
+                success = await self.desktop.create_folder(path)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Folder {'created' if success else 'failed to create'}"
+                }
+                
+            elif action == "desktop_move_items":
+                source_paths = params.get("source_paths", [])
+                destination_path = params.get("destination_path")
+                if not source_paths or not destination_path:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Source and destination paths required"
+                    }
+                success = await self.desktop.move_items(source_paths, destination_path)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Items {'moved' if success else 'failed to move'}"
+                }
+                
+            elif action == "desktop_get_selected":
+                try:
+                    items = await self.desktop.get_selected_items()
+                    return {
+                        "action": action,
+                        "status": "success",
+                        "items": items
+                    }
+                except Exception as e:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": str(e)
+                    }
+                    
+            elif action == "desktop_launch_app":
                 app_name = params.get("app_name")
                 if not app_name:
                     return {

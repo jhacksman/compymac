@@ -4,11 +4,12 @@ try:
     # Try to import real PyObjC modules
     import Cocoa
     import Quartz
+    import Foundation
     from ApplicationServices import AXUIElementCreateSystemWide
     MOCK_MODE = False
 except ImportError:
     # Fall back to mock implementations for development
-    from mock_pyobjc import Cocoa, Quartz, ApplicationServices
+    from mock_pyobjc import Cocoa, Quartz, Foundation, ApplicationServices
     MOCK_MODE = True
     print("Warning: Using mock PyObjC implementations for development")
 
@@ -19,9 +20,98 @@ class DesktopAutomation:
         """Initialize desktop automation with system-wide UI access."""
         self.system = ApplicationServices.AXUIElementCreateSystemWide()
         self.workspace = Cocoa.NSWorkspace.sharedWorkspace()
+        self.file_manager = Foundation.NSFileManager.defaultManager()
         if MOCK_MODE:
             print("Desktop Automation initialized in mock mode")
     
+    async def open_folder(self, path: str) -> bool:
+        """Open a folder in Finder.
+        
+        Args:
+            path: Path to the folder to open
+            
+        Returns:
+            bool: True if folder was opened successfully
+        """
+        try:
+            url = Foundation.NSURL.fileURLWithPath_(path)
+            return bool(self.workspace.openURL_(url))
+        except Exception as e:
+            print(f"Failed to open folder {path}: {e}")
+            return False
+    
+    async def create_folder(self, path: str) -> bool:
+        """Create a new folder.
+        
+        Args:
+            path: Path where to create the folder
+            
+        Returns:
+            bool: True if folder was created successfully
+        """
+        try:
+            return bool(self.file_manager.createDirectoryAtPath_withIntermediateDirectories_attributes_error_(
+                path,
+                True,
+                None,
+                None
+            ))
+        except Exception as e:
+            print(f"Failed to create folder {path}: {e}")
+            return False
+    
+    async def move_items(self, source_paths: list[str], destination_path: str) -> bool:
+        """Move items to a destination.
+        
+        Args:
+            source_paths: List of paths to move
+            destination_path: Destination directory
+            
+        Returns:
+            bool: True if all items were moved successfully
+        """
+        try:
+            # Check file system permissions
+            if not self.file_manager.isWritableFileAtPath_(destination_path):
+                print(f"No write permission for destination: {destination_path}")
+                return False
+                
+            for source in source_paths:
+                if not self.file_manager.isReadableFileAtPath_(source):
+                    print(f"No read permission for source: {source}")
+                    return False
+                    
+                source_url = Foundation.NSURL.fileURLWithPath_(source)
+                dest_url = Foundation.NSURL.fileURLWithPath_(destination_path)
+                
+                success = self.file_manager.moveItemAtURL_toURL_error_(
+                    source_url,
+                    dest_url,
+                    None
+                )
+                if not success:
+                    return False
+            return True
+        except Exception as e:
+            print(f"Failed to move items: {e}")
+            return False
+    
+    async def get_selected_items(self) -> list[str]:
+        """Get paths of currently selected items in Finder.
+        
+        Returns:
+            list[str]: List of selected item paths
+        """
+        try:
+            finder_app = self.workspace.frontmostApplication()
+            if finder_app and finder_app.bundleIdentifier() == "com.apple.finder":
+                selection = finder_app.selection()
+                return [item.path() for item in selection]
+            return []
+        except Exception as e:
+            print(f"Failed to get selected items: {e}")
+            return []
+            
     def launch_application(self, app_name: str) -> bool:
         """Launch an application by name.
         
