@@ -35,6 +35,25 @@ class PythonBrowserService {
         return .success([:]) // Actual response handled via message listener
     }
     
+    // MARK: - CLI Operations
+    
+    func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
+        let result = try await sendCommand("runCommand", payload: ["command": command])
+        return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
+    }
+}
+
+// MARK: - Command Types
+
+extension PythonBrowserService {
+    struct CommandResult {
+        let success: Bool
+        let output: String?
+        let error: String?
+        let returnCode: Int?
+    }
+    }
+    
     private func handleResponse(_ response: [String: Any]) {
         guard let action = response["action"] as? String else { return }
         

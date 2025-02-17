@@ -36,6 +36,37 @@ class BrowserAutomationServer:
     async def execute_browser_action(self, action: str, params: dict):
         if action.startswith("desktop_"):
             return await self.execute_desktop_action(action, params)
+        elif action == "runCommand":
+            command = params.get("command")
+            if not command:
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "message": "Command not specified"
+                }
+            
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                return {
+                    "action": "runCommand",
+                    "status": "success" if process.returncode == 0 else "error",
+                    "output": stdout.decode() if stdout else "",
+                    "error": stderr.decode() if stderr else "",
+                    "returnCode": process.returncode
+                }
+            except Exception as e:
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
         elif action == "openPage":
             url = params.get("url")
             if not url:
