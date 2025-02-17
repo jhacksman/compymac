@@ -83,6 +83,6 @@ private class Logger {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let logMessage = "[\(timestamp)] \(message)\n"
         
-        try? logMessage.data(using: .utf8)?.append(to: logFile)
+        try? logMessage.data(using: .utf8)?.write(to: logFile, options: .atomic)
     }
 }
