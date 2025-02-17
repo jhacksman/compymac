@@ -141,6 +141,39 @@ class PythonBrowserService {
 
 // MARK: - Desktop Automation
 extension PythonBrowserService {
+    // MARK: - Finder Operations
+    
+    struct FinderResult {
+        let success: Bool
+        let items: [String]?
+        let error: String?
+    }
+    
+    func openFolder(_ path: String) async throws -> Result<FinderResult, Error> {
+        let result = try await sendCommand("desktop_open_folder", payload: ["path": path])
+        return .success(FinderResult(success: true, items: nil, error: nil))
+    }
+    
+    func createFolder(_ path: String) async throws -> Result<FinderResult, Error> {
+        let result = try await sendCommand("desktop_create_folder", payload: ["path": path])
+        return .success(FinderResult(success: true, items: nil, error: nil))
+    }
+    
+    func moveItems(sourcePaths: [String], destinationPath: String) async throws -> Result<FinderResult, Error> {
+        let result = try await sendCommand("desktop_move_items", payload: [
+            "source_paths": sourcePaths,
+            "destination_path": destinationPath
+        ])
+        return .success(FinderResult(success: true, items: nil, error: nil))
+    }
+    
+    func getSelectedItems() async throws -> Result<FinderResult, Error> {
+        let result = try await sendCommand("desktop_get_selected", payload: [:])
+        return .success(FinderResult(success: true, items: [], error: nil))
+    }
+    
+    // MARK: - App Control
+    
     func launchApplication(_ appName: String) async throws -> Result<[String: Any], Error> {
         return try await sendCommand("desktop_launch_app", payload: ["app_name": appName])
     }

@@ -71,7 +71,16 @@ class DesktopAutomation:
             bool: True if all items were moved successfully
         """
         try:
+            # Check file system permissions
+            if not self.file_manager.isWritableFileAtPath_(destination_path):
+                print(f"No write permission for destination: {destination_path}")
+                return False
+                
             for source in source_paths:
+                if not self.file_manager.isReadableFileAtPath_(source):
+                    print(f"No read permission for source: {source}")
+                    return False
+                    
                 source_url = Foundation.NSURL.fileURLWithPath_(source)
                 dest_url = Foundation.NSURL.fileURLWithPath_(destination_path)
                 
