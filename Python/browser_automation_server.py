@@ -482,12 +482,20 @@ class BrowserAutomationServer:
                             "status": "error",
                             "message": "Invalid path (mock mode)"
                         }
-                    os.makedirs(path, exist_ok=True)
-                    return {
-                        "action": action,
-                        "status": "success",
-                        "message": "Folder created (mock mode)"
-                    }
+                    try:
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        os.makedirs(path, exist_ok=True)
+                        return {
+                            "action": action,
+                            "status": "success",
+                            "message": "Folder created (mock mode)"
+                        }
+                    except Exception as e:
+                        return {
+                            "action": action,
+                            "status": "error",
+                            "message": str(e)
+                        }
                 success = await self.desktop.create_folder(path)
                 return {
                     "action": action,
