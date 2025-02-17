@@ -1,13 +1,13 @@
 import Cocoa
 
 class PermissionGuideWindow: NSWindow {
-    convenience init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 500, height: 400)
-        self.init(
-            contentRect: contentRect,
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false)
+    override init(
+        contentRect: NSRect,
+        styleMask: NSWindow.StyleMask,
+        backing: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(contentRect: contentRect, styleMask: styleMask, backing: backing, defer: flag)
         
         title = "Accessibility Permission Guide"
         let newContentView = NSView(frame: contentRect)
