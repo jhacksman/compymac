@@ -12,6 +12,9 @@
         1234567890ABCDEF1234567890ABCD15 /* AccessibilityPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */; };
         1234567890ABCDEF1234567890ABCD17 /* PermissionGuideWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */; };
         1234567890ABCDEF1234567890ABCD19 /* PermissionErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */; };
+        1234567890ABCDEF1234567890ABCD21 /* FinderAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD22 /* FinderAutomation.swift */; };
+        1234567890ABCDEF1234567890ABCD23 /* SafariAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD24 /* SafariAutomation.swift */; };
+        1234567890ABCDEF1234567890ABCD25 /* TerminalAutomation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD26 /* TerminalAutomation.swift */; };
         /* End PBXBuildFile section */
         
         /* Begin PBXFileReference section */
@@ -22,6 +25,9 @@
         1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPermissionManager.swift; sourceTree = "<group>"; };
         1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGuideWindow.swift; sourceTree = "<group>"; };
         1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionErrorHandler.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD22 /* FinderAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderAutomation.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD24 /* SafariAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariAutomation.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD26 /* TerminalAutomation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAutomation.swift; sourceTree = "<group>"; };
         /* End PBXFileReference section */
         
         /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +50,9 @@
                 1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */,
                 1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */,
                 1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */,
+                1234567890ABCDEF1234567890ABCD22 /* FinderAutomation.swift */,
+                1234567890ABCDEF1234567890ABCD24 /* SafariAutomation.swift */,
+                1234567890ABCDEF1234567890ABCD26 /* TerminalAutomation.swift */,
             );
             path = CompyMac;
             sourceTree = "<group>";
