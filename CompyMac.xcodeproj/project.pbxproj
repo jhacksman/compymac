@@ -9,6 +9,9 @@
         1234567890ABCDEF1234567890ABCDEF /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD01 /* AppDelegate.swift */; };
         1234567890ABCDEF1234567890ABCD02 /* MemoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD03 /* MemoryService.swift */; };
         1234567890ABCDEF1234567890ABCD13 /* PythonBrowserService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD14 /* PythonBrowserService.swift */; };
+        1234567890ABCDEF1234567890ABCD15 /* AccessibilityPermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */; };
+        1234567890ABCDEF1234567890ABCD17 /* PermissionGuideWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */; };
+        1234567890ABCDEF1234567890ABCD19 /* PermissionErrorHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */; };
         /* End PBXBuildFile section */
         
         /* Begin PBXFileReference section */
@@ -16,6 +19,9 @@
         1234567890ABCDEF1234567890ABCD03 /* MemoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryService.swift; sourceTree = "<group>"; };
         1234567890ABCDEF1234567890ABCD04 /* CompyMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CompyMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
         1234567890ABCDEF1234567890ABCD14 /* PythonBrowserService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonBrowserService.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPermissionManager.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGuideWindow.swift; sourceTree = "<group>"; };
+        1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionErrorHandler.swift; sourceTree = "<group>"; };
         /* End PBXFileReference section */
         
         /* Begin PBXFrameworksBuildPhase section */
@@ -35,6 +41,9 @@
                 1234567890ABCDEF1234567890ABCD01 /* AppDelegate.swift */,
                 1234567890ABCDEF1234567890ABCD03 /* MemoryService.swift */,
                 1234567890ABCDEF1234567890ABCD14 /* PythonBrowserService.swift */,
+                1234567890ABCDEF1234567890ABCD16 /* AccessibilityPermissionManager.swift */,
+                1234567890ABCDEF1234567890ABCD18 /* PermissionGuideWindow.swift */,
+                1234567890ABCDEF1234567890ABCD20 /* PermissionErrorHandler.swift */,
             );
             path = CompyMac;
             sourceTree = "<group>";
