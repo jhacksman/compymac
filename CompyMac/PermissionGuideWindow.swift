@@ -1,10 +1,12 @@
 import Cocoa
 
 class PermissionGuideWindow: NSWindow {
-    internal var contentView: NSView?
-    
     init() {
-        contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                  styleMask: [.titled, .closable],
+                  backing: .buffered,
+                  defer: false)
+        self.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
         
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
