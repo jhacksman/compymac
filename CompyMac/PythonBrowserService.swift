@@ -85,17 +85,17 @@ public class PythonBrowserService {
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
-    func navigateBack() async throws -> Result<BrowserResult, Error> {
+    public func navigateBack() async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("navigateBack", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
-    func navigateForward() async throws -> Result<BrowserResult, Error> {
+    public func navigateForward() async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("navigateForward", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
-    func refresh() async throws -> Result<BrowserResult, Error> {
+    public func refresh() async throws -> Result<BrowserResult, Error> {
         let result = try await sendCommand("refresh", payload: [:])
         return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
@@ -197,10 +197,10 @@ public class PythonBrowserService {
 extension PythonBrowserService {
     // MARK: - Finder Operations
     
-    struct FinderResult {
-        let success: Bool
-        let items: [String]?
-        let error: String?
+    public struct FinderResult {
+        public let success: Bool
+        public let items: [String]?
+        public let error: String?
     }
     
     func openFolder(_ path: String) async throws -> Result<FinderResult, Error> {
