@@ -1,7 +1,7 @@
 import Cocoa
 
 class PermissionGuideWindow: NSWindow {
-    private let contentView: NSView
+    internal var contentView: NSView?
     
     init() {
         contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
