@@ -1,5 +1,7 @@
 """Desktop automation module for macOS using PyObjC."""
 
+import os
+
 try:
     # Try to import real PyObjC modules
     import Cocoa
@@ -58,7 +60,13 @@ class DesktopAutomation:
         Returns:
             bool: True if folder was created successfully
         """
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
         try:
+            if MOCK_MODE:
+                os.makedirs(path, exist_ok=True)
+                return True
             return bool(self.file_manager.createDirectoryAtPath_withIntermediateDirectories_attributes_error_(
                 path,
                 True,
@@ -79,8 +87,28 @@ class DesktopAutomation:
         Returns:
             bool: True if all items were moved successfully
         """
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
         try:
-            # Check file system permissions
+            if MOCK_MODE:
+                if not os.access(destination_path, os.W_OK):
+                    print(f"No write permission for destination: {destination_path}")
+                    return False
+                    
+                for source in source_paths:
+                    if not os.access(source, os.R_OK):
+                        print(f"No read permission for source: {source}")
+                        return False
+                        
+                    dest_file = os.path.join(destination_path, os.path.basename(source))
+                    try:
+                        os.rename(source, dest_file)
+                    except OSError:
+                        return False
+                return True
+                
+            # Real implementation
             if not self.file_manager.isWritableFileAtPath_(destination_path):
                 print(f"No write permission for destination: {destination_path}")
                 return False
