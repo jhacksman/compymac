@@ -13,11 +13,11 @@ class MemoryService {
     static let shared = MemoryService()
     
     /// Python service for WebSocket communication.
-    private let pythonService = PythonBrowserService.shared
     private let pythonService: PythonBrowserService
     
     /// Private initializer for singleton pattern.
     private init() {
+        pythonService = PythonBrowserService.shared
         pythonService = PythonBrowserService.shared
     }
     
