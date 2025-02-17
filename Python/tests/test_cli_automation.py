@@ -2,16 +2,24 @@ import pytest
 import pytest_asyncio
 import asyncio
 import json
-from ..browser_automation_server import BrowserAutomationServer
-from ..desktop_automation import DesktopAutomation
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from browser_automation_server import BrowserAutomationServer
+from desktop_automation import DesktopAutomation
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="function")
 async def automation():
     """Create automation fixture."""
     automation = DesktopAutomation()
-    await automation.start()
-    yield automation
-    await automation.stop()
+    try:
+        await automation.start()
+        yield automation
+    finally:
+        try:
+            await automation.stop()
+        except Exception:
+            pass
 
 @pytest.mark.asyncio
 async def test_execute_command_success(automation):

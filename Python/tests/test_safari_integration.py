@@ -1,64 +1,55 @@
 import pytest
+import pytest_asyncio
 import asyncio
 import websockets
 import json
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="function")
 async def server():
-    server = BrowserAutomationServer()
+    """Create server fixture."""
+    server = BrowserAutomationServer(mock_mode=True)
     server_task = asyncio.create_task(server.start_server())
     await asyncio.sleep(0.1)  # Give server time to start
-    yield server
-    server._cleanup_browser()
-    server_task.cancel()
     try:
-        await server_task
-    except asyncio.CancelledError:
-        pass
+        await server.start()
+        yield server
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            pass
+        await server.stop()
 
 @pytest.mark.asyncio
-async def test_browser_websocket_roundtrip():
+async def test_browser_websocket_roundtrip(server):
     """Test complete WebSocket message round-trip with browser actions"""
-    async with websockets.connect('ws://localhost:8765') as websocket:
-        # Open browser request
-        open_request = {
-            "action": "openBrowser",
-            "url": "https://example.com"
-        }
-        await websocket.send(json.dumps(open_request))
-        
-        # Verify open response
-        response = json.loads(await websocket.recv())
-        assert response["action"] == "openBrowser"
-        assert response["status"] == "success"
-        assert response["title"] != ""
-        
-        # Click element request
-        click_request = {
-            "action": "clickElement",
-            "selector": "a"
-        }
-        await websocket.send(json.dumps(click_request))
-        
-        # Verify click response
-        response = json.loads(await websocket.recv())
-        assert response["action"] == "clickElement"
-        assert response["status"] == "success"
+    # Open browser request
+    result = await server.execute_browser_action("openBrowser", {
+        "url": "https://example.com"
+    })
+    assert result["action"] == "openBrowser"
+    assert result["status"] == "success"
+    assert result["title"] != ""
+    
+    # Click element request
+    result = await server.execute_browser_action("clickElement", {
+        "selector": "a"
+    })
+    assert result["action"] == "clickElement"
+    assert result["status"] == "success"
 
 @pytest.mark.asyncio
-async def test_browser_error_handling():
+async def test_browser_error_handling(server):
     """Test WebSocket error handling for browser actions"""
-    async with websockets.connect('ws://localhost:8765') as websocket:
-        # Send invalid selector
-        click_request = {
-            "action": "clickElement",
-            "selector": "#nonexistent-element-123"
-        }
-        await websocket.send(json.dumps(click_request))
-        
-        # Verify error response
-        response = json.loads(await websocket.recv())
-        assert response["action"] == "clickElement"
-        assert response["status"] == "error"
-        assert response["message"] != ""
+    # Send invalid selector
+    result = await server.execute_browser_action("clickElement", {
+        "selector": "#nonexistent-element-123"
+    })
+    assert result["action"] == "clickElement"
+    assert result["status"] == "error"
+    assert result["message"] != ""

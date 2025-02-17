@@ -1,11 +1,23 @@
 import pytest
+import pytest_asyncio
 import asyncio
 import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from desktop_automation import DesktopAutomation
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="function")
 async def automation():
-    return DesktopAutomation()
+    """Create automation fixture."""
+    automation = DesktopAutomation()
+    try:
+        await automation.start()
+        yield automation
+    finally:
+        try:
+            await automation.stop()
+        except Exception:
+            pass
 
 @pytest.fixture
 def test_dir(tmp_path):
@@ -17,7 +29,7 @@ async def test_create_folder(automation, test_dir):
     """Test creating a new folder."""
     new_folder = os.path.join(test_dir, "test_folder")
     success = await automation.create_folder(new_folder)
-    assert success
+    assert success is True
     assert os.path.exists(new_folder)
     assert os.path.isdir(new_folder)
 
