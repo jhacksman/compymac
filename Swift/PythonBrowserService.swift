@@ -99,6 +99,32 @@ class PythonBrowserService {
     }
     
 
+// MARK: - Desktop Automation
+extension PythonBrowserService {
+    func launchApplication(_ appName: String) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_launch_app", payload: ["app_name": appName])
+    }
+    
+    func clickMenuItem(appName: String, menuPath: [String]) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_click_menu", payload: [
+            "app_name": appName,
+            "menu_path": menuPath
+        ])
+    }
+    
+    func typeText(_ text: String) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_type_text", payload: ["text": text])
+    }
+    
+    func handleDialog(action: String, params: [String: Any]) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_handle_dialog", payload: [
+            "dialog_action": action,
+            "dialog_params": params
+        ])
+    }
+}
+
+
     func disconnect() {
         socketTask?.cancel(with: .goingAway, reason: nil)
         isConnected = false
