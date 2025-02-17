@@ -1,6 +1,10 @@
+import Foundation
+import AppKit
+import WebKit
+
 // MARK: - IPC Service Layer
-class PythonBrowserService {
-    static let shared = PythonBrowserService()
+public class PythonBrowserService {
+    public static let shared = PythonBrowserService()
     private var socketTask: URLSessionWebSocketTask?
     private var isConnected = false
     private var retryCount = 0
