@@ -51,6 +51,51 @@ class PythonBrowserService {
         return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
     }
     
+    // MARK: - Browser Types
+    
+    enum BrowserMode: String {
+        case webkit = "webkit"
+    }
+    
+    struct BrowserResult {
+        let success: Bool
+        let title: String?
+        let url: String?
+        let error: String?
+    }
+    
+    // MARK: - Browser Operations
+    
+    func openBrowser(url: String) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("openBrowser", payload: ["url": url])
+        return .success(BrowserResult(success: true, title: "", url: url, error: nil))
+    }
+    
+    func clickElement(selector: String) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("clickElement", payload: ["selector": selector])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func fillForm(fields: [String: String]) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("fillForm", payload: ["fields": fields])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func navigateBack() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("navigateBack", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func navigateForward() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("navigateForward", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func refresh() async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("refresh", payload: [:])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
     private func handleResponse(_ response: [String: Any]) {
         guard let action = response["action"] as? String else { return }
         
@@ -62,6 +107,11 @@ class PythonBrowserService {
         
         // Handle successful responses based on action type
         switch action {
+        case "openBrowser":
+            if let title = response["title"] as? String,
+               let url = response["url"] as? String {
+                print("Browser opened: \(title) at \(url)")
+            }
         case "runCommand":
             if let output = response["output"] as? String {
                 print("Command output: \(output)")
