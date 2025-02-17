@@ -2,19 +2,15 @@ import pytest
 import asyncio
 import websockets
 import json
-from ..browser_automation_server import BrowserAutomationServer
+import pytest_asyncio
+from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def server():
     server = BrowserAutomationServer()
-    server_task = asyncio.create_task(server.start_server())
-    await asyncio.sleep(0.1)  # Give server time to start
+    await server.start_server()
     yield server
-    server_task.cancel()
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        pass
+    await server._cleanup_browser()
 
 @pytest.mark.asyncio
 async def test_websocket_command_roundtrip():

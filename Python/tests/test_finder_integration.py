@@ -5,17 +5,14 @@ import json
 import os
 from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+import pytest_asyncio
+
+@pytest_asyncio.fixture
 async def server():
     server = BrowserAutomationServer()
-    server_task = asyncio.create_task(server.start_server())
-    await asyncio.sleep(0.1)  # Give server time to start
+    await server.start_server()
     yield server
-    server_task.cancel()
-    try:
-        await server_task
-    except asyncio.CancelledError:
-        pass
+    await server._cleanup_browser()
 
 @pytest.fixture
 def test_dir(tmp_path):

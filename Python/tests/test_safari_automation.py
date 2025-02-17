@@ -2,11 +2,14 @@ import pytest
 import asyncio
 from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+import pytest_asyncio
+
+@pytest_asyncio.fixture
 async def server():
     server = BrowserAutomationServer()
+    await server.start_server()
     yield server
-    server._cleanup_browser()
+    await server._cleanup_browser()
 
 @pytest.mark.asyncio
 async def test_open_browser_success(server):
