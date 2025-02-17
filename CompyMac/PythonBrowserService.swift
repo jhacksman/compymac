@@ -203,8 +203,6 @@ public class PythonBrowserService {
         }
     }
 
-// MARK: - Desktop Automation
-extension PythonBrowserService {
     // MARK: - Finder Operations
     
     public struct FinderResult {

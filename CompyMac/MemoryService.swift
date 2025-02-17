@@ -103,7 +103,7 @@ public class MemoryService {
             "updates": updates
         ]
         
-        let result = try await pythonService.sendCommand("store_memory", payload: payload)
+        let result = try await pythonService.sendCommand("update_memory", payload: payload)
         switch result {
         case .success(let response):
             guard let memoryData = response as? [String: Any] else {
