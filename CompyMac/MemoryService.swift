@@ -8,6 +8,7 @@
 import Foundation
 
 /// Memory service singleton for handling memory operations.
+@_implementationOnly import PythonBrowserService
 class MemoryService {
     /// Shared instance for singleton access.
     static let shared = MemoryService()
