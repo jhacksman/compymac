@@ -39,8 +39,8 @@ async def test_move_items(automation, test_dir):
     # Create source and destination folders
     source_dir = os.path.join(test_dir, "source")
     dest_dir = os.path.join(test_dir, "destination")
-    await automation.create_folder(source_dir)
-    await automation.create_folder(dest_dir)
+    os.makedirs(source_dir, exist_ok=True)
+    os.makedirs(dest_dir, exist_ok=True)
     
     # Create a test file
     test_file = os.path.join(source_dir, "test.txt")
@@ -59,8 +59,8 @@ async def test_move_items_permission_denied(automation, test_dir):
     # Create source and destination with restricted permissions
     source_dir = os.path.join(test_dir, "restricted_source")
     dest_dir = os.path.join(test_dir, "restricted_dest")
-    await automation.create_folder(source_dir)
-    await automation.create_folder(dest_dir)
+    os.makedirs(source_dir, exist_ok=True)
+    os.makedirs(dest_dir, exist_ok=True)
     
     # Create a test file
     test_file = os.path.join(source_dir, "test.txt")

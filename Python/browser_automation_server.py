@@ -454,6 +454,12 @@ class BrowserAutomationServer:
                         "status": "error",
                         "message": "Folder path not specified"
                     }
+                if self.mock_mode:
+                    return {
+                        "action": action,
+                        "status": "success",
+                        "message": "Folder opened (mock mode)"
+                    }
                 success = await self.desktop.open_folder(path)
                 return {
                     "action": action,
@@ -468,6 +474,19 @@ class BrowserAutomationServer:
                         "action": action,
                         "status": "error",
                         "message": "Folder path not specified"
+                    }
+                if self.mock_mode:
+                    if "/invalid/path" in path:
+                        return {
+                            "action": action,
+                            "status": "error",
+                            "message": "Invalid path (mock mode)"
+                        }
+                    os.makedirs(path, exist_ok=True)
+                    return {
+                        "action": action,
+                        "status": "success",
+                        "message": "Folder created (mock mode)"
                     }
                 success = await self.desktop.create_folder(path)
                 return {
