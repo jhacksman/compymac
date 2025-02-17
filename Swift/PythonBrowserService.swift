@@ -3,13 +3,20 @@ class PythonBrowserService {
     static let shared = PythonBrowserService()
     private var socketTask: URLSessionWebSocketTask?
     private var isConnected = false
+    private var retryCount = 0
+    private let maxRetries = 5
+    private let baseDelay: TimeInterval = 1.0
     
     func connect() {
         guard !isConnected else { return }
+        
         let serverURL = URL(string: "ws://127.0.0.1:8765")!
         socketTask = URLSession.shared.webSocketTask(with: serverURL)
+        
         socketTask?.resume()
         isConnected = true
+        retryCount = 0  // Reset retry count on successful connection
+        
         listenForMessages()
     }
     
@@ -53,6 +60,7 @@ class PythonBrowserService {
             switch result {
             case .failure(let error):
                 print("WebSocket receive error: \(error)")
+                reconnect()
             case .success(let message):
                 switch message {
                 case .string(let text):
@@ -68,6 +76,72 @@ class PythonBrowserService {
         }
     }
     
+    private func reconnect() {
+        guard retryCount < maxRetries else {
+            notifyReconnectionFailed()
+            return
+        }
+        
+        let delay = baseDelay * pow(2.0, Double(retryCount))
+        retryCount += 1
+        isConnected = false
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.connect()
+        }
+    }
+    
+    private func notifyReconnectionFailed() {
+        let notification = NSUserNotification()
+        notification.title = "Connection Error"
+        notification.informativeText = "Failed to reconnect to automation service after multiple attempts"
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+    
+    private func handleError(_ message: String, action: String) {
+        let notification = NSUserNotification()
+        notification.title = "Automation Error"
+        notification.subtitle = action.replacingOccurrences(of: "_", with: " ").capitalized
+        notification.informativeText = message
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+    
+    private func notifySuccess(_ message: String, subtitle: String? = nil) {
+        let notification = NSUserNotification()
+        notification.title = "Automation Success"
+        if let subtitle = subtitle {
+            notification.subtitle = subtitle
+        }
+        notification.informativeText = message
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+
+// MARK: - Desktop Automation
+extension PythonBrowserService {
+    func launchApplication(_ appName: String) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_launch_app", payload: ["app_name": appName])
+    }
+    
+    func clickMenuItem(appName: String, menuPath: [String]) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_click_menu", payload: [
+            "app_name": appName,
+            "menu_path": menuPath
+        ])
+    }
+    
+    func typeText(_ text: String) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_type_text", payload: ["text": text])
+    }
+    
+    func handleDialog(action: String, params: [String: Any]) async throws -> Result<[String: Any], Error> {
+        return try await sendCommand("desktop_handle_dialog", payload: [
+            "dialog_action": action,
+            "dialog_params": params
+        ])
+    }
+}
+
+
     func disconnect() {
         socketTask?.cancel(with: .goingAway, reason: nil)
         isConnected = false
