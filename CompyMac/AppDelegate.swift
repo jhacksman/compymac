@@ -1,4 +1,5 @@
 import Cocoa
+import AppKit
 
 extension Notification.Name {
     static let showPermissionGuide = Notification.Name("showPermissionGuide")
