@@ -7,7 +7,13 @@ class AccessibilityPermissionManager {
     
     func checkAccessibilityPermission() -> Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        return AXIsProcessTrustedWithOptions(options as CFDictionary)
+        let hasPermission = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if !hasPermission {
+            PermissionErrorHandler.shared.handlePermissionDenied()
+        }
+        
+        return hasPermission
     }
     
     func requestAccessibilityPermission() {

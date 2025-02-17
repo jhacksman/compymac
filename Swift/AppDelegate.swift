@@ -8,7 +8,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+        setupNotifications()
         checkPermissions()
+    }
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showPermissionGuide),
+            name: .showPermissionGuide,
+            object: nil
+        )
     }
     
     private func setupStatusItem() {
