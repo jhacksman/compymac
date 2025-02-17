@@ -9,6 +9,7 @@ from typing import Dict, List, Any
 from ..memory.manager import MemoryManager
 from ..memory.venice_api import VeniceAPI
 from ..memory.exceptions import ContextWindowExceededError, VeniceAPIError
+from ..memory.protocol import MemoryMessage
 
 @pytest.fixture
 def venice_api():
@@ -21,12 +22,12 @@ def memory_manager(venice_api):
 @pytest.mark.asyncio
 async def test_store_memory_success(memory_manager, venice_api):
     """Test successful memory storage."""
-    mock_memory = {
-        "id": "test_id",
-        "content": "test memory",
-        "metadata": {"importance": "high"},
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    mock_memory = MemoryMessage.create(
+        role="assistant",
+        content="test memory",
+        importance="high"
+    )
+    mock_memory["id"] = "test_id"
     venice_api.store_memory.return_value = mock_memory
     
     result = await memory_manager.store_memory(
