@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 import os
-from ..desktop_automation import DesktopAutomation
+from desktop_automation import DesktopAutomation
 
 @pytest.fixture
 async def automation():
