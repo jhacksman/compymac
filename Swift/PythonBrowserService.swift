@@ -66,12 +66,19 @@ class PythonBrowserService {
     
     // MARK: - Browser Operations
     
-    func openBrowser(url: String, mode: BrowserMode = .webkit) async throws -> Result<BrowserResult, Error> {
-        let result = try await sendCommand("openBrowser", payload: [
-            "url": url,
-            "mode": mode.rawValue
-        ])
+    func openBrowser(url: String) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("openBrowser", payload: ["url": url])
         return .success(BrowserResult(success: true, title: "", url: url, error: nil))
+    }
+    
+    func clickElement(selector: String) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("clickElement", payload: ["selector": selector])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
+    }
+    
+    func fillForm(fields: [String: String]) async throws -> Result<BrowserResult, Error> {
+        let result = try await sendCommand("fillForm", payload: ["fields": fields])
+        return .success(BrowserResult(success: true, title: nil, url: nil, error: nil))
     }
     
     private func handleResponse(_ response: [String: Any]) {

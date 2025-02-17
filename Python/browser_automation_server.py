@@ -10,6 +10,16 @@ class BrowserAutomationServer:
         self.browser = None
         self.page = None
         self.desktop = DesktopAutomation()
+        self._setup_browser()
+    
+    def _setup_browser(self):
+        """Initialize browser instance with Playwright."""
+        try:
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.webkit.launch(headless=False)
+            self.page = self.browser.new_page()
+        except Exception as e:
+            print(f"Failed to initialize browser: {e}")
     
     async def start_server(self):
         async with serve(self.handle_client_message, "localhost", 8765):
@@ -39,8 +49,6 @@ class BrowserAutomationServer:
             return await self.execute_desktop_action(action, params)
         elif action == "openBrowser":
             url = params.get("url")
-            mode = params.get("mode", "webkit")
-            
             if not url:
                 return {
                     "action": "openBrowser",
@@ -49,29 +57,81 @@ class BrowserAutomationServer:
                 }
             
             try:
-                with sync_playwright() as p:
-                    if mode == "webkit":
-                        browser = p.webkit.launch(headless=False)
-                        page = browser.new_page()
-                        page.goto(url)
-                        title = page.title()
-                        browser.close()
-                        
-                        return {
-                            "action": "openBrowser",
-                            "status": "success",
-                            "title": title,
-                            "url": url
-                        }
-                    else:
-                        return {
-                            "action": "openBrowser",
-                            "status": "error",
-                            "message": "Unsupported browser mode"
-                        }
+                if not self.page:
+                    self._setup_browser()
+                
+                self.page.goto(url)
+                title = self.page.title()
+                
+                return {
+                    "action": "openBrowser",
+                    "status": "success",
+                    "title": title,
+                    "url": url
+                }
             except Exception as e:
                 return {
                     "action": "openBrowser",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
+        elif action == "clickElement":
+            selector = params.get("selector")
+            if not selector:
+                return {
+                    "action": "clickElement",
+                    "status": "error",
+                    "message": "Selector not specified"
+                }
+            
+            try:
+                if not self.page:
+                    return {
+                        "action": "clickElement",
+                        "status": "error",
+                        "message": "No active browser page"
+                    }
+                
+                self.page.click(selector)
+                return {
+                    "action": "clickElement",
+                    "status": "success"
+                }
+            except Exception as e:
+                return {
+                    "action": "clickElement",
+                    "status": "error",
+                    "message": str(e)
+                }
+                
+        elif action == "fillForm":
+            fields = params.get("fields", {})
+            if not fields:
+                return {
+                    "action": "fillForm",
+                    "status": "error",
+                    "message": "Form fields not specified"
+                }
+            
+            try:
+                if not self.page:
+                    return {
+                        "action": "fillForm",
+                        "status": "error",
+                        "message": "No active browser page"
+                    }
+                
+                for selector, value in fields.items():
+                    self.page.fill(selector, value)
+                
+                return {
+                    "action": "fillForm",
+                    "status": "success"
+                }
+            except Exception as e:
+                return {
+                    "action": "fillForm",
                     "status": "error",
                     "message": str(e)
                 }
