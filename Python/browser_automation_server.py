@@ -16,14 +16,14 @@ class BrowserAutomationServer:
         """Cleanup browser resources."""
         self._cleanup_browser()
         
-    def _cleanup_browser(self):
+    async def _cleanup_browser(self):
         """Clean up browser resources."""
         if self.page:
-            self.page.close()
+            await self.page.close()
         if self.browser:
-            self.browser.close()
+            await self.browser.close()
         if self.playwright:
-            self.playwright.stop()
+            await self.playwright.stop()
     
     async def _setup_browser(self):
         """Initialize browser instance with Playwright."""

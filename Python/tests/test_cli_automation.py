@@ -3,9 +3,14 @@ import asyncio
 import json
 from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+import pytest_asyncio
+
+@pytest_asyncio.fixture
 async def server():
-    return BrowserAutomationServer()
+    server = BrowserAutomationServer()
+    await server.start_server()
+    yield server
+    await server._cleanup_browser()
 
 @pytest.mark.asyncio
 async def test_execute_command_success(server):
