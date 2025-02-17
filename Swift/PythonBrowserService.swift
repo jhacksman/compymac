@@ -40,7 +40,7 @@ class PythonBrowserService {
         
         if let status = response["status"] as? String, status == "error" {
             let errorMsg = response["message"] as? String ?? "Unknown error"
-            print("Python service reported error for \(action): \(errorMsg)")
+            handleError(errorMsg, action: action)
             return
         }
         
@@ -48,7 +48,17 @@ class PythonBrowserService {
         switch action {
         case "openPage":
             if let title = response["title"] as? String {
-                print("Page opened: \(title)")
+                notifySuccess("Page opened successfully", subtitle: title)
+            }
+        case "desktop_launch_app":
+            notifySuccess("Application launched successfully")
+        case "desktop_click_menu":
+            notifySuccess("Menu item clicked successfully")
+        case "desktop_type_text":
+            notifySuccess("Text input completed")
+        case "desktop_handle_dialog":
+            if let result = response["result"] as? [String: Any] {
+                notifySuccess("Dialog handled successfully", subtitle: "\(result)")
             }
         default:
             break
@@ -98,6 +108,25 @@ class PythonBrowserService {
         NSUserNotificationCenter.default.deliver(notification)
     }
     
+
+    private func handleError(_ message: String, action: String) {
+        let notification = NSUserNotification()
+        notification.title = "Automation Error"
+        notification.subtitle = action.replacingOccurrences(of: "_", with: " ").capitalized
+        notification.informativeText = message
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+    
+    private func notifySuccess(_ message: String, subtitle: String? = nil) {
+        let notification = NSUserNotification()
+        notification.title = "Automation Success"
+        if let subtitle = subtitle {
+            notification.subtitle = subtitle
+        }
+        notification.informativeText = message
+        NSUserNotificationCenter.default.deliver(notification)
+    }
+
 
 // MARK: - Desktop Automation
 extension PythonBrowserService {
