@@ -144,6 +144,12 @@
                 1234567890ABCDEF1234567890ABCDEF /* AppDelegate.swift in Sources */,
                 1234567890ABCDEF1234567890ABCD02 /* MemoryService.swift in Sources */,
                 1234567890ABCDEF1234567890ABCD13 /* PythonBrowserService.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD15 /* AccessibilityPermissionManager.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD17 /* PermissionGuideWindow.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD19 /* PermissionErrorHandler.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD21 /* FinderAutomation.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD23 /* SafariAutomation.swift in Sources */,
+                1234567890ABCDEF1234567890ABCD25 /* TerminalAutomation.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
