@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from ..browser_automation_server import BrowserAutomationServer
+from browser_automation_server import BrowserAutomationServer
 
 @pytest.fixture
 async def server():

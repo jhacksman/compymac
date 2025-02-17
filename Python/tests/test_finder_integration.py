@@ -3,7 +3,7 @@ import asyncio
 import websockets
 import json
 import os
-from ..browser_automation_server import BrowserAutomationServer
+from browser_automation_server import BrowserAutomationServer
 
 @pytest.fixture
 async def server():
