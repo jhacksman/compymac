@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import WebKit
+import UserNotifications
 
 // MARK: - IPC Service Layer
 public class PythonBrowserService {
@@ -133,7 +134,7 @@ public class PythonBrowserService {
     }
     
     private func listenForMessages() {
-        socketTask?.receive { [weak self] result in
+        socketTask?.receive { [weak self] (result: Result<URLSessionWebSocketTask.Message, Error>) in
             switch result {
             case .failure(let error):
                 print("WebSocket receive error: \(error)")
@@ -159,7 +160,7 @@ public class PythonBrowserService {
             return
         }
         
-        let delay = baseDelay * pow(2.0, Double(retryCount))
+        let delay = baseDelay * Foundation.pow(2.0, Double(retryCount))
         retryCount += 1
         isConnected = false
         
@@ -169,28 +170,31 @@ public class PythonBrowserService {
     }
     
     private func notifyReconnectionFailed() {
-        let notification = NSUserNotification()
-        notification.title = "Connection Error"
-        notification.informativeText = "Failed to reconnect to automation service after multiple attempts"
-        NSUserNotificationCenter.default.deliver(notification)
+        let content = UNMutableNotificationContent()
+        content.title = "Connection Error"
+        content.body = "Failed to reconnect to automation service after multiple attempts"
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
     
     private func handleError(_ message: String, action: String) {
-        let notification = NSUserNotification()
-        notification.title = "Automation Error"
-        notification.subtitle = action.replacingOccurrences(of: "_", with: " ").capitalized
-        notification.informativeText = message
-        NSUserNotificationCenter.default.deliver(notification)
+        let content = UNMutableNotificationContent()
+        content.title = "Automation Error"
+        content.subtitle = action.replacingOccurrences(of: "_", with: " ").capitalized
+        content.body = message
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
     
     private func notifySuccess(_ message: String, subtitle: String? = nil) {
-        let notification = NSUserNotification()
-        notification.title = "Automation Success"
+        let content = UNMutableNotificationContent()
+        content.title = "Automation Success"
         if let subtitle = subtitle {
-            notification.subtitle = subtitle
+            content.subtitle = subtitle
         }
-        notification.informativeText = message
-        NSUserNotificationCenter.default.deliver(notification)
+        content.body = message
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 
 // MARK: - Desktop Automation
@@ -203,17 +207,17 @@ extension PythonBrowserService {
         public let error: String?
     }
     
-    func openFolder(_ path: String) async throws -> Result<FinderResult, Error> {
+    public func openFolder(_ path: String) async throws -> Result<FinderResult, Error> {
         let result = try await sendCommand("desktop_open_folder", payload: ["path": path])
         return .success(FinderResult(success: true, items: nil, error: nil))
     }
     
-    func createFolder(_ path: String) async throws -> Result<FinderResult, Error> {
+    public func createFolder(_ path: String) async throws -> Result<FinderResult, Error> {
         let result = try await sendCommand("desktop_create_folder", payload: ["path": path])
         return .success(FinderResult(success: true, items: nil, error: nil))
     }
     
-    func moveItems(sourcePaths: [String], destinationPath: String) async throws -> Result<FinderResult, Error> {
+    public func moveItems(sourcePaths: [String], destinationPath: String) async throws -> Result<FinderResult, Error> {
         let result = try await sendCommand("desktop_move_items", payload: [
             "source_paths": sourcePaths,
             "destination_path": destinationPath
@@ -221,37 +225,37 @@ extension PythonBrowserService {
         return .success(FinderResult(success: true, items: nil, error: nil))
     }
     
-    func getSelectedItems() async throws -> Result<FinderResult, Error> {
+    public func getSelectedItems() async throws -> Result<FinderResult, Error> {
         let result = try await sendCommand("desktop_get_selected", payload: [:])
         return .success(FinderResult(success: true, items: [], error: nil))
     }
     
     // MARK: - App Control
     
-    func launchApplication(_ appName: String) async throws -> Result<[String: Any], Error> {
+    public func launchApplication(_ appName: String) async throws -> Result<[String: Any], Error> {
         return try await sendCommand("desktop_launch_app", payload: ["app_name": appName])
     }
     
-    func clickMenuItem(appName: String, menuPath: [String]) async throws -> Result<[String: Any], Error> {
+    public func clickMenuItem(appName: String, menuPath: [String]) async throws -> Result<[String: Any], Error> {
         return try await sendCommand("desktop_click_menu", payload: [
             "app_name": appName,
             "menu_path": menuPath
         ])
     }
     
-    func typeText(_ text: String) async throws -> Result<[String: Any], Error> {
+    public func typeText(_ text: String) async throws -> Result<[String: Any], Error> {
         return try await sendCommand("desktop_type_text", payload: ["text": text])
     }
     
-    func handleDialog(action: String, params: [String: Any]) async throws -> Result<[String: Any], Error> {
+    public func handleDialog(action: String, params: [String: Any]) async throws -> Result<[String: Any], Error> {
         return try await sendCommand("desktop_handle_dialog", payload: [
             "dialog_action": action,
             "dialog_params": params
         ])
     }
     
-    func disconnect() {
-        socketTask?.cancel(with: .goingAway, reason: nil)
+    public func disconnect() {
+        socketTask?.cancel(with: .goingAway, reason: "Disconnecting".data(using: .utf8))
         isConnected = false
     }
 }
