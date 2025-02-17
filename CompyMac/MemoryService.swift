@@ -8,9 +8,9 @@
 import Foundation
 
 /// Memory service singleton for handling memory operations.
-class MemoryService {
+public class MemoryService {
     /// Shared instance for singleton access.
-    static let shared = MemoryService()
+    public static let shared = MemoryService()
     
     /// Python service for WebSocket communication.
     private let pythonService: PythonBrowserService
@@ -26,11 +26,10 @@ class MemoryService {
     ///   - content: Raw memory content
     ///   - metadata: Additional memory metadata
     ///   - completion: Completion handler with Result type
-    func storeMemory(
+    public func storeMemory(
         _ content: String,
-        metadata: [String: Any],
-        completion: @escaping (Result<[String: Any], Error>) -> Void
-    ) {
+        metadata: [String: Any]
+    ) async throws -> Result<[String: Any], Error> {
         let payload: [String: Any] = [
             "action": "store_memory",
             "content": content,
@@ -38,17 +37,15 @@ class MemoryService {
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
         
-        pythonService.sendCommand(payload) { result in
-            switch result {
-            case .success(let response):
-                guard let memoryData = response as? [String: Any] else {
-                    completion(.failure(MemoryError.invalidResponse))
-                    return
-                }
-                completion(.success(memoryData))
-            case .failure(let error):
-                completion(.failure(error))
+        let result = try await pythonService.sendCommand("store_memory", payload: payload)
+        switch result {
+        case .success(let response):
+            guard let memoryData = response as? [String: Any] else {
+                return .failure(MemoryError.invalidResponse)
             }
+            return .success(memoryData)
+        case .failure(let error):
+            return .failure(error)
         }
     }
     
@@ -59,12 +56,11 @@ class MemoryService {
     ///   - taskId: Optional task-specific context ID
     ///   - timeRange: Optional time range filter (e.g., "1d", "7d")
     ///   - completion: Completion handler with Result type
-    func retrieveContext(
+    public func retrieveContext(
         query: String,
         taskId: String? = nil,
-        timeRange: String? = nil,
-        completion: @escaping (Result<[[String: Any]], Error>) -> Void
-    ) {
+        timeRange: String? = nil
+    ) async throws -> Result<[[String: Any]], Error> {
         var filters: [String: Any] = [:]
         if let taskId = taskId {
             filters["task_id"] = taskId
@@ -79,17 +75,15 @@ class MemoryService {
             "filters": filters
         ]
         
-        pythonService.sendCommand(payload) { result in
-            switch result {
-            case .success(let response):
-                guard let contextData = response as? [[String: Any]] else {
-                    completion(.failure(MemoryError.invalidResponse))
-                    return
-                }
-                completion(.success(contextData))
-            case .failure(let error):
-                completion(.failure(error))
+        let result = try await pythonService.sendCommand("retrieve_context", payload: payload)
+        switch result {
+        case .success(let response):
+            guard let contextData = response as? [[String: Any]] else {
+                return .failure(MemoryError.invalidResponse)
             }
+            return .success(contextData)
+        case .failure(let error):
+            return .failure(error)
         }
     }
     
@@ -99,28 +93,25 @@ class MemoryService {
     ///   - memoryId: ID of the memory to update
     ///   - updates: Dictionary of fields to update
     ///   - completion: Completion handler with Result type
-    func updateMemory(
+    public func updateMemory(
         _ memoryId: String,
-        updates: [String: Any],
-        completion: @escaping (Result<[String: Any], Error>) -> Void
-    ) {
+        updates: [String: Any]
+    ) async throws -> Result<[String: Any], Error> {
         let payload: [String: Any] = [
             "action": "update_memory",
             "memory_id": memoryId,
             "updates": updates
         ]
         
-        pythonService.sendCommand(payload) { result in
-            switch result {
-            case .success(let response):
-                guard let memoryData = response as? [String: Any] else {
-                    completion(.failure(MemoryError.invalidResponse))
-                    return
-                }
-                completion(.success(memoryData))
-            case .failure(let error):
-                completion(.failure(error))
+        let result = try await pythonService.sendCommand("store_memory", payload: payload)
+        switch result {
+        case .success(let response):
+            guard let memoryData = response as? [String: Any] else {
+                return .failure(MemoryError.invalidResponse)
             }
+            return .success(memoryData)
+        case .failure(let error):
+            return .failure(error)
         }
     }
     
@@ -129,28 +120,26 @@ class MemoryService {
     /// - Parameters:
     ///   - memoryId: ID of the memory to delete
     ///   - completion: Completion handler with Result type
-    func deleteMemory(
-        _ memoryId: String,
-        completion: @escaping (Result<Void, Error>) -> Void
-    ) {
+    public func deleteMemory(
+        _ memoryId: String
+    ) async throws -> Result<Void, Error> {
         let payload: [String: Any] = [
             "action": "delete_memory",
             "memory_id": memoryId
         ]
         
-        pythonService.sendCommand(payload) { result in
-            switch result {
-            case .success:
-                completion(.success(()))
-            case .failure(let error):
-                completion(.failure(error))
-            }
+        let result = try await pythonService.sendCommand("delete_memory", payload: payload)
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let error):
+            return .failure(error)
         }
     }
 }
 
 /// Memory-related errors.
-enum MemoryError: Error {
+public enum MemoryError: Error {
     /// Invalid response format from server.
     case invalidResponse
 }
