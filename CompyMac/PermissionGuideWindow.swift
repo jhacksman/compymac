@@ -1,21 +1,19 @@
 import Cocoa
 
 class PermissionGuideWindow: NSWindow {
-    private let contentView: NSView
-    
-    init() {
-        contentView = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
-        
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
+    override init(
+        contentRect: NSRect,
+        styleMask: NSWindow.StyleMask,
+        backing: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(contentRect: contentRect, styleMask: styleMask, backing: backing, defer: flag)
         
         title = "Accessibility Permission Guide"
-        contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        let newContentView = NSView(frame: contentRect)
+        newContentView.wantsLayer = true
+        newContentView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        self.contentView = newContentView
         
         setupUI()
         center()
@@ -53,7 +51,7 @@ class PermissionGuideWindow: NSWindow {
         stackView.addArrangedSubview(instructionsLabel)
         stackView.addArrangedSubview(openButton)
         
-        contentView.addSubview(stackView)
+        contentView?.addSubview(stackView)
         self.contentView = contentView
     }
     

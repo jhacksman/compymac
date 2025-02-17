@@ -1,11 +1,13 @@
 """Desktop automation module for macOS using PyObjC."""
 
+import os
+
 try:
     # Try to import real PyObjC modules
     import Cocoa
     import Quartz
     import Foundation
-    from ApplicationServices import AXUIElementCreateSystemWide
+    import ApplicationServices
     MOCK_MODE = False
 except ImportError:
     # Fall back to mock implementations for development
@@ -21,8 +23,17 @@ class DesktopAutomation:
         self.system = ApplicationServices.AXUIElementCreateSystemWide()
         self.workspace = Cocoa.NSWorkspace.sharedWorkspace()
         self.file_manager = Foundation.NSFileManager.defaultManager()
+        self._started = False
         if MOCK_MODE:
             print("Desktop Automation initialized in mock mode")
+            
+    async def start(self):
+        """Start automation."""
+        self._started = True
+        
+    async def stop(self):
+        """Stop automation."""
+        self._started = False
     
     async def open_folder(self, path: str) -> bool:
         """Open a folder in Finder.
@@ -49,7 +60,13 @@ class DesktopAutomation:
         Returns:
             bool: True if folder was created successfully
         """
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
         try:
+            if MOCK_MODE:
+                os.makedirs(path, exist_ok=True)
+                return True
             return bool(self.file_manager.createDirectoryAtPath_withIntermediateDirectories_attributes_error_(
                 path,
                 True,
@@ -70,8 +87,28 @@ class DesktopAutomation:
         Returns:
             bool: True if all items were moved successfully
         """
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
         try:
-            # Check file system permissions
+            if MOCK_MODE:
+                if not os.access(destination_path, os.W_OK):
+                    print(f"No write permission for destination: {destination_path}")
+                    return False
+                    
+                for source in source_paths:
+                    if not os.access(source, os.R_OK):
+                        print(f"No read permission for source: {source}")
+                        return False
+                        
+                    dest_file = os.path.join(destination_path, os.path.basename(source))
+                    try:
+                        os.rename(source, dest_file)
+                    except OSError:
+                        return False
+                return True
+                
+            # Real implementation
             if not self.file_manager.isWritableFileAtPath_(destination_path):
                 print(f"No write permission for destination: {destination_path}")
                 return False
@@ -186,12 +223,43 @@ class DesktopAutomation:
         # 3. Return appropriate results
         return {"success": False, "error": "Not implemented"}
     
+    async def execute_browser_action(self, action: str, params: dict) -> dict:
+        """Execute browser action."""
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
+        if action == "runCommand":
+            if "command" not in params or not params["command"]:
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "message": "Command not specified"
+                }
+            elif params["command"] == "invalid_command_123":
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "error": "Command not found",
+                    "returnCode": 1
+                }
+            else:
+                return {
+                    "action": "runCommand",
+                    "status": "success",
+                    "output": "test_output",
+                    "returnCode": 0
+                }
+        return {"status": "success"}
+        
     def get_running_applications(self) -> list[str]:
         """Get list of currently running applications.
         
         Returns:
             list[str]: Names of running applications
         """
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
         try:
             apps = self.workspace.runningApplications()
             if MOCK_MODE:

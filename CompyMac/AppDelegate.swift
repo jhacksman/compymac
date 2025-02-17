@@ -1,4 +1,9 @@
 import Cocoa
+import AppKit
+
+extension Notification.Name {
+    static let showPermissionGuide = Notification.Name("showPermissionGuide")
+}
 
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -19,6 +24,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .showPermissionGuide,
             object: nil
         )
+    }
+    
+    @objc private func showPermissionGuide() {
+        permissionGuideWindow.makeKeyAndOrderFront(nil)
     }
     
     private func setupStatusItem() {

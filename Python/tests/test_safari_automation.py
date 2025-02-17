@@ -1,12 +1,27 @@
 import pytest
+import pytest_asyncio
 import asyncio
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from browser_automation_server import BrowserAutomationServer
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="function")
 async def server():
-    server = BrowserAutomationServer()
-    yield server
-    server._cleanup_browser()
+    """Create server fixture."""
+    server = BrowserAutomationServer(mock_mode=True)
+    server_task = asyncio.create_task(server.start_server())
+    await asyncio.sleep(0.1)  # Give server time to start
+    try:
+        await server.start()
+        yield server
+    finally:
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            pass
+        await server.stop()
 
 @pytest.mark.asyncio
 async def test_open_browser_success(server):
