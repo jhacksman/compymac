@@ -2,11 +2,13 @@ import asyncio
 import json
 from websockets import serve
 from playwright.sync_api import sync_playwright
+from desktop_automation import DesktopAutomation
 
 class BrowserAutomationServer:
     def __init__(self):
         self.playwright = None
         self.browser = None
+        self.desktop = DesktopAutomation()
     
     async def start_server(self):
         async with serve(self.handle_client_message, "localhost", 8765):
@@ -32,7 +34,9 @@ class BrowserAutomationServer:
             await websocket.send(json.dumps(response))
     
     async def execute_browser_action(self, action: str, params: dict):
-        if action == "openPage":
+        if action.startswith("desktop_"):
+            return await self.execute_desktop_action(action, params)
+        elif action == "openPage":
             url = params.get("url")
             if not url:
                 return {
@@ -66,6 +70,93 @@ class BrowserAutomationServer:
                 "message": "Unsupported action"
             }
 
+    async def execute_desktop_action(self, action: str, params: dict):
+        """Execute desktop automation actions.
+        
+        Args:
+            action: The desktop action to perform (prefixed with 'desktop_')
+            params: Parameters for the action
+            
+        Returns:
+            dict: Response containing action status and results
+        """
+        try:
+            if action == "desktop_launch_app":
+                app_name = params.get("app_name")
+                if not app_name:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Application name not specified"
+                    }
+                success = self.desktop.launch_application(app_name)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Application {'launched' if success else 'failed to launch'}"
+                }
+            
+            elif action == "desktop_click_menu":
+                app_name = params.get("app_name")
+                menu_path = params.get("menu_path", [])
+                if not app_name or not menu_path:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Application name or menu path not specified"
+                    }
+                success = self.desktop.click_menu_item(app_name, menu_path)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Menu item {'clicked' if success else 'failed to click'}"
+                }
+            
+            elif action == "desktop_type_text":
+                text = params.get("text")
+                if not text:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Text not specified"
+                    }
+                success = self.desktop.type_text(text)
+                return {
+                    "action": action,
+                    "status": "success" if success else "error",
+                    "message": f"Text {'typed' if success else 'failed to type'}"
+                }
+            
+            elif action == "desktop_handle_dialog":
+                dialog_action = params.get("dialog_action")
+                dialog_params = params.get("dialog_params", {})
+                if not dialog_action:
+                    return {
+                        "action": action,
+                        "status": "error",
+                        "message": "Dialog action not specified"
+                    }
+                result = self.desktop.handle_dialog(dialog_action, dialog_params)
+                return {
+                    "action": action,
+                    "status": "success" if result.get("success") else "error",
+                    "message": result.get("error", "Dialog handled successfully"),
+                    "result": result.get("result")
+                }
+            
+            else:
+                return {
+                    "action": action,
+                    "status": "error",
+                    "message": f"Unsupported desktop action: {action}"
+                }
+                
+        except Exception as e:
+            return {
+                "action": action,
+                "status": "error",
+                "message": str(e)
+            }
 if __name__ == "__main__":
     server = BrowserAutomationServer()
     asyncio.run(server.start_server())
