@@ -212,17 +212,17 @@ public class PythonBrowserService {
     }
     
     public func openFolder(_ path: String) async throws -> Result<FinderResult, Error> {
-        let result = try await sendCommand("desktop_open_folder", payload: ["path": path])
+        _ = try await sendCommand("desktop_open_folder", payload: ["path": path])
         return .success(FinderResult(success: true, items: nil, error: nil))
     }
     
     public func createFolder(_ path: String) async throws -> Result<FinderResult, Error> {
-        let result = try await sendCommand("desktop_create_folder", payload: ["path": path])
+        _ = try await sendCommand("desktop_create_folder", payload: ["path": path])
         return .success(FinderResult(success: true, items: nil, error: nil))
     }
     
     public func moveItems(sourcePaths: [String], destinationPath: String) async throws -> Result<FinderResult, Error> {
-        let result = try await sendCommand("desktop_move_items", payload: [
+        _ = try await sendCommand("desktop_move_items", payload: [
             "source_paths": sourcePaths,
             "destination_path": destinationPath
         ])
@@ -230,7 +230,7 @@ public class PythonBrowserService {
     }
     
     public func getSelectedItems() async throws -> Result<FinderResult, Error> {
-        let result = try await sendCommand("desktop_get_selected", payload: [:])
+        _ = try await sendCommand("desktop_get_selected", payload: [:])
         return .success(FinderResult(success: true, items: [], error: nil))
     }
     
