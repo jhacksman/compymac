@@ -4,6 +4,7 @@ import Cocoa
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var permissionManager: AccessibilityPermissionManager!
+    private var permissionGuideWindow: PermissionGuideWindow!
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -16,8 +17,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Check Permissions", action: #selector(checkPermissions), keyEquivalent: "p"))
+        menu.addItem(NSMenuItem(title: "Permission Guide", action: #selector(showPermissionGuide), keyEquivalent: "g"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        
+        // Create guide window but don't show it yet
+        permissionGuideWindow = PermissionGuideWindow()
         
         statusItem.menu = menu
     }
