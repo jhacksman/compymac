@@ -1,5 +1,9 @@
 import Cocoa
 
+extension Notification.Name {
+    static let showPermissionGuide = Notification.Name("showPermissionGuide")
+}
+
 @main
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
