@@ -53,7 +53,7 @@ public class PythonBrowserService {
     
     public func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
         let result = try await sendCommand("runCommand", payload: ["command": command])
-        return .success(CommandResult(success: true, output: "", error: nil)) // Response handled via message listener
+        return .success(CommandResult(success: true, output: "", error: nil, returnCode: 0)) // Response handled via message listener
     }
     
     // MARK: - Browser Types
