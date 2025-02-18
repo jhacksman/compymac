@@ -31,39 +31,47 @@ class MockWebSocketServer:
         import websockets.sync.server as ws_server
         
         def run_server():
-            with ws_server.serve(
-                self.handle_connection,
-                self.host,
-                self.port,
-                reuse_address=True
-            ) as server:
-                self.server = server
-                server.serve_forever()
+            try:
+                with ws_server.WebSocketServer(
+                    self.host,
+                    self.port,
+                    process_request=self.handle_connection
+                ) as server:
+                    self.server = server
+                    server.serve_forever()
+            except Exception as e:
+                print(f"Server error: {str(e)}")
                 
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()
         # Give server time to start
         import time
-        time.sleep(0.5)
+        time.sleep(1)
     
     def stop(self):
         """Stop the WebSocket server."""
         if hasattr(self, 'server_thread'):
             self.server_thread.join(timeout=1.0)
     
-    def handle_connection(self, websocket):
+    def handle_connection(self, path, request_headers):
         """Handle WebSocket connection.
         
         Args:
-            websocket: WebSocket connection
+            path: Request path
+            request_headers: Request headers
         """
         try:
-            while True:
-                try:
-                    message = websocket.recv()
-                    print(f"Received message: {message}")  # Debug logging
-                    request = json.loads(message)
-                    action = request.get("action")
+            with websockets.sync.server.ServerConnection(
+                self.socket,
+                path,
+                request_headers
+            ) as websocket:
+                while True:
+                    try:
+                        message = websocket.recv()
+                        print(f"Received message: {message}")  # Debug logging
+                        request = json.loads(message)
+                        action = request.get("action")
                     
                     if action == "store_memory":
                         response = self._handle_store_memory(request)
