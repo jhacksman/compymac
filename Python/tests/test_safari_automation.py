@@ -1,6 +1,4 @@
 import pytest
-import pytest_asyncio
-import asyncio
 from ..browser_automation_server import BrowserAutomationServer
 
 @pytest.fixture(scope="function")
