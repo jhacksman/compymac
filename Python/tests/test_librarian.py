@@ -169,7 +169,8 @@ async def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     assert memories[0]["content"] == "new content"
 
 
-def test_get_recent_memories(librarian):
+@pytest.mark.asyncio
+async def test_get_recent_memories(librarian):
     """Test getting recent memories."""
     # Add some test memories
     now = time.time()
@@ -193,11 +194,11 @@ def test_get_recent_memories(librarian):
     ]
     
     # Get with importance filter
-    memories = librarian.get_recent_memories(min_importance=0.5)
+    memories = await librarian.get_recent_memories(min_importance=0.5)
     assert len(memories) == 1
     assert memories[0]["content"] == "content 1"
     
     # Get with limit
-    memories = librarian.get_recent_memories(limit=1)
+    memories = await librarian.get_recent_memories(limit=1)
     assert len(memories) == 1
     assert memories[0]["content"] == "content 2"
