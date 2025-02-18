@@ -127,8 +127,8 @@ class PersistentMemory:
             if task_id is not None:
                 memories = [
                     memory for memory in memories
-                    if memory.get("task_id") == task_id or 
-                    f"task_{task_id}" in memory.get("metadata", {}).get("context_ids", [])
+                    if memory.get("task_id") == task_id or
+                    f"task_{task_id}" in memory["metadata"].get("context_ids", [])
                 ]
             
             return memories

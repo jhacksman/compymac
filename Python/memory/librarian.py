@@ -5,7 +5,8 @@ retrieval, and organization using Venice.ai API.
 """
 
 import json
-import asyncio
+import uuid
+import time
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
@@ -31,7 +32,7 @@ class LibrarianAgent:
         self.importance_threshold = 0.5
         self.max_context_tokens = 4096  # Venice.ai default
         
-    async def store_memory(
+    def store_memory(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -81,52 +82,103 @@ class LibrarianAgent:
             if surprise_score > self.importance_threshold:
                 metadata.importance = max(metadata.importance or 0.0, surprise_score)
                 
+            memory_id = None
             last_error = None
+            
             for attempt in range(max_retries):
                 try:
                     # Store in Venice.ai with timeout handling
-                    response = await self.venice_client.store_memory(content, metadata)
+                    response = self.venice_client.store_memory(content, metadata)
                     if response.success and response.memory_id:
                         memory_id = response.memory_id
                         break
-                except asyncio.TimeoutError:
-                    last_error = MemoryError("Venice.ai API timeout: Failed to store memory")
+                except (TimeoutError, ConnectionError) as e:
+                    last_error = e
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                        time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
                         continue
-                    raise last_error
-                except ConnectionError as e:
-                    last_error = MemoryError(f"Venice.ai connection error: {str(e)}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
-                        continue
-                    raise last_error
+                    raise MemoryError(f"Venice.ai API error after {max_retries} retries: {str(e)}")
                 except Exception as e:
-                    last_error = MemoryError(f"Venice.ai API error: {str(e)}")
-                    raise last_error
-                
-            if not response.success:
-                raise MemoryError(f"Failed to store memory: {response.error}")
-                
+                    raise MemoryError(f"Venice.ai API error: {str(e)}")
+                    
             if not memory_id:
-                raise MemoryError("No memory ID returned from Venice.ai")
+                raise MemoryError(f"Failed to store memory: {last_error or 'No memory ID returned'}")
                 
-            # Create memory entry
+            # Convert metadata to dict format for consistent access
+            metadata_dict = {
+                "timestamp": metadata.timestamp,
+                "importance": metadata.importance or 0.0,
+                "context_ids": metadata.context_ids or [],
+                "tags": metadata.tags or [],
+                "source": metadata.source,
+                "task_id": metadata.task_id
+            }
+            
+            # No need to stream again since we already have memory_id
+            if not memory_id:
+                raise MemoryError("Failed to store memory: No memory ID returned")
+                    
+            if not memory_id:
+                raise MemoryError("Failed to store memory: No memory ID returned")
+                
+            # Create memory entry with consistent metadata format
             memory_entry = {
                 "id": memory_id,
                 "content": content,
-                "metadata": metadata,
+                "metadata": dict(metadata_dict),  # Store as dict for consistent access
                 "timestamp": datetime.now().timestamp()
             }
             
-            # Add to recent and shared memories
-            self.recent_memories.append(memory_entry)
-            LibrarianAgent._shared_memories.append(memory_entry)
+            # Add to recent memories with deep copy
+            recent_entry = dict(memory_entry)  # Deep copy entire entry
+            recent_entry["metadata"] = dict(metadata_dict)  # Store as dict
+            self.recent_memories.append(recent_entry)
             
-            # Maintain context window sizes
+            # Add to shared memories with deep copy
+            shared_entry = dict(memory_entry)  # Deep copy entire entry
+            shared_entry["metadata"] = dict(metadata_dict)  # Store as dict
+            LibrarianAgent._shared_memories.append(shared_entry)
+            
+            # Update importance based on surprise score
+            if surprise_score and surprise_score > 0.5:
+                memory_entry["metadata"]["importance"] = max(
+                    memory_entry["metadata"]["importance"],
+                    surprise_score
+                )
+            
+            # Update shared memories with context_ids
+            for m in LibrarianAgent._shared_memories:
+                if isinstance(m["metadata"], MemoryMetadata):
+                    m["metadata"] = {
+                        "timestamp": m["metadata"].timestamp,
+                        "importance": m["metadata"].importance or 0.0,
+                        "context_ids": m["metadata"].context_ids or [],
+                        "tags": m["metadata"].tags or [],
+                        "source": m["metadata"].source,
+                        "task_id": m["metadata"].task_id
+                    }
+            
+            # Maintain context window sizes and preserve important memories
             while len(self.recent_memories) > self.max_context_tokens // 4:
+                # Keep memories with high importance
+                metadata = self.recent_memories[0]["metadata"]
+                if isinstance(metadata, dict):
+                    importance = metadata.get("importance", 0.0)
+                else:
+                    importance = metadata.importance or 0.0
+                if importance >= 0.8:
+                    break
                 self.recent_memories.pop(0)
+                
             while len(LibrarianAgent._shared_memories) > self.max_context_tokens:
+                # Keep memories with high importance
+                metadata = LibrarianAgent._shared_memories[0]["metadata"]
+                if isinstance(metadata, dict):
+                    importance = metadata.get("importance", 0.0)
+                else:
+                    importance = metadata.importance or 0.0
+                if importance >= 0.8:
+                    break
                 LibrarianAgent._shared_memories.pop(0)
                 
             return memory_id
@@ -134,7 +186,7 @@ class LibrarianAgent:
         except Exception as e:
             raise MemoryError(f"Failed to store memory: {str(e)}")
             
-    async def retrieve_memories(
+    def retrieve_memories(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -160,13 +212,13 @@ class LibrarianAgent:
         try:
             try:
                 # Get memories from Venice.ai with timeout handling
-                response = await self.venice_client.retrieve_context(
+                response = self.venice_client.retrieve_context(
                     query=query,
                     context_id=context_id,
                     time_range=time_range.total_seconds() if time_range else None,
                     limit=None  # Get all memories first, then filter
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise MemoryError("Venice.ai API timeout: Failed to retrieve memories")
             except Exception as e:
                 raise MemoryError(f"Venice.ai API error: {str(e)}")
@@ -180,11 +232,17 @@ class LibrarianAgent:
                     
             memories = response.memories or []
             
-            # Ensure we have valid memories
-            if not memories and self.recent_memories:
-                # Fall back to recent memories if Venice.ai returns nothing
-                memories = self.recent_memories.copy()
-            
+            # Handle error cases
+            if not response.success:
+                if "corruption" in str(response.error).lower():
+                    # Handle index corruption by returning empty list
+                    return []
+                raise MemoryError(f"Failed to retrieve memories: {response.error}")
+                
+            # Handle empty or None memories
+            if not memories:
+                return []
+                
             # Ensure consistent metadata format and handle partial data
             valid_memories = []
             for memory in memories:
@@ -236,24 +294,131 @@ class LibrarianAgent:
                 # Get memories from shared store
                 memories = LibrarianAgent._shared_memories.copy()
                 
-            # Ensure shared memories are accessible
+            # Ensure consistent metadata format
             for memory in memories:
+                metadata = memory.get("metadata")
+                if isinstance(metadata, dict):
+                    memory["metadata"] = MemoryMetadata(
+                        timestamp=metadata.get("timestamp", datetime.now().timestamp()),
+                        importance=metadata.get("importance", 0.0),
+                        context_ids=metadata.get("context_ids", []),
+                        tags=metadata.get("tags", []),
+                        source=metadata.get("source"),
+                        task_id=metadata.get("task_id")
+                    )
+                elif not isinstance(metadata, MemoryMetadata):
+                    memory["metadata"] = MemoryMetadata(
+                        timestamp=datetime.now().timestamp(),
+                        importance=0.0,
+                        context_ids=[],
+                        tags=[],
+                        source=None,
+                        task_id=None
+                    )
                 memory["shared"] = True
 
+            # Convert all metadata to dict format and ensure deep copies
+            normalized_memories = []
+            for memory in memories:
+                if not isinstance(memory, dict):
+                    continue
+                    
+                if "metadata" not in memory:
+                    continue
+                    
+                metadata = memory["metadata"]
+                if isinstance(metadata, MemoryMetadata):
+                    metadata_dict = {
+                        "timestamp": metadata.timestamp,
+                        "importance": metadata.importance or 0.0,
+                        "context_ids": metadata.context_ids or [],
+                        "tags": metadata.tags or [],
+                        "source": metadata.source,
+                        "task_id": metadata.task_id
+                    }
+                elif isinstance(metadata, dict):
+                    metadata_dict = dict(metadata)  # Make a copy
+                    metadata_dict.setdefault("timestamp", datetime.now().timestamp())
+                    metadata_dict.setdefault("importance", 0.0)
+                    metadata_dict.setdefault("context_ids", [])
+                    metadata_dict.setdefault("tags", [])
+                    metadata_dict.setdefault("source", None)
+                    metadata_dict.setdefault("task_id", None)
+                else:
+                    continue
+                    
+                # Create normalized memory entry
+                normalized_memory = {
+                    "id": memory.get("id", str(uuid.uuid4())),
+                    "content": memory.get("content", ""),
+                    "metadata": dict(metadata_dict),  # Deep copy metadata
+                    "timestamp": memory.get("timestamp", datetime.now().timestamp())
+                }
+                normalized_memories.append(normalized_memory)
+                
+            memories = normalized_memories
+            
+            # Share memories between agents
+            if not memories:
+                # Get memories from shared store
+                memories = []
+                for m in LibrarianAgent._shared_memories:
+                    # Convert metadata to dict for consistent access
+                    metadata = m["metadata"]
+                    if isinstance(metadata, MemoryMetadata):
+                        metadata_dict = {
+                            "timestamp": metadata.timestamp,
+                            "importance": metadata.importance or 0.0,
+                            "context_ids": metadata.context_ids or [],
+                            "tags": metadata.tags or [],
+                            "source": metadata.source,
+                            "task_id": metadata.task_id
+                        }
+                    else:
+                        metadata_dict = dict(metadata)  # Make a copy
+                        
+                    # Ensure all fields exist with defaults
+                    metadata_dict.setdefault("timestamp", datetime.now().timestamp())
+                    metadata_dict.setdefault("importance", 0.0)
+                    metadata_dict.setdefault("context_ids", [])
+                    metadata_dict.setdefault("tags", [])
+                    metadata_dict.setdefault("source", None)
+                    metadata_dict.setdefault("task_id", None)
+                        
+                    # Filter by context_id if specified
+                    if context_id:
+                        context_ids = metadata_dict["context_ids"]
+                        if not any(cid == context_id or str(context_id) in str(cid) for cid in context_ids):
+                            continue
+                        
+                    # Filter by min_importance if specified
+                    if min_importance and metadata_dict["importance"] < min_importance:
+                        continue
+                        
+                    # Create memory entry with consistent metadata format
+                    memory_entry = {
+                        "id": m["id"],
+                        "content": m["content"],
+                        "metadata": dict(metadata_dict),  # Store as dict for consistent access
+                        "timestamp": m["timestamp"],
+                        "shared": True
+                    }
+                    memories.append(memory_entry)
+                
             # Filter by time range if specified
             if time_range:
                 now = datetime.now().timestamp()
                 cutoff = now - time_range.total_seconds()
                 memories = [
                     m for m in memories
-                    if m["metadata"].timestamp >= cutoff
+                    if m["metadata"]["timestamp"] >= cutoff
                 ]
                 
             # Filter by context ID if specified
             if context_id:
                 memories = [
                     m for m in memories
-                    if context_id in m["metadata"].context_ids
+                    if context_id in m["metadata"]["context_ids"]
                 ]
                 
             # Filter by importance if specified
@@ -261,12 +426,10 @@ class LibrarianAgent:
                 filtered_memories = []
                 for m in memories:
                     try:
-                        metadata = m.get("metadata")
-                        if metadata and hasattr(metadata, "importance"):
-                            importance = metadata.importance
-                            if importance is not None and float(importance) >= min_importance:
-                                filtered_memories.append(m)
-                    except (AttributeError, ValueError, TypeError):
+                        importance = float(m["metadata"]["importance"])
+                        if importance >= min_importance:
+                            filtered_memories.append(m)
+                    except (ValueError, TypeError, KeyError):
                         continue
                 memories = filtered_memories
                 
@@ -274,8 +437,12 @@ class LibrarianAgent:
             now = datetime.now().timestamp()
             for memory in memories:
                 metadata = memory["metadata"]
-                time_diff = now - metadata.timestamp
-                importance = float(metadata.importance or 0.0)
+                if isinstance(metadata, MemoryMetadata):
+                    time_diff = now - metadata.timestamp
+                    importance = float(metadata.importance or 0.0)
+                else:
+                    time_diff = now - metadata.get("timestamp", now)
+                    importance = float(metadata.get("importance", 0.0))
                 recency_score = 1.0 / (1.0 + time_diff / 86400)  # Decay over days
                 memory["_score"] = importance + recency_score
                 
@@ -285,16 +452,25 @@ class LibrarianAgent:
             if limit is not None:
                 memories = memories[:limit]
                 
-            # Remove scoring field
+            # Remove scoring field and ensure consistent metadata format
             for memory in memories:
                 memory.pop("_score", None)
+                if isinstance(memory["metadata"], dict):
+                    memory["metadata"] = MemoryMetadata(
+                        timestamp=memory["metadata"].get("timestamp", now),
+                        importance=memory["metadata"].get("importance", 0.0),
+                        context_ids=memory["metadata"].get("context_ids", []),
+                        tags=memory["metadata"].get("tags", []),
+                        source=memory["metadata"].get("source"),
+                        task_id=memory["metadata"].get("task_id")
+                    )
                 
             return memories
             
         except Exception as e:
             raise MemoryError(f"Failed to retrieve memories: {str(e)}")
             
-    async def update_memory(
+    def update_memory(
         self,
         memory_id: str,
         content: Optional[str] = None,
@@ -320,12 +496,12 @@ class LibrarianAgent:
                 
             try:
                 # Update in Venice.ai with timeout handling
-                response = await self.venice_client.update_memory(
+                response = self.venice_client.update_memory(
                     memory_id=memory_id,
                     content=content,
                     metadata=metadata
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise MemoryError("Venice.ai API timeout: Failed to update memory")
             except json.JSONDecodeError as e:
                 raise MemoryError(f"Memory corrupted: {str(e)}")

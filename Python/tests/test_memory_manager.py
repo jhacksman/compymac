@@ -1,8 +1,7 @@
 """Tests for memory manager."""
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import Mock, MagicMock
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 
@@ -13,14 +12,13 @@ from ..memory.protocol import MemoryMessage
 
 @pytest.fixture
 def venice_api():
-    return AsyncMock(spec=VeniceAPI)
+    return Mock(spec=VeniceAPI)
 
 @pytest.fixture
 def memory_manager(venice_api):
     return MemoryManager(venice_api, max_tokens=1000)
 
-@pytest.mark.asyncio
-async def test_store_memory_success(memory_manager, venice_api):
+def test_store_memory_success(memory_manager, venice_api):
     """Test successful memory storage."""
     mock_memory = MemoryMessage.create(
         role="assistant",
@@ -30,7 +28,7 @@ async def test_store_memory_success(memory_manager, venice_api):
     mock_memory["id"] = "test_id"
     venice_api.store_memory.return_value = mock_memory
     
-    result = await memory_manager.store_memory(
+    result = memory_manager.store_memory(
         "test memory",
         {"importance": "high"}
     )
@@ -42,8 +40,7 @@ async def test_store_memory_success(memory_manager, venice_api):
         {"importance": "high"}
     )
 
-@pytest.mark.asyncio
-async def test_store_memory_with_task_id(memory_manager, venice_api):
+def test_store_memory_with_task_id(memory_manager, venice_api):
     """Test memory storage with task ID."""
     mock_memory = {
         "id": "test_id",
@@ -56,7 +53,7 @@ async def test_store_memory_with_task_id(memory_manager, venice_api):
     }
     venice_api.store_memory.return_value = mock_memory
     
-    result = await memory_manager.store_memory(
+    result = memory_manager.store_memory(
         "test memory",
         {"importance": "high"},
         task_id="task_123"
@@ -68,8 +65,7 @@ async def test_store_memory_with_task_id(memory_manager, venice_api):
         {"importance": "high", "task_id": "task_123"}
     )
 
-@pytest.mark.asyncio
-async def test_retrieve_context_success(memory_manager, venice_api):
+def test_retrieve_context_success(memory_manager, venice_api):
     """Test successful context retrieval."""
     mock_memories = [{
         "id": "test_id",
@@ -79,7 +75,7 @@ async def test_retrieve_context_success(memory_manager, venice_api):
     }]
     venice_api.retrieve_context.return_value = mock_memories
     
-    result = await memory_manager.retrieve_context(
+    result = memory_manager.retrieve_context(
         "test query",
         task_id="task_123",
         time_range="1d"
@@ -91,8 +87,7 @@ async def test_retrieve_context_success(memory_manager, venice_api):
         {"task_id": "task_123", "time_range": "1d"}
     )
 
-@pytest.mark.asyncio
-async def test_update_memory_success(memory_manager, venice_api):
+def test_update_memory_success(memory_manager, venice_api):
     """Test successful memory update."""
     mock_memory = {
         "id": "test_id",
@@ -108,7 +103,7 @@ async def test_update_memory_success(memory_manager, venice_api):
         "content": "old memory"
     })
     
-    result = await memory_manager.update_memory(
+    result = memory_manager.update_memory(
         "test_id",
         {"content": "updated memory"}
     )
@@ -120,8 +115,7 @@ async def test_update_memory_success(memory_manager, venice_api):
         {"content": "updated memory"}
     )
 
-@pytest.mark.asyncio
-async def test_delete_memory_success(memory_manager, venice_api):
+def test_delete_memory_success(memory_manager, venice_api):
     """Test successful memory deletion."""
     # Add memory to context window
     memory_manager.context_window.append({
@@ -129,13 +123,12 @@ async def test_delete_memory_success(memory_manager, venice_api):
         "content": "test memory"
     })
     
-    await memory_manager.delete_memory("test_id")
+    memory_manager.delete_memory("test_id")
     
     assert len(memory_manager.context_window) == 0
     venice_api.delete_memory.assert_called_once_with("test_id")
 
-@pytest.mark.asyncio
-async def test_context_window_pruning(memory_manager, venice_api):
+def test_context_window_pruning(memory_manager, venice_api):
     """Test context window pruning when limit exceeded."""
     # Create a memory that will exceed token limit
     long_content = "x" * 4000  # Will be ~1000 tokens
@@ -153,7 +146,7 @@ async def test_context_window_pruning(memory_manager, venice_api):
         {"id": "old_2", "content": "old memory 2"}
     ]
     
-    result = await memory_manager.store_memory(
+    result = memory_manager.store_memory(
         long_content,
         {"importance": "high"}
     )

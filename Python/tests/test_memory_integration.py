@@ -1,36 +1,33 @@
 """Integration tests for memory operations."""
 
 import pytest
-import pytest_asyncio
-import asyncio
-import websockets
+import websockets.sync.client as websockets
 import json
 from datetime import datetime, timezone
 
 from ..memory.protocol import MemoryMessage
 from ..memory.exceptions import VeniceAPIError
 
-@pytest_asyncio.fixture
-async def server():
+@pytest.fixture
+def server():
     from .mock_websocket_server import MockWebSocketServer
     server = MockWebSocketServer()
-    await server.start()
+    server.start()  # Synchronous start
     try:
         yield server
     finally:
-        await server.stop()
+        server.stop()  # Synchronous stop
 
-@pytest_asyncio.fixture
-async def websocket(server):
+@pytest.fixture
+def websocket(server):
     try:
-        async with websockets.connect('ws://localhost:8765') as websocket:
+        with websockets.connect('ws://localhost:8765') as websocket:
             yield websocket
     except Exception as e:
         pytest.fail(f"Failed to connect to WebSocket server: {str(e)}")
 
 
-@pytest.mark.asyncio
-async def test_store_memory_roundtrip(websocket):
+def test_store_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for store_memory."""
     store_request = MemoryMessage.create(
         role="assistant",
@@ -40,16 +37,15 @@ async def test_store_memory_roundtrip(websocket):
     )
     store_request["action"] = "store_memory"
     
-    await websocket.send(json.dumps(store_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(store_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "success"
     assert response["id"] is not None
     assert response["content"] == "test memory"
     assert response["metadata"]["importance"] == "high"
 
-@pytest.mark.asyncio
-async def test_retrieve_context_roundtrip(websocket):
+def test_retrieve_context_roundtrip(websocket):
     """Test complete WebSocket round-trip for retrieve_context."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -60,8 +56,8 @@ async def test_retrieve_context_roundtrip(websocket):
     )
     store_request["action"] = "store_memory"
     
-    await websocket.send(json.dumps(store_request))
-    store_response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(store_request))
+    store_response = json.loads(websocket.recv())
     assert store_response["status"] == "success"
     
     # Then retrieve it
@@ -73,15 +69,14 @@ async def test_retrieve_context_roundtrip(websocket):
         }
     }
     
-    await websocket.send(json.dumps(retrieve_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(retrieve_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "success"
     assert len(response["memories"]) > 0
     assert response["memories"][0]["content"] == "test memory"
 
-@pytest.mark.asyncio
-async def test_update_memory_roundtrip(websocket):
+def test_update_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for update_memory."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -92,8 +87,8 @@ async def test_update_memory_roundtrip(websocket):
     )
     store_request["action"] = "store_memory"
     
-    await websocket.send(json.dumps(store_request))
-    store_response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(store_request))
+    store_response = json.loads(websocket.recv())
     assert store_response["status"] == "success"
     memory_id = store_response["id"]
     
@@ -107,15 +102,14 @@ async def test_update_memory_roundtrip(websocket):
         }
     }
     
-    await websocket.send(json.dumps(update_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(update_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "success"
     assert response["content"] == "updated memory"
     assert response["metadata"]["importance"] == "medium"
 
-@pytest.mark.asyncio
-async def test_delete_memory_roundtrip(websocket):
+def test_delete_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for delete_memory."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -126,8 +120,8 @@ async def test_delete_memory_roundtrip(websocket):
     )
     store_request["action"] = "store_memory"
     
-    await websocket.send(json.dumps(store_request))
-    store_response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(store_request))
+    store_response = json.loads(websocket.recv())
     assert store_response["status"] == "success"
     memory_id = store_response["id"]
     
@@ -137,8 +131,8 @@ async def test_delete_memory_roundtrip(websocket):
         "memory_id": memory_id
     }
     
-    await websocket.send(json.dumps(delete_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(delete_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "success"
     
@@ -148,14 +142,13 @@ async def test_delete_memory_roundtrip(websocket):
         "query": "test memory"
     }
     
-    await websocket.send(json.dumps(retrieve_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(retrieve_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "success"
     assert len(response["memories"]) == 0
 
-@pytest.mark.asyncio
-async def test_error_handling(websocket):
+def test_error_handling(websocket):
     """Test error handling in WebSocket communication."""
     # Try to update non-existent memory
     update_request = {
@@ -164,8 +157,8 @@ async def test_error_handling(websocket):
         "updates": {"content": "test"}
     }
     
-    await websocket.send(json.dumps(update_request))
-    response = json.loads(await websocket.recv())
+    websocket.send(json.dumps(update_request))
+    response = json.loads(websocket.recv())
     
     assert response["status"] == "error"
     assert "memory not found" in response["message"].lower()

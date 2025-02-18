@@ -1,9 +1,8 @@
 """Tests for memory retrieve operations."""
 
 import pytest
-import pytest_asyncio
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
@@ -11,11 +10,11 @@ from memory.librarian import LibrarianAgent
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
+    client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[{
@@ -27,29 +26,27 @@ async def mock_venice_client():
                 "context_ids": []
             }
         }]
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian fixture."""
     return LibrarianAgent(mock_venice_client)
 
 
-@pytest.mark.asyncio
-async def test_basic_memory_retrieval(librarian):
+def test_basic_memory_retrieval(librarian):
     """Test basic memory retrieval."""
     query = "test query"
-    memories = await librarian.retrieve_memories(query)
+    memories = librarian.retrieve_memories(query)
     
     assert len(memories) == 1
     assert memories[0]["content"] == "test content"
     assert memories[0]["metadata"]["importance"] == 0.8
 
 
-@pytest.mark.asyncio
-async def test_hybrid_retrieval(librarian, mock_venice_client):
+def test_hybrid_retrieval(librarian, mock_venice_client):
     """Test hybrid retrieval with vector and time-based filtering."""
     now = datetime.now()
     old_time = now - timedelta(days=2)
@@ -81,7 +78,7 @@ async def test_hybrid_retrieval(librarian, mock_venice_client):
     )
     
     # Test retrieval with time range
-    memories = await librarian.retrieve_memories(
+    memories = librarian.retrieve_memories(
         "test query",
         time_range=timedelta(days=1)
     )
@@ -90,7 +87,7 @@ async def test_hybrid_retrieval(librarian, mock_venice_client):
     assert memories[0]["id"] == "recent_important"
     
     # Test retrieval with importance
-    memories = await librarian.retrieve_memories(
+    memories = librarian.retrieve_memories(
         "test query",
         min_importance=0.85
     )
@@ -99,8 +96,7 @@ async def test_hybrid_retrieval(librarian, mock_venice_client):
     assert memories[0]["id"] == "recent_important"
 
 
-@pytest.mark.asyncio
-async def test_context_based_retrieval(librarian, mock_venice_client):
+def test_context_based_retrieval(librarian, mock_venice_client):
     """Test retrieval with context filtering."""
     context_id = "task_123"
     
@@ -119,7 +115,7 @@ async def test_context_based_retrieval(librarian, mock_venice_client):
         }]
     )
     
-    memories = await librarian.retrieve_memories(
+    memories = librarian.retrieve_memories(
         "test query",
         context_id=context_id
     )
@@ -129,8 +125,7 @@ async def test_context_based_retrieval(librarian, mock_venice_client):
     assert context_id in memories[0]["metadata"]["context_ids"]
 
 
-@pytest.mark.asyncio
-async def test_retrieval_error_handling(librarian, mock_venice_client):
+def test_retrieval_error_handling(librarian, mock_venice_client):
     """Test error handling during retrieval."""
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
@@ -139,13 +134,12 @@ async def test_retrieval_error_handling(librarian, mock_venice_client):
     )
     
     with pytest.raises(MemoryError) as exc_info:
-        await librarian.retrieve_memories("test query")
+        librarian.retrieve_memories("test query")
     
     assert "Failed to retrieve memories" in str(exc_info.value)
 
 
-@pytest.mark.asyncio
-async def test_empty_retrieval_results(librarian, mock_venice_client):
+def test_empty_retrieval_results(librarian, mock_venice_client):
     """Test handling of empty retrieval results."""
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
@@ -153,6 +147,6 @@ async def test_empty_retrieval_results(librarian, mock_venice_client):
         memories=[]
     )
     
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     
     assert len(memories) == 0

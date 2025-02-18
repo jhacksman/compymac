@@ -1,6 +1,6 @@
 pytest>=7.0.0
-pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
 websockets>=11.0.3  # For WebSocket integration tests
-aiohttp>=3.8.0  # For Venice.ai API client
+requests>=2.32.0  # For Venice.ai API client
 pytest-mock>=3.10.0  # For mocking Venice.ai API responses
+psutil>=5.9.0  # For performance monitoring
