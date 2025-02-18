@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory
-from langchain_openai import OpenAI
+from langchain_core.language_models.llms import BaseLLM
 
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
@@ -86,11 +86,11 @@ Response:""",
             input_variables=["task", "criteria", "execution_history"]
         )
         
-        # Use provided LLM or create new one
-        llm = self._llm or OpenAI()
-        
+        if not self._llm:
+            raise ValueError("LLM must be provided for execution chain")
+            
         return LLMChain(
-            llm=llm,
+            llm=self._llm,
             prompt=prompt,
             memory=self.memory
         )
