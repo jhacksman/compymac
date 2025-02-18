@@ -15,7 +15,7 @@ from .config import VENICE_API_KEY, VENICE_BASE_URL, VENICE_MODEL
 class VeniceClient:
     """Client for Venice.ai API."""
     
-    def delete_memory(self, memory_id: str) -> MemoryResponse:
+    async def delete_memory(self, memory_id: str) -> MemoryResponse:
         """Delete a memory by ID.
         
         Args:
@@ -28,15 +28,18 @@ class VeniceClient:
             VeniceAPIError: If deletion fails
         """
         try:
-            response = requests.delete(
-                f"{self.base_url}/api/v1/memories/{memory_id}",
-                headers=self.headers
-            )
-            response.raise_for_status()
-            return MemoryResponse(
-                action="delete_memory",
-                success=True
-            )
+            async with aiohttp.ClientSession() as session:
+                async with session.delete(
+                    f"{self.base_url}/api/v1/memories/{memory_id}",
+                    headers=self.headers
+                ) as response:
+                    await response.read()
+                    if response.status != 200:
+                        raise VeniceAPIError(f"Failed to delete memory: {response.status}")
+                    return MemoryResponse(
+                        action="delete_memory",
+                        success=True
+                    )
         except Exception as e:
             raise VeniceAPIError(f"Failed to delete memory: {str(e)}")
     
@@ -118,7 +121,7 @@ class VeniceClient:
         print(f"Rate limited. Retrying in {delay} seconds...")  # Debug log
         time.sleep(delay)
 
-    def _stream_chunks(self, response: requests.Response, retry_count: int = 0) -> Generator[str, None, None]:
+    async def _stream_chunks(self, response: aiohttp.ClientResponse, retry_count: int = 0) -> Generator[str, None, None]:
         """Stream chunks from response."""
         if response.status_code == 429:  # Rate limit exceeded
             self._handle_rate_limit(retry_count)
@@ -222,13 +225,13 @@ class VeniceClient:
             }
             print(f"Request data: {json.dumps(request_data, indent=2)}")  # Debug log
             
-            with requests.post(
-                f"{self.base_url}/chat/completions",
-                json=request_data,
-                headers=self.headers,
-                timeout=timeout,
-                stream=True
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/chat/completions",
+                    json=request_data,
+                    headers=self.headers,
+                    timeout=timeout
+                ) as response:
                 print(f"Response status: {response.status_code}")  # Debug log
                 print(f"Response headers: {response.headers}")  # Debug log
                 
@@ -334,13 +337,13 @@ class VeniceClient:
             if limit:
                 params["limit"] = limit
                 
-            with requests.post(
-                f"{self.base_url}/memories/search",
-                json=params,
-                headers=self.headers,
-                timeout=timeout,
-                stream=True
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/memories/search",
+                    json=params,
+                    headers=self.headers,
+                    timeout=timeout
+                ) as response:
                 if response.status_code == 429 and retry_count < self.max_retries:
                     self._handle_rate_limit(retry_count)
                     # Retry with incremented count
@@ -390,18 +393,18 @@ class VeniceClient:
     ) -> MemoryResponse:
         """Update memory in Venice.ai."""
         try:
-            with requests.patch(
-                f"{self.base_url}/memories/{memory_id}",
-                json={
-                    "model": self.model,
-                    "content": content,
-                    "metadata": metadata.__dict__ if metadata else None,
-                    "stream": True
-                },
-                headers=self.headers,
-                timeout=timeout,
-                stream=True
-            ) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.patch(
+                    f"{self.base_url}/memories/{memory_id}",
+                    json={
+                        "model": self.model,
+                        "content": content,
+                        "metadata": metadata.__dict__ if metadata else None,
+                        "stream": True
+                    },
+                    headers=self.headers,
+                    timeout=timeout
+                ) as response:
                 if response.status_code == 429 and retry_count < self.max_retries:
                     self._handle_rate_limit(retry_count)
                     # Retry with incremented count
