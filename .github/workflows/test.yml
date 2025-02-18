@@ -28,9 +28,11 @@ jobs:
         pip install -r tests/requirements-test.txt
         
     - name: Run tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}/Python
       run: |
         cd Python
-        PYTHONPATH=. python -m pytest tests/ -v
+        python -m pytest tests/ -v
         
     - name: Build Swift app
       run: |
