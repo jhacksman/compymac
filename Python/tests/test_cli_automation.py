@@ -2,11 +2,8 @@ import pytest
 import pytest_asyncio
 import asyncio
 import json
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ..browser_automation_server import BrowserAutomationServer
-from desktop_automation import DesktopAutomation
+from ..desktop_automation import DesktopAutomation
 
 @pytest_asyncio.fixture(scope="function")
 async def automation():
