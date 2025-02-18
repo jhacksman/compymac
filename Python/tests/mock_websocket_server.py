@@ -105,13 +105,13 @@ class MockWebSocketServer:
                         "status": "error",
                         "message": f"Invalid JSON format: {str(e)}"
                     }
-                    await websocket.send(json.dumps(error_response))
+                    websocket.send(json.dumps(error_response))
                 except Exception as e:
                     error_response = {
                         "status": "error",
                         "message": f"Internal server error: {str(e)}"
                     }
-                    await websocket.send(json.dumps(error_response))
+                    websocket.send(json.dumps(error_response))
                     
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")  # Debug logging
