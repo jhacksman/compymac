@@ -235,7 +235,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = float(item["metadata"].timestamp) if hasattr(item["metadata"], "timestamp") else 0.0
+                importance = float(item["metadata"].timestamp) if isinstance(item["metadata"], MemoryMetadata) else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
@@ -274,7 +274,8 @@ class CoreMemory(nn.Module):
             # Generate summary using generator model
             with torch.no_grad():
                 outputs = self.generator.generate(
-                    **context_encoding,
+                    input_ids=context_encoding["input_ids"],
+                    attention_mask=context_encoding["attention_mask"],
                     max_length=200,
                     num_beams=4,
                     length_penalty=2.0,
