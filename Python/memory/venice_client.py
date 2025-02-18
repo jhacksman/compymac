@@ -356,11 +356,11 @@ class VeniceClient:
                         timeout,
                         retry_count + 1
                     )
-                if response.status_code != 200:
-                    error_text = response.text
+                if response.status != 200:
+                    error_text = await response.text()
                     print(f"Error response body: {error_text}")  # Debug log
                     raise VeniceAPIError(
-                        f"Failed to retrieve memories: {response.status_code} - {error_text}"
+                        f"Failed to retrieve memories: {response.status} - {error_text}"
                     )
                     
                 memories = []
@@ -416,11 +416,11 @@ class VeniceClient:
                             timeout,
                             retry_count + 1
                         )
-                if response.status_code != 200:
-                    error_text = response.text
+                if response.status != 200:
+                    error_text = await response.text()
                     print(f"Error response body: {error_text}")  # Debug log
                     raise VeniceAPIError(
-                        f"Failed to update memory: {response.status_code} - {error_text}"
+                        f"Failed to update memory: {response.status} - {error_text}"
                     )
                     
                 success = False
