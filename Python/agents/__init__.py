@@ -1,6 +1,6 @@
 """Agent system for CompyMac."""
 
-from .manager import AgentManager
+from .manager import ManagerAgent
 from .executor import ExecutorAgent
 from .planner import PlannerAgent
 from .reflector import ReflectorAgent
