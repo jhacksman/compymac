@@ -8,7 +8,8 @@ import json
 
 from langchain_core.language_models.llms import BaseLLM
 from langchain_core.outputs import Generation, LLMResult
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import RunnableConfig, Runnable
+from langchain_core.runnables.base import RunnableSerializable
 
 from ...memory import MemoryManager
 from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent
@@ -90,7 +91,7 @@ from langchain_core.language_models.llms import BaseLLM
 
 from langchain_core.runnables import Runnable
 
-class MockLLM(BaseLLM, Runnable):
+class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
     """Mock LLM for testing."""
     
     def _get_response_for_prompt(self, prompt: str) -> Dict:
@@ -225,6 +226,10 @@ class MockLLM(BaseLLM, Runnable):
         prompt = json.dumps(input) if isinstance(input, dict) else str(input)
         response = self._get_response_for_prompt(prompt)
         return json.dumps(response)
+
+    def transform(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
+        """Transform input to output."""
+        return self.invoke(input, config, **kwargs)
         
     async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock async invoke call."""
