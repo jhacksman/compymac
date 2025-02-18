@@ -12,7 +12,32 @@ from ..memory.protocol import MemoryMessage
 
 @pytest.fixture
 def venice_api():
-    return Mock(spec=VeniceAPI)
+    """Create mock Venice API with synchronous methods."""
+    client = Mock(spec=VeniceAPI)
+    
+    # Configure mock to return synchronous values
+    client.store_memory.return_value = {
+        "id": "test_id",
+        "content": "test memory",
+        "metadata": {"importance": "high"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    
+    client.retrieve_context.return_value = [{
+        "id": "test_id",
+        "content": "test memory",
+        "metadata": {"importance": "high"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }]
+    
+    client.update_memory.return_value = {
+        "id": "test_id",
+        "content": "updated memory",
+        "metadata": {"importance": "high"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    
+    return client
 
 @pytest.fixture
 def memory_manager(venice_api):
