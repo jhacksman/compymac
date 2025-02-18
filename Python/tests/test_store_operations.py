@@ -1,7 +1,6 @@
 """Tests for memory store operations."""
 
 import pytest
-import pytest_asyncio
 from datetime import datetime
 
 from memory.message_types import MemoryMetadata, MemoryResponse
@@ -48,11 +47,10 @@ def test_store_memory_with_surprise(librarian):
     assert stored["metadata"]["importance"] >= 0.8  # Importance updated by surprise
 
 
-@pytest.mark.asyncio
-async def test_store_memory_error_handling(librarian):
+def test_store_memory_error_handling(librarian):
     """Test error handling during memory storage."""
     with pytest.raises(MemoryError) as exc_info:
-        await librarian.store_memory(
+        librarian.store_memory(
             "test content",
             MemoryMetadata(timestamp=None)  # Invalid timestamp
         )
