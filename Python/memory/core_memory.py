@@ -251,7 +251,7 @@ class CoreMemory(nn.Module):
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
                 metadata = item.get("metadata", {})
-            importance = float(metadata.get("importance", 0.0)) if isinstance(metadata, dict) else 0.0
+                importance = float(metadata.get("importance", 0.0)) if isinstance(metadata, dict) else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
