@@ -24,10 +24,10 @@
   - [x] Memory consolidation
 
 ## 2. End-to-End Workflow Tests
-- [ ] Deep Research Session Tests
-  - [ ] Multi-turn conversation tracking
-  - [ ] Context preservation across sessions
-  - [ ] Memory consolidation during long sessions
+- [x] Deep Research Session Tests
+  - [x] Multi-turn conversation tracking
+  - [x] Context preservation across sessions
+  - [x] Memory consolidation during long sessions
 
 - [ ] Multi-Agent Interaction Tests
   - [ ] Memory sharing between agents
