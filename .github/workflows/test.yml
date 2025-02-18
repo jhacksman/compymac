@@ -25,6 +25,7 @@ jobs:
         cd Python
         pip install -r requirements.txt
         pip install -r tests/requirements-test.txt
+        python -m playwright install
         
     - name: Run tests
       run: |
