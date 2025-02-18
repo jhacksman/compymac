@@ -32,13 +32,13 @@ class MockWebSocketServer:
         
         def run_server():
             try:
-                with ws_server.WebSocketServer(
+                self.server = ws_server.serve(
+                    self.handle_connection,
                     self.host,
                     self.port,
-                    process_request=self.handle_connection
-                ) as server:
-                    self.server = server
-                    server.serve_forever()
+                    reuse_address=True
+                )
+                self.server.serve_forever()
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
@@ -53,25 +53,19 @@ class MockWebSocketServer:
         if hasattr(self, 'server_thread'):
             self.server_thread.join(timeout=1.0)
     
-    def handle_connection(self, path, request_headers):
+    def handle_connection(self, websocket):
         """Handle WebSocket connection.
         
         Args:
-            path: Request path
-            request_headers: Request headers
+            websocket: WebSocket connection
         """
         try:
-            with websockets.sync.server.ServerConnection(
-                self.socket,
-                path,
-                request_headers
-            ) as websocket:
-                while True:
-                    try:
-                        message = websocket.recv()
-                        print(f"Received message: {message}")  # Debug logging
-                        request = json.loads(message)
-                        action = request.get("action")
+            while True:
+                try:
+                    message = websocket.recv()
+                    print(f"Received message: {message}")  # Debug logging
+                    request = json.loads(message)
+                    action = request.get("action")
                     
                     if action == "store_memory":
                         response = self._handle_store_memory(request)
