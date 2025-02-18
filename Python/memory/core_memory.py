@@ -9,7 +9,7 @@ import torch.nn as nn
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
-from .message_types import MemoryMetadata
+from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
 
 
