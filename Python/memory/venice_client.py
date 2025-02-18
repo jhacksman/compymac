@@ -81,10 +81,12 @@ class VeniceClient:
     def _stream_chunks(self, response: requests.Response) -> Generator[str, None, None]:
         """Stream chunks from response."""
         buffer = ""
+        content_buffer = ""
         for chunk in response.iter_content(chunk_size=512):
             if chunk:
                 try:
                     text = chunk.decode("utf-8")
+                    print(f"Raw chunk: {text}")  # Debug log
                     buffer += text
                     
                     # Process complete messages
@@ -99,21 +101,35 @@ class VeniceClient:
                         if line.startswith("data: "):
                             data = line[6:].strip()  # Skip "data: " prefix
                             if data == "[DONE]":
+                                if content_buffer:
+                                    yield content_buffer
                                 return
                                 
                             try:
                                 json_data = json.loads(data)
+                                print(f"Parsed JSON: {json_data}")  # Debug log
+                                
                                 if "choices" in json_data and json_data["choices"]:
                                     choice = json_data["choices"][0]
                                     if "delta" in choice and "content" in choice["delta"]:
                                         content = choice["delta"]["content"]
                                         if content:
-                                            yield content
-                            except json.JSONDecodeError:
+                                            print(f"Adding content: {content}")  # Debug log
+                                            content_buffer += content
+                                            yield content_buffer
+                                            content_buffer = ""  # Reset after yielding
+                                            
+                                    # Check for finish_reason to handle end of stream
+                                    if choice.get("finish_reason") == "stop":
+                                        print("Received stop signal")  # Debug log
+                                        return
+                            except json.JSONDecodeError as e:
+                                print(f"JSON decode error: {e}, data: {data}")  # Debug log
                                 continue
                 except Exception as e:
                     print(f"Chunk processing error: {e}")  # Debug log
                     raise VeniceAPIError(f"Failed to decode chunk: {str(e)}")
+            time.sleep(0.01)  # Small delay to prevent CPU spinning
             
     def stream_memory(
         self,
