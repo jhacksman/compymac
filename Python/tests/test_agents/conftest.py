@@ -3,8 +3,9 @@
 import pytest
 import json
 from unittest.mock import MagicMock, AsyncMock
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, AsyncIterator
 import json
+import asyncio
 
 from langchain_core.language_models.llms import BaseLLM
 from langchain_core.outputs import Generation, LLMResult
@@ -108,19 +109,11 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
 
     async def abatch(self, inputs: List[Dict], config: Optional[RunnableConfig] = None, **kwargs) -> List[str]:
         """Async batch process inputs."""
-        return [await self.ainvoke(input, config, **kwargs) for input in inputs]
-
-    def get_name(self) -> str:
-        """Get name of the runnable."""
-        return "MockLLM"
-
-    def get_input_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
-        """Get input schema."""
-        return {"type": "object", "properties": {"input": {"type": "string"}}}
-
-    def get_output_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
-        """Get output schema."""
-        return {"type": "string"}
+        results = []
+        for input in inputs:
+            result = await self.ainvoke(input, config, **kwargs)
+            results.append(result)
+        return results
     
     def _get_response_for_prompt(self, prompt: str) -> Dict:
         """Get appropriate response based on prompt content."""
@@ -261,7 +254,8 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
 
     async def stream(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> AsyncGenerator[str, None]:
         """Stream output."""
-        yield self.invoke(input, config, **kwargs)
+        result = await self.ainvoke(input, config, **kwargs)
+        yield result
         
     async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock async invoke call."""
