@@ -68,7 +68,8 @@ async def test_store_memory_with_surprise(librarian):
     assert librarian.recent_memories[0]["metadata"].importance == 0.8
 
 
-def test_retrieve_memories_basic(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_basic(librarian, mock_venice_client):
     """Test basic memory retrieval."""
     # Setup mock response
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -85,13 +86,14 @@ def test_retrieve_memories_basic(librarian, mock_venice_client):
     )
     
     # Retrieve memories
-    memories = librarian.retrieve_memories("test query")
+    memories = await librarian.retrieve_memories("test query")
     
     assert len(memories) == 1
     assert memories[0]["content"] == "test content"
 
 
-def test_retrieve_memories_with_importance(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     """Test memory retrieval with importance filtering."""
     # Setup mock response with varying importance
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -118,7 +120,7 @@ def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     )
     
     # Retrieve with importance filter
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "test query",
         min_importance=0.5
     )
@@ -127,7 +129,8 @@ def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     assert memories[0]["content"] == "important content"
 
 
-def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     """Test memory retrieval with time filtering."""
     now = time.time()
     old_time = now - 60*60*24*2  # 2 days ago
@@ -157,7 +160,7 @@ def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     )
     
     # Retrieve with time range
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "test query",
         time_range=timedelta(days=1)
     )
