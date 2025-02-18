@@ -1,6 +1,6 @@
 """Venice.ai API client for memory operations."""
 
-import aiohttp
+import requests
 import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
@@ -23,7 +23,7 @@ class VeniceAPI:
             "Content-Type": "application/json"
         }
     
-    async def store_memory(self, content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def store_memory(self, content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Store a new memory in Venice.ai.
         
         Args:
@@ -37,28 +37,26 @@ class VeniceAPI:
             VeniceAPIError: If the API request fails
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                payload = {
-                    "content": content,
-                    "metadata": metadata,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                
-                response = await session.post(
-                    f"{self.base_url}/memories",
-                    headers=self.headers,
-                    json=payload
-                )
-                if response.status != 201:
-                    error_body = await response.text()
-                    raise VeniceAPIError(f"Failed to store memory: {error_body}")
-                
-                return await response.json()
+            payload = {
+                "content": content,
+                "metadata": metadata,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/memories",
+                headers=self.headers,
+                json=payload
+            )
+            if response.status_code != 201:
+                raise VeniceAPIError(f"Failed to store memory: {response.text}")
+            
+            return response.json()
 
-        except aiohttp.ClientError as e:
+        except requests.RequestException as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
-    async def retrieve_context(
+    def retrieve_context(
         self,
         query: str,
         filters: Optional[Dict[str, Any]] = None
@@ -76,27 +74,25 @@ class VeniceAPI:
             VeniceAPIError: If the API request fails
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                params = {
-                    "query": query,
-                    **(filters or {})
-                }
-                
-                response = await session.get(
-                    f"{self.base_url}/memories/search",
-                    headers=self.headers,
-                    params=params
-                )
-                if response.status != 200:
-                    error_body = await response.text()
-                    raise VeniceAPIError(f"Failed to retrieve context: {error_body}")
-                
-                return await response.json()
+            params = {
+                "query": query,
+                **(filters or {})
+            }
+            
+            response = requests.get(
+                f"{self.base_url}/memories/search",
+                headers=self.headers,
+                params=params
+            )
+            if response.status_code != 200:
+                raise VeniceAPIError(f"Failed to retrieve context: {response.text}")
+            
+            return response.json()
 
-        except aiohttp.ClientError as e:
+        except requests.RequestException as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
-    async def update_memory(
+    def update_memory(
         self,
         memory_id: str,
         updates: Dict[str, Any]
@@ -114,22 +110,20 @@ class VeniceAPI:
             VeniceAPIError: If the API request fails
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                response = await session.patch(
-                    f"{self.base_url}/memories/{memory_id}",
-                    headers=self.headers,
-                    json=updates
-                )
-                if response.status != 200:
-                    error_body = await response.text()
-                    raise VeniceAPIError(f"Failed to update memory: {error_body}")
-                
-                return await response.json()
+            response = requests.patch(
+                f"{self.base_url}/memories/{memory_id}",
+                headers=self.headers,
+                json=updates
+            )
+            if response.status_code != 200:
+                raise VeniceAPIError(f"Failed to update memory: {response.text}")
+            
+            return response.json()
 
-        except aiohttp.ClientError as e:
+        except requests.RequestException as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")
     
-    async def delete_memory(self, memory_id: str) -> None:
+    def delete_memory(self, memory_id: str) -> None:
         """Delete a memory record.
         
         Args:
@@ -139,14 +133,12 @@ class VeniceAPI:
             VeniceAPIError: If the API request fails
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                response = await session.delete(
-                    f"{self.base_url}/memories/{memory_id}",
-                    headers=self.headers
-                )
-                if response.status != 204:
-                    error_body = await response.text()
-                    raise VeniceAPIError(f"Failed to delete memory: {error_body}")
-                
-        except aiohttp.ClientError as e:
+            response = requests.delete(
+                f"{self.base_url}/memories/{memory_id}",
+                headers=self.headers
+            )
+            if response.status_code != 204:
+                raise VeniceAPIError(f"Failed to delete memory: {response.text}")
+            
+        except requests.RequestException as e:
             raise VeniceAPIError(f"API request failed: {str(e)}")

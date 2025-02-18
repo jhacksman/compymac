@@ -20,7 +20,7 @@ class MemoryManager:
         self.max_tokens = max_tokens
         self.context_window: List[Dict[str, Any]] = []
     
-    async def store_memory(
+    def store_memory(
         self,
         content: str,
         metadata: Dict[str, Any],
@@ -43,7 +43,7 @@ class MemoryManager:
         if task_id:
             metadata["task_id"] = task_id
             
-        memory = await self.venice_api.store_memory(content, metadata)
+        memory = self.venice_api.store_memory(content, metadata)
         self.context_window.append(memory)
         
         # Prune context window if needed
@@ -52,7 +52,7 @@ class MemoryManager:
             
         return memory
     
-    async def retrieve_context(
+    def retrieve_context(
         self,
         query: str,
         task_id: Optional[str] = None,
@@ -77,9 +77,9 @@ class MemoryManager:
         if time_range:
             filters["time_range"] = time_range
             
-        return await self.venice_api.retrieve_context(query, filters)
+        return self.venice_api.retrieve_context(query, filters)
     
-    async def update_memory(
+    def update_memory(
         self,
         memory_id: str,
         updates: Dict[str, Any]
@@ -96,7 +96,7 @@ class MemoryManager:
         Raises:
             VeniceAPIError: If API request fails
         """
-        memory = await self.venice_api.update_memory(memory_id, updates)
+        memory = self.venice_api.update_memory(memory_id, updates)
         
         # Update context window if memory exists there
         for i, ctx_memory in enumerate(self.context_window):
@@ -106,7 +106,7 @@ class MemoryManager:
                 
         return memory
     
-    async def delete_memory(self, memory_id: str) -> None:
+    def delete_memory(self, memory_id: str) -> None:
         """Delete a memory record.
         
         Args:
@@ -115,7 +115,7 @@ class MemoryManager:
         Raises:
             VeniceAPIError: If API request fails
         """
-        await self.venice_api.delete_memory(memory_id)
+        self.venice_api.delete_memory(memory_id)
         
         # Remove from context window if exists
         self.context_window = [

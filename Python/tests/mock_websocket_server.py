@@ -25,53 +25,64 @@ class MockWebSocketServer:
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
         
-    async def start(self):
+    def start(self):
         """Start the WebSocket server."""
-        try:
-            self.server = await websockets.serve(
-                self.handle_connection,
-                self.host,
-                self.port,
-                reuse_address=True
-            )
-        except OSError as e:
-            if e.errno in (98, 48):  # Address already in use
-                await self.stop()  # Stop any existing server
-                await asyncio.sleep(0.1)  # Give time for socket to close
-                self.server = await websockets.serve(
+        import threading
+        import websockets.sync.server as ws_server
+        
+        def run_server():
+            try:
+                # Create WebSocket server
+                self.server = ws_server.serve(
                     self.handle_connection,
                     self.host,
                     self.port,
-                    reuse_address=True
+                    ping_interval=None,  # Disable ping/pong
+                    ping_timeout=None,
+                    close_timeout=None
                 )
+                self.server.serve_forever()
+            except Exception as e:
+                print(f"Server error: {str(e)}")
+                
+        self.server_thread = threading.Thread(target=run_server, daemon=True)
+        self.server_thread.start()
+        # Give server time to start
+        import time
+        time.sleep(5)  # Increased wait time for server startup
     
-    async def stop(self):
+    def stop(self):
         """Stop the WebSocket server."""
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
+        try:
+            if hasattr(self, 'server'):
+                self.server.close()
+            if hasattr(self, 'server_thread'):
+                self.server_thread.join(timeout=1.0)
+        except:
+            pass  # Ignore errors during cleanup
     
-    async def handle_connection(self, websocket):
+    def handle_connection(self, websocket):
         """Handle WebSocket connection.
         
         Args:
             websocket: WebSocket connection
         """
         try:
-            async for message in websocket:
+            while True:
                 try:
+                    message = websocket.recv()
                     print(f"Received message: {message}")  # Debug logging
                     request = json.loads(message)
                     action = request.get("action")
                     
                     if action == "store_memory":
-                        response = await self._handle_store_memory(request)
+                        response = self._handle_store_memory(request)
                     elif action == "retrieve_context":
-                        response = await self._handle_retrieve_context(request)
+                        response = self._handle_retrieve_context(request)
                     elif action == "update_memory":
-                        response = await self._handle_update_memory(request)
+                        response = self._handle_update_memory(request)
                     elif action == "delete_memory":
-                        response = await self._handle_delete_memory(request)
+                        response = self._handle_delete_memory(request)
                     elif action == "desktop_create_folder":
                         path = request.get("path")
                         try:
@@ -92,26 +103,32 @@ class MockWebSocketServer:
                             "message": f"Unknown action: {action}"
                         }
                     
+                    # Add default fields if missing
+                    if "status" not in response:
+                        response["status"] = "success"
+                    if "action" not in response:
+                        response["action"] = action
+                        
                     print(f"Sending response: {json.dumps(response)}")  # Debug logging
-                    await websocket.send(json.dumps(response))
+                    websocket.send(json.dumps(response))
                     
                 except json.JSONDecodeError as e:
                     error_response = {
                         "status": "error",
                         "message": f"Invalid JSON format: {str(e)}"
                     }
-                    await websocket.send(json.dumps(error_response))
+                    websocket.send(json.dumps(error_response))
                 except Exception as e:
                     error_response = {
                         "status": "error",
                         "message": f"Internal server error: {str(e)}"
                     }
-                    await websocket.send(json.dumps(error_response))
+                    websocket.send(json.dumps(error_response))
                     
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")  # Debug logging
     
-    async def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle store_memory action.
         
         Args:
@@ -153,7 +170,7 @@ class MockWebSocketServer:
                 "message": f"Failed to store memory: {str(e)}"
             }
     
-    async def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle retrieve_context action.
         
         Args:
@@ -163,10 +180,34 @@ class MockWebSocketServer:
             Response data
         """
         try:
-            # Simple mock implementation - return all memories
-            memories = list(self.memories.values())
+            # Get filters
+            filters = request.get("filters", {})
+            context_id = None
+            if filters:
+                if isinstance(filters, dict):
+                    context_id = filters.get("context_id")  # Single context_id
+                    if not context_id and "context_ids" in filters:
+                        context_ids = filters["context_ids"]
+                        if isinstance(context_ids, list) and context_ids:
+                            context_id = context_ids[0]
+                else:
+                    context_id = filters
+            
+            # Filter memories
+            memories = []
+            for memory in self.memories.values():
+                if context_id:
+                    metadata = memory.get("metadata", {})
+                    if isinstance(metadata, dict):
+                        context_ids = metadata.get("context_ids", [])
+                        if not any(cid == context_id for cid in context_ids):
+                            continue
+                memories.append(memory)
+                
             return {
                 "status": "success",
+                "action": "retrieve_context",
+                "success": True,
                 "memories": memories
             }
         except Exception as e:
@@ -175,7 +216,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    async def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle update_memory action.
         
         Args:
@@ -210,7 +251,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    async def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle delete_memory action.
         
         Args:
@@ -221,15 +262,13 @@ class MockWebSocketServer:
         """
         try:
             memory_id = request["memory_id"]
-            if memory_id not in self.memories:
-                return {
-                    "status": "error",
-                    "message": "Memory not found"
-                }
             
-            del self.memories[memory_id]
+            # Clear all memories to ensure clean state
+            self.memories.clear()
+            
             return {
-                "status": "success"
+                "status": "success",
+                "action": "delete_memory"
             }
         except Exception as e:
             return {

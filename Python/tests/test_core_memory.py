@@ -14,16 +14,26 @@ from unittest.mock import Mock
 def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
+    
+    # Mock store_memory response
     client.store_memory.return_value = MemoryResponse(
         action="store_memory",
         success=True,
         memory_id="test_id"
     )
+    
+    # Mock retrieve_context response
     client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[]
     )
+    
+    # Mock stream_memory to return an iterable
+    def mock_stream_memory(*args, **kwargs):
+        return iter(["Test summary chunk 1", "Test summary chunk 2"])
+    client.stream_memory.side_effect = mock_stream_memory
+    
     return client
 
 

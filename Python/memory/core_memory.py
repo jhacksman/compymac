@@ -5,9 +5,19 @@ processing the current input using Venice.ai API with dynamic encoding and
 surprise-based filtering.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 from datetime import datetime
+import math
+
+import torch
+import torch.nn as nn
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    BartForConditionalGeneration,
+    AutoConfig
+)
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
@@ -18,12 +28,16 @@ from .librarian import LibrarianAgent
 @dataclass
 class CoreMemoryConfig:
     """Configuration for core memory module."""
-    context_size: int = 4096  # Venice.ai default
+    context_size: int = 4096  # Transformer context window
     window_size: int = 100  # Number of recent items to keep
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
+    encoder_model: str = "sentence-transformers/all-mpnet-base-v2"  # Model for encoding
+    generator_model: str = "facebook/bart-large-cnn"  # Model for generation
+    hidden_size: int = 768  # Hidden size for transformer
+    num_attention_heads: int = 12  # Number of attention heads
 
 
-class CoreMemory:
+class CoreMemory(nn.Module):
     """Core memory module for immediate context processing."""
     
     def __init__(
@@ -37,18 +51,34 @@ class CoreMemory:
             config: Configuration for the module
             venice_client: Client for Venice.ai API
         """
+        super().__init__()
         self.config = config
         self.venice_client = venice_client
         self.librarian = LibrarianAgent(venice_client)
         
+        # Initialize transformer components
+        self.encoder_tokenizer = AutoTokenizer.from_pretrained(config.encoder_model)
+        self.encoder = AutoModel.from_pretrained(config.encoder_model)
+        self.generator_tokenizer = AutoTokenizer.from_pretrained(config.generator_model)
+        self.generator = BartForConditionalGeneration.from_pretrained(config.generator_model)
+        
+        # Attention components
+        self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.key_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.value_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        
         # Current context state
         self.current_context: List[Dict] = []
+        
+        # Move model to GPU if available
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
         
     def reset_context(self):
         """Reset the current context state."""
         self.current_context = []
         
-    async def add_to_context(
+    def add_to_context(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -70,20 +100,73 @@ class CoreMemory:
                 f"Context size limit ({self.config.context_size}) exceeded"
             )
             
+        # Encode content
+        inputs = self.encoder_tokenizer(
+            content,
+            padding=True,
+            truncation=True,
+            max_length=self.config.context_size,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # Get content embeddings
+        with torch.no_grad():
+            outputs = self.encoder(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"]
+            )
+            embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
+            
+        # Compute surprise score if not provided
+        if surprise_score is None:
+            # Project query and memory
+            query = self.query_proj(embeddings)
+            
+            # Get context embeddings
+            if self.current_context:
+                # Batch encode all context items
+                context_texts = [item["content"] for item in self.current_context[-self.config.window_size:]]
+                encodings = self.encoder_tokenizer(
+                    context_texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=self.config.context_size,
+                    return_tensors="pt"
+                ).to(self.device)
+                
+                with torch.no_grad():
+                    outputs = self.encoder(
+                        input_ids=encodings["input_ids"],
+                        attention_mask=encodings["attention_mask"]
+                    )
+                    context_items = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token for all sequences
+                    keys = self.key_proj(context_items)
+            else:
+                keys = torch.zeros((0, self.config.hidden_size), device=self.device)
+            
+            if keys.size(0) > 0:
+                attention_scores = torch.matmul(query, keys.transpose(-2, -1))
+                attention_scores = attention_scores / math.sqrt(self.config.hidden_size)
+                max_attention = torch.max(attention_scores).item()
+                surprise_score = 1.0 - max_attention
+            else:
+                surprise_score = 1.0  # First item is surprising
+            
         # Apply surprise-based filtering
-        if surprise_score is not None and surprise_score > self.config.surprise_threshold:
+        if surprise_score > self.config.surprise_threshold:
             # Store important memories via librarian
-            await self.librarian.store_memory(
+            self.librarian.store_memory(
                 content=content,
                 metadata=metadata,
                 surprise_score=surprise_score
             )
             
-        # Add to context
+        # Add to context with embeddings
         self.current_context.append({
             "content": content,
-            "metadata": metadata,
-            "surprise_score": surprise_score
+            "metadata": metadata if isinstance(metadata, dict) else {},
+            "surprise_score": float(surprise_score) if surprise_score is not None else 1.0,
+            "embeddings": embeddings.detach().cpu()
         })
         
     def get_context_window(
@@ -103,12 +186,12 @@ class CoreMemory:
             
         return self.current_context[-window_size:]
         
-    async def process_context(
+    def process_context(
         self,
         query: Optional[str] = None,
         min_importance: Optional[float] = None
     ) -> List[Dict]:
-        """Process current context through Venice.ai API with hybrid ranking.
+        """Process current context through transformer attention.
         
         Args:
             query: Optional query to focus attention
@@ -123,38 +206,68 @@ class CoreMemory:
         if not self.current_context:
             raise MemoryError("No context available to process")
             
-        # Use librarian to process context with hybrid ranking
-        if query is not None:
-            memories = await self.librarian.retrieve_memories(
-                query=query,
-                limit=self.config.window_size,
-                min_importance=min_importance
+        # Get recent context window
+        recent_context = self.current_context[-self.config.window_size:]
+        
+        # Encode context items
+        context_texts = [item["content"] for item in recent_context]
+        context_encodings = self.encoder_tokenizer(
+            context_texts,
+            padding=True,
+            truncation=True,
+            max_length=self.config.context_size,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # Get context embeddings
+        with torch.no_grad():
+            context_outputs = self.encoder(
+                input_ids=context_encodings["input_ids"],
+                attention_mask=context_encodings["attention_mask"]
             )
+            context_embeddings = context_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
+        
+        if query is not None:
+            # Encode query
+            query_encoding = self.encoder_tokenizer(
+                query,
+                padding=True,
+                truncation=True,
+                max_length=self.config.context_size,
+                return_tensors="pt"
+            ).to(self.device)
             
-            # Combine with recent context
-            recent_context = self.current_context[-self.config.window_size:]
-            all_memories = []
-            seen_ids = set()
+            # Get query embedding
+            with torch.no_grad():
+                query_outputs = self.encoder(
+                    input_ids=query_encoding["input_ids"],
+                    attention_mask=query_encoding["attention_mask"]
+                )
+                query_embedding = query_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
             
-            # Add retrieved memories first
-            for memory in memories:
-                if memory["id"] not in seen_ids:
-                    all_memories.append(memory)
-                    seen_ids.add(memory["id"])
-                    
-            # Add recent context (deduplicated)
-            for context_item in recent_context:
-                if "id" in context_item and context_item["id"] not in seen_ids:
-                    all_memories.append(context_item)
-                    seen_ids.add(context_item["id"])
-                    
-            return all_memories
+            # Compute attention scores
+            query_proj = self.query_proj(query_embedding)
+            key_proj = self.key_proj(context_embeddings)
             
+            attention_scores = torch.matmul(query_proj, key_proj.transpose(-2, -1))
+            attention_scores = attention_scores / math.sqrt(self.config.hidden_size)
+            attention_weights = torch.softmax(attention_scores, dim=-1)
+            
+            # Filter by attention weights and importance
+            filtered_context = []
+            for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
+                metadata = item.get("metadata", {})
+                importance = float(metadata.get("importance", 0.0)) if isinstance(metadata, dict) else 0.0
+                if weight > 0.1 and (min_importance is None or importance >= min_importance):
+                    filtered_context.append(item)
+            
+            return filtered_context
+        
         # Return recent context if no query
-        return self.current_context[-self.config.window_size:]
+        return recent_context
         
     def summarize_context(self) -> str:
-        """Generate a summary of current context.
+        """Generate a summary of current context using transformer model.
         
         Returns:
             Summary string of current context
@@ -165,5 +278,35 @@ class CoreMemory:
         if not self.current_context:
             raise MemoryError("No context available to summarize")
             
-        # For now, just return the most recent content
-        return self.current_context[-1]["content"]
+        try:
+            # Combine context into single string
+            context_str = "\n".join(
+                entry["content"] for entry in self.current_context
+            )
+            
+            # Encode context
+            context_encoding = self.generator_tokenizer(
+                context_str,
+                padding=True,
+                truncation=True,
+                max_length=self.config.context_size,
+                return_tensors="pt"
+            ).to(self.device)
+            
+            # Generate summary using generator model
+            with torch.no_grad():
+                outputs = self.generator.generate(
+                    input_ids=context_encoding["input_ids"],
+                    attention_mask=context_encoding["attention_mask"],
+                    max_length=200,
+                    num_beams=4,
+                    length_penalty=2.0,
+                    early_stopping=True,
+                    use_cache=True
+                )
+                
+            summary = self.generator_tokenizer.decode(outputs[0], skip_special_tokens=True)
+            return summary
+            
+        except Exception as e:
+            raise MemoryError(f"Failed to summarize context: {str(e)}")
