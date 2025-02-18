@@ -88,14 +88,6 @@ def mock_agents(memory_manager, mock_llm):
         llm=mock_llm
     )
 
-    return ManagerAgent(
-        memory_manager=memory_manager,
-        executor=executor,
-        planner=planner,
-        reflector=reflector,
-        llm=mock_llm
-    )
-
 from langchain_core.language_models.llms import BaseLLM
 
 class MockLLM(BaseLLM):
