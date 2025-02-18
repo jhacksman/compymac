@@ -121,9 +121,11 @@ class CoreMemory(nn.Module):
             
             # Get context embeddings
             context_items = []
-            for item in self.current_context[-self.config.window_size:]:
-                encoding = self.encoder_tokenizer(
-                    item["content"],
+            if self.current_context:
+                # Batch encode all context items
+                context_texts = [item["content"] for item in self.current_context[-self.config.window_size:]]
+                encodings = self.encoder_tokenizer(
+                    context_texts,
                     padding=True,
                     truncation=True,
                     max_length=self.config.context_size,
@@ -132,10 +134,10 @@ class CoreMemory(nn.Module):
                 
                 with torch.no_grad():
                     outputs = self.encoder(
-                        input_ids=encoding["input_ids"],
-                        attention_mask=encoding["attention_mask"]
+                        input_ids=encodings["input_ids"],
+                        attention_mask=encodings["attention_mask"]
                     )
-                    context_items.append(outputs.last_hidden_state[:, 0, :])
+                    context_items = [outputs.last_hidden_state[i, 0, :] for i in range(len(context_texts))]
                     
             keys = self.key_proj(torch.stack(context_items) if context_items else torch.empty(0, self.config.hidden_size).to(self.device))
             
@@ -248,7 +250,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = float(item["metadata"].get("importance", 0.0)) if isinstance(item["metadata"], dict) else 0.0
+                importance = float(item.get("metadata", {}).get("importance", 0.0))
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
