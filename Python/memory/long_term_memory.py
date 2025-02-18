@@ -43,6 +43,7 @@ class LongTermMemory:
         """
         self.config = config
         self.librarian = LibrarianAgent(venice_client)
+        self.venice_client = venice_client  # Store venice_client for direct use
         
         # Recent context
         self.recent_context: List[Dict] = []
