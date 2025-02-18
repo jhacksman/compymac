@@ -27,33 +27,29 @@ class MockWebSocketServer:
         
     def start(self):
         """Start the WebSocket server."""
-        try:
-            import websockets.sync.server as ws_server
-            self.server = ws_server.serve(
+        import threading
+        import websockets.sync.server as ws_server
+        
+        def run_server():
+            with ws_server.serve(
                 self.handle_connection,
                 self.host,
                 self.port,
                 reuse_address=True
-            )
-            self.server.serve_forever()
-        except OSError as e:
-            if e.errno in (98, 48):  # Address already in use
-                self.stop()  # Stop any existing server
-                import time
-                time.sleep(0.1)  # Give time for socket to close
-                self.server = ws_server.serve(
-                    self.handle_connection,
-                    self.host,
-                    self.port,
-                    reuse_address=True
-                )
-                self.server.serve_forever()
+            ) as server:
+                self.server = server
+                server.serve_forever()
+                
+        self.server_thread = threading.Thread(target=run_server, daemon=True)
+        self.server_thread.start()
+        # Give server time to start
+        import time
+        time.sleep(0.5)
     
     def stop(self):
         """Stop the WebSocket server."""
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
+        if hasattr(self, 'server_thread'):
+            self.server_thread.join(timeout=1.0)
     
     def handle_connection(self, websocket):
         """Handle WebSocket connection.
