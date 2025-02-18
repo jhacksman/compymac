@@ -23,40 +23,12 @@ async def mock_venice_client():
         memory_id="test_id"
     ))
     
-    # Return test memory for task-based retrieval
-    async def mock_retrieve_context(**kwargs):
-        context_id = kwargs.get("context_id")
-        query = kwargs.get("query", "")
-        
-        # Default test memory
-        test_memory = {
-            "id": "test_id",
-            "content": "test content",
-            "metadata": {
-                "timestamp": datetime.now().timestamp(),
-                "importance": 0.5,
-                "context_ids": []
-            }
-        }
-        
-        # Task-specific memory
-        if context_id and context_id.startswith("task_"):
-            task_id = int(context_id.split("_")[1])
-            test_memory.update({
-                "content": "task-specific content",
-                "metadata": {
-                    "timestamp": datetime.now().timestamp(),
-                    "importance": 0.5,
-                    "context_ids": [f"task_{task_id}"],
-                    "task_id": task_id
-                }
-            })
-            
-        return MemoryResponse(
-            action="retrieve_context",
-            success=True,
-            memories=[test_memory]
-        )
+    # Simple default mock response
+    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
+        action="retrieve_context",
+        success=True,
+        memories=[]
+    ))
     
     client.retrieve_context = AsyncMock(side_effect=mock_retrieve_context)
     return client
