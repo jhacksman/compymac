@@ -121,14 +121,6 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
     def get_output_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
         """Get output schema."""
         return {"type": "string"}
-
-    def get_input_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
-        """Get input schema."""
-        return {"type": "object", "properties": {"input": {"type": "string"}}}
-
-    def get_output_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
-        """Get output schema."""
-        return {"type": "string"}
     
     def _get_response_for_prompt(self, prompt: str) -> Dict:
         """Get appropriate response based on prompt content."""
@@ -267,11 +259,9 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
         """Transform input to output."""
         return self.invoke(input, config, **kwargs)
 
-    def stream(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> AsyncGenerator[str, None]:
+    async def stream(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> AsyncGenerator[str, None]:
         """Stream output."""
-        async def _stream():
-            yield self.invoke(input, config, **kwargs)
-        return _stream()
+        yield self.invoke(input, config, **kwargs)
         
     async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock async invoke call."""
