@@ -1,11 +1,11 @@
 # CompyMac Memory System Test Plan
 
 ## 1. Core Memory Operations Tests
-- [ ] Store Operation Tests
-  - [ ] Basic memory storage with metadata
-  - [ ] Task-specific memory storage
-  - [ ] Surprise-based filtering tests
-  - [ ] Memory chunk management tests
+- [x] Store Operation Tests
+  - [x] Basic memory storage with metadata
+  - [x] Task-specific memory storage
+  - [x] Surprise-based filtering tests
+  - [x] Memory chunk management tests
 
 - [ ] Retrieve Operation Tests
   - [ ] Basic memory retrieval
