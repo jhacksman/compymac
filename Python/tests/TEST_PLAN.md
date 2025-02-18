@@ -7,11 +7,11 @@
   - [x] Surprise-based filtering tests
   - [x] Memory chunk management tests
 
-- [ ] Retrieve Operation Tests
-  - [ ] Basic memory retrieval
-  - [ ] Hybrid retrieval (vector + time-based)
-  - [ ] Task-specific context retrieval
-  - [ ] Importance-based filtering
+- [x] Retrieve Operation Tests
+  - [x] Basic memory retrieval
+  - [x] Hybrid retrieval (vector + time-based)
+  - [x] Task-specific context retrieval
+  - [x] Importance-based filtering
 
 - [ ] Update Operation Tests
   - [ ] Memory content updates
