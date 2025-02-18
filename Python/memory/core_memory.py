@@ -118,16 +118,26 @@ class CoreMemory(nn.Module):
         if surprise_score is None:
             # Project query and memory
             query = self.query_proj(embeddings)
-            keys = self.key_proj(torch.stack([
-                self.transformer(**self.tokenizer(
+            
+            # Get context embeddings
+            context_items = []
+            for item in self.current_context[-self.config.window_size:]:
+                encoding = self.encoder_tokenizer(
                     item["content"],
                     padding=True,
                     truncation=True,
                     max_length=self.config.context_size,
                     return_tensors="pt"
-                ).to(self.device)).last_hidden_state[:, 0, :]
-                for item in self.current_context[-self.config.window_size:]
-            ]) if self.current_context else torch.empty(0, self.config.hidden_size).to(self.device))
+                ).to(self.device)
+                
+                with torch.no_grad():
+                    outputs = self.encoder(
+                        input_ids=encoding["input_ids"],
+                        attention_mask=encoding["attention_mask"]
+                    )
+                    context_items.append(outputs.last_hidden_state[:, 0, :])
+                    
+            keys = self.key_proj(torch.stack(context_items) if context_items else torch.empty(0, self.config.hidden_size).to(self.device))
             
             if keys.size(0) > 0:
                 attention_scores = torch.matmul(query, keys.transpose(-2, -1))
@@ -221,7 +231,10 @@ class CoreMemory(nn.Module):
             
             # Get query embedding
             with torch.no_grad():
-                query_outputs = self.encoder(**query_encoding)
+                query_outputs = self.encoder(
+                    input_ids=query_encoding["input_ids"],
+                    attention_mask=query_encoding["attention_mask"]
+                )
                 query_embedding = query_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
             
             # Compute attention scores
@@ -235,7 +248,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = float(item["metadata"].timestamp) if isinstance(item["metadata"], MemoryMetadata) else 0.0
+                importance = float(item["metadata"].get("importance", 0.0)) if isinstance(item["metadata"], dict) else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
@@ -279,7 +292,8 @@ class CoreMemory(nn.Module):
                     max_length=200,
                     num_beams=4,
                     length_penalty=2.0,
-                    early_stopping=True
+                    early_stopping=True,
+                    use_cache=True
                 )
                 
             summary = self.generator_tokenizer.decode(outputs[0], skip_special_tokens=True)
