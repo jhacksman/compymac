@@ -21,10 +21,16 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip3 install torch torchvision torchaudio
+        cd Python
         pip install -r requirements.txt
-        pip install -r Python/tests/requirements-test.txt
+        pip install -r tests/requirements-test.txt
+        python -m playwright install
+        python -m playwright install-deps
         
     - name: Run tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}/Python
       run: |
         cd Python
         python -m pytest tests/ -v

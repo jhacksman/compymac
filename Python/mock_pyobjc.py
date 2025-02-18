@@ -6,19 +6,60 @@ class NSObject:
 
 class DesktopAutomation:
     """Mock DesktopAutomation."""
+    def __init__(self):
+        self.system = ApplicationServices.AXUIElementCreateSystemWide()
+        self.workspace = Cocoa.NSWorkspace.sharedWorkspace()
+        self.file_manager = Foundation.NSFileManager.defaultManager()
+        self._started = False
+        print("Desktop Automation initialized in mock mode")
+
     async def start(self):
-        pass
-    
+        """Start automation."""
+        self._started = True
+
     async def stop(self):
-        pass
-    
+        """Stop automation."""
+        self._started = False
+
     async def execute_browser_action(self, action, params):
+        """Execute browser action."""
+        if not self._started:
+            raise RuntimeError("Automation not started")
+            
+        if action == "runCommand":
+            if "command" not in params or not params["command"]:
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "message": "Command not specified"
+                }
+            elif params["command"] == "invalid_command_123":
+                return {
+                    "action": "runCommand",
+                    "status": "error",
+                    "error": "Command not found",
+                    "returnCode": 1
+                }
+            else:
+                return {
+                    "action": "runCommand",
+                    "status": "success",
+                    "output": "test_output",
+                    "returnCode": 0
+                }
         return {"status": "success"}
-    
+
     async def create_folder(self, path):
+        """Create a folder."""
+        if not self._started:
+            raise RuntimeError("Automation not started")
         return True
-    
+
     async def get_selected_items(self):
+        """Get selected items."""
+        if not self._started:
+            raise RuntimeError("Automation not started")
+        return []
         return []
 
 class NSWorkspace(NSObject):
