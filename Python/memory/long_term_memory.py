@@ -30,7 +30,7 @@ class LongTermMemoryConfig:
     summary_threshold: int = 100  # Messages before summarization
     context_window_size: int = 10  # Recent messages to keep in full
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
-    model_name: str = "bert-base-uncased"  # Base transformer model
+    model_name: str = "sentence-transformers/all-mpnet-base-v2"  # Base transformer model
     hidden_size: int = 768  # Hidden size for transformer
     num_attention_heads: int = 12  # Number of attention heads
 

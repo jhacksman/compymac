@@ -29,14 +29,17 @@ class MockWebSocketServer:
         """Start the WebSocket server."""
         import threading
         import websockets.sync.server as ws_server
+        import socket
         
         def run_server():
             try:
-                with ws_server.serve(
-                    self.handle_connection,
-                    self.host,
-                    self.port
-                ) as server:
+                # Create socket with SO_REUSEADDR
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((self.host, self.port))
+                sock.listen()
+                
+                with ws_server.WebSocketServer(sock) as server:
                     self.server = server
                     server.serve_forever()
             except Exception as e:
