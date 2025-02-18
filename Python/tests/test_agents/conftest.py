@@ -11,7 +11,7 @@ from langchain_core.outputs import Generation, LLMResult
 from langchain_core.runnables import RunnableConfig
 
 from ...memory import MemoryManager
-from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent, ManagerAgent
+from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent, AgentManager
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def mock_agents(memory_manager, mock_llm):
         artifacts={"metrics": {"success_rate": 0.8}}
     ))
 
-    return ManagerAgent(
+    return AgentManager(
         memory_manager=memory_manager,
         executor=executor,
         planner=planner,

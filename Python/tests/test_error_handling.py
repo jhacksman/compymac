@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, AsyncMock
 from typing import Dict
 
 from ..agents.protocols import AgentRole, AgentMessage, TaskResult
-from ..agents.manager import ManagerAgent
+from ..agents import AgentManager
 from ..memory import MemoryManager
 from .test_agents.conftest import MockLLM
 
@@ -24,7 +24,7 @@ def mock_memory_manager():
 @pytest.fixture
 def agent_manager(mock_memory_manager, mock_llm):
     """Create agent manager with mocks."""
-    return ManagerAgent(memory_manager=mock_memory_manager, llm=mock_llm)
+    return AgentManager(memory_manager=mock_memory_manager, llm=mock_llm)
 
 @pytest.mark.asyncio
 async def test_retry_mechanism(mock_llm):
@@ -39,7 +39,7 @@ async def test_retry_mechanism(mock_llm):
         TaskResult(success=True, message="Third attempt succeeded", artifacts={"result": "success"})
     ])
     
-    manager = ManagerAgent(memory_manager=memory_manager, executor=executor, llm=mock_llm)
+    manager = AgentManager(memory_manager=memory_manager, executor=executor, llm=mock_llm)
     
     task = {"type": "test", "action": "retry_test"}
     result = await manager.execute_task(task)
@@ -62,7 +62,7 @@ async def test_failure_after_max_retries(mock_llm):
         error="Test error"
     ))
     
-    manager = ManagerAgent(memory_manager=memory_manager, executor=executor, llm=mock_llm)
+    manager = AgentManager(memory_manager=memory_manager, executor=executor, llm=mock_llm)
     
     task = {"type": "test", "action": "fail_test"}
     result = await manager.execute_task(task)
@@ -81,7 +81,7 @@ async def test_error_message_formatting(mock_llm):
     executor = MagicMock()
     executor.execute_task = AsyncMock(side_effect=Exception("Test exception"))
     
-    manager = ManagerAgent(memory_manager=memory_manager, executor=executor, llm=mock_llm)
+    manager = AgentManager(memory_manager=memory_manager, executor=executor, llm=mock_llm)
     
     task = {"type": "test", "action": "error_test"}
     result = await manager.execute_task(task)
@@ -103,7 +103,7 @@ async def test_task_result_reporting(mock_llm):
         artifacts={"result": "test"}
     ))
     
-    manager = ManagerAgent(memory_manager=memory_manager, executor=executor, llm=mock_llm)
+    manager = AgentManager(memory_manager=memory_manager, executor=executor, llm=mock_llm)
     
     task = {"type": "test", "action": "success_test"}
     result = await manager.execute_task(task)

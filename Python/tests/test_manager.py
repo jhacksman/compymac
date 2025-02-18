@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock
 from datetime import datetime
 
-from ..agents.manager import ManagerAgent
+from ..agents import AgentManager
 from ..agents.config import AgentConfig
 from ..agents.protocols import TaskResult
 from ..memory import MemoryManager
@@ -20,7 +20,7 @@ def memory_manager():
 @pytest.fixture
 def manager_agent(memory_manager):
     """Create manager agent with mock memory manager."""
-    return ManagerAgent(memory_manager)
+    return AgentManager(memory_manager)
 
 @pytest.mark.asyncio
 async def test_execute_task_success(manager_agent):
