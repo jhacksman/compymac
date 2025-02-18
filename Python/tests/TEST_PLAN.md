@@ -45,10 +45,10 @@
   - [x] Batch operation performance
   - [x] Cold start performance
 
-- [ ] Throughput Tests
-  - [ ] Memory operations per minute
-  - [ ] Concurrent operation handling
-  - [ ] Queue management
+- [x] Throughput Tests
+  - [x] Memory operations per minute
+  - [x] Concurrent operation handling
+  - [x] Queue management
 
 - [ ] Resource Utilization Tests
   - [ ] CPU usage monitoring
