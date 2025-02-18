@@ -11,35 +11,34 @@ from memory.librarian import LibrarianAgent
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.update_memory = AsyncMock(return_value=MemoryResponse(
+    client.update_memory.return_value = MemoryResponse(
         action="update_memory",
         success=True,
         memory_id="test_id"
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian fixture."""
     return LibrarianAgent(mock_venice_client)
 
 
-@pytest.mark.asyncio
-async def test_update_memory_content(librarian, mock_venice_client):
+def test_update_memory_content(librarian, mock_venice_client):
     """Test updating memory content."""
     # First store a memory
     original_content = "original content"
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
-    memory_id = await librarian.store_memory(original_content, metadata)
+    memory_id = librarian.store_memory(original_content, metadata)
     
     # Update the content
     updated_content = "updated content"
-    await librarian.update_memory(
+    librarian.update_memory(
         memory_id,
         content=updated_content,
         metadata=metadata
