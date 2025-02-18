@@ -101,7 +101,7 @@ class CoreMemory(nn.Module):
             )
             
         # Encode content
-        inputs = self.tokenizer(
+        inputs = self.encoder_tokenizer(
             content,
             padding=True,
             truncation=True,
@@ -235,7 +235,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = float(item["metadata"].importance) if hasattr(item["metadata"], "importance") else 0.0
+                importance = float(item["metadata"].timestamp) if hasattr(item["metadata"], "timestamp") else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
