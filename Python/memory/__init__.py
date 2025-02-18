@@ -11,5 +11,6 @@ and integrates with the venice.ai API for LLM operations.
 """
 
 from .venice_api import VeniceAPI
+from .manager import MemoryManager
 
-__all__ = ['VeniceAPI']
+__all__ = ['VeniceAPI', 'MemoryManager']
