@@ -6,7 +6,7 @@ from .planner import PlannerAgent
 from .reflector import ReflectorAgent
 
 __all__ = [
-    'AgentManager',
+    'ManagerAgent',
     'ExecutorAgent',
     'PlannerAgent',
     'ReflectorAgent'
