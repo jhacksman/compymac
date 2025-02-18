@@ -88,7 +88,9 @@ def mock_agents(memory_manager, mock_llm):
 
 from langchain_core.language_models.llms import BaseLLM
 
-class MockLLM(BaseLLM):
+from langchain_core.runnables import Runnable
+
+class MockLLM(BaseLLM, Runnable):
     """Mock LLM for testing."""
     
     def _get_response_for_prompt(self, prompt: str) -> Dict:
@@ -218,15 +220,15 @@ class MockLLM(BaseLLM):
         """Mock async generate call."""
         return self._generate(prompts, stop, **kwargs)
         
-    def invoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None) -> str:
+    def invoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock invoke call."""
         prompt = json.dumps(input) if isinstance(input, dict) else str(input)
         response = self._get_response_for_prompt(prompt)
         return json.dumps(response)
         
-    async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None) -> str:
+    async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock async invoke call."""
-        return self.invoke(input, config)
+        return self.invoke(input, config, **kwargs)
         
     @property
     def _llm_type(self) -> str:
