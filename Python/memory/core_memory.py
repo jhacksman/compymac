@@ -38,6 +38,7 @@ class CoreMemory:
             venice_client: Client for Venice.ai API
         """
         self.config = config
+        self.venice_client = venice_client
         self.librarian = LibrarianAgent(venice_client)
         
         # Current context state

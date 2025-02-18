@@ -108,6 +108,16 @@ class LibrarianAgent:
                 limit=limit
             )
             
+            # Filter by time range if specified
+            if time_range:
+                now = datetime.now().timestamp()
+                cutoff = now - time_range.total_seconds()
+                memories = [
+                    memory for memory in response.memories or []
+                    if memory.get("metadata", {}).get("timestamp", 0) >= cutoff
+                ]
+                response.memories = memories
+            
             if not response.success:
                 raise MemoryError(f"Failed to retrieve memories: {response.error}")
                 
