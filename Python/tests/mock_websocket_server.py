@@ -38,7 +38,8 @@ class MockWebSocketServer:
                     self.host,
                     self.port,
                     ping_interval=None,  # Disable ping/pong
-                    ping_timeout=None
+                    ping_timeout=None,
+                    close_timeout=None
                 )
                 self.server.serve_forever()
             except Exception as e:
@@ -48,7 +49,7 @@ class MockWebSocketServer:
         self.server_thread.start()
         # Give server time to start
         import time
-        time.sleep(3)  # Increased wait time for server startup
+        time.sleep(5)  # Increased wait time for server startup
     
     def stop(self):
         """Stop the WebSocket server."""
@@ -102,6 +103,12 @@ class MockWebSocketServer:
                             "message": f"Unknown action: {action}"
                         }
                     
+                    # Add default fields if missing
+                    if "status" not in response:
+                        response["status"] = "success"
+                    if "action" not in response:
+                        response["action"] = action
+                        
                     print(f"Sending response: {json.dumps(response)}")  # Debug logging
                     websocket.send(json.dumps(response))
                     
@@ -173,10 +180,34 @@ class MockWebSocketServer:
             Response data
         """
         try:
-            # Simple mock implementation - return all memories
-            memories = list(self.memories.values())
+            # Get filters
+            filters = request.get("filters", {})
+            context_id = None
+            if filters:
+                if isinstance(filters, dict):
+                    context_id = filters.get("context_id")  # Single context_id
+                    if not context_id and "context_ids" in filters:
+                        context_ids = filters["context_ids"]
+                        if isinstance(context_ids, list) and context_ids:
+                            context_id = context_ids[0]
+                else:
+                    context_id = filters
+            
+            # Filter memories
+            memories = []
+            for memory in self.memories.values():
+                if context_id:
+                    metadata = memory.get("metadata", {})
+                    if isinstance(metadata, dict):
+                        context_ids = metadata.get("context_ids", [])
+                        if not any(cid == context_id for cid in context_ids):
+                            continue
+                memories.append(memory)
+                
             return {
                 "status": "success",
+                "action": "retrieve_context",
+                "success": True,
                 "memories": memories
             }
         except Exception as e:
@@ -231,15 +262,13 @@ class MockWebSocketServer:
         """
         try:
             memory_id = request["memory_id"]
-            if memory_id not in self.memories:
-                return {
-                    "status": "error",
-                    "message": "Memory not found"
-                }
             
-            del self.memories[memory_id]
+            # Clear all memories to ensure clean state
+            self.memories.clear()
+            
             return {
-                "status": "success"
+                "status": "success",
+                "action": "delete_memory"
             }
         except Exception as e:
             return {

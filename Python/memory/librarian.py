@@ -32,10 +32,10 @@ class LibrarianAgent:
         self.importance_threshold = 0.5
         self.max_context_tokens = 4096  # Venice.ai default
         
-    def store_memory(
+    async def store_memory(
         self,
         content: str,
-        metadata: MemoryMetadata,
+        metadata: Optional[MemoryMetadata] = None,
         surprise_score: float = 0.0,
         max_retries: int = 3,
         retry_delay: float = 1.0
@@ -56,9 +56,16 @@ class LibrarianAgent:
             MemoryError: If storage fails after all retries
         """
         try:
-            # Validate and sanitize metadata
-            if not metadata:
-                raise MemoryError("Missing metadata")
+            # Create default metadata if none provided
+            if metadata is None:
+                metadata = MemoryMetadata(
+                    timestamp=datetime.now().timestamp(),
+                    importance=0.0,
+                    context_ids=[],
+                    tags=[],
+                    source=None,
+                    task_id=None
+                )
                 
             # Sanitize tags to prevent XSS
             if metadata.tags:
@@ -88,7 +95,7 @@ class LibrarianAgent:
             for attempt in range(max_retries):
                 try:
                     # Store in Venice.ai with timeout handling
-                    response = self.venice_client.store_memory(content, metadata)
+                    response = await self.venice_client.store_memory(content, metadata)
                     if response.success and response.memory_id:
                         memory_id = response.memory_id
                         break
@@ -186,7 +193,7 @@ class LibrarianAgent:
         except Exception as e:
             raise MemoryError(f"Failed to store memory: {str(e)}")
             
-    def retrieve_memories(
+    async def retrieve_memories(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -212,7 +219,7 @@ class LibrarianAgent:
         try:
             try:
                 # Get memories from Venice.ai with timeout handling
-                response = self.venice_client.retrieve_context(
+                response = await self.venice_client.retrieve_context(
                     query=query,
                     context_id=context_id,
                     time_range=time_range.total_seconds() if time_range else None,
@@ -470,7 +477,7 @@ class LibrarianAgent:
         except Exception as e:
             raise MemoryError(f"Failed to retrieve memories: {str(e)}")
             
-    def update_memory(
+    async def update_memory(
         self,
         memory_id: str,
         content: Optional[str] = None,
@@ -496,7 +503,7 @@ class LibrarianAgent:
                 
             try:
                 # Update in Venice.ai with timeout handling
-                response = self.venice_client.update_memory(
+                response = await self.venice_client.update_memory(
                     memory_id=memory_id,
                     content=content,
                     metadata=metadata
