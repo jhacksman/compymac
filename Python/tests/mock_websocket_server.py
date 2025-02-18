@@ -25,53 +25,58 @@ class MockWebSocketServer:
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
         
-    async def start(self):
+    def start(self):
         """Start the WebSocket server."""
         try:
-            self.server = await websockets.serve(
+            import websockets.sync.server as ws_server
+            self.server = ws_server.serve(
                 self.handle_connection,
                 self.host,
                 self.port,
                 reuse_address=True
             )
+            self.server.serve_forever()
         except OSError as e:
             if e.errno in (98, 48):  # Address already in use
-                await self.stop()  # Stop any existing server
-                await asyncio.sleep(0.1)  # Give time for socket to close
-                self.server = await websockets.serve(
+                self.stop()  # Stop any existing server
+                import time
+                time.sleep(0.1)  # Give time for socket to close
+                self.server = ws_server.serve(
                     self.handle_connection,
                     self.host,
                     self.port,
                     reuse_address=True
                 )
+                self.server.serve_forever()
     
-    async def stop(self):
+    def stop(self):
         """Stop the WebSocket server."""
         if self.server:
-            self.server.close()
-            await self.server.wait_closed()
+            self.server.shutdown()
+            self.server.server_close()
     
-    async def handle_connection(self, websocket):
+    def handle_connection(self, websocket):
         """Handle WebSocket connection.
         
         Args:
             websocket: WebSocket connection
         """
         try:
-            async for message in websocket:
+            while True:
                 try:
+                    message = websocket.recv()
                     print(f"Received message: {message}")  # Debug logging
                     request = json.loads(message)
                     action = request.get("action")
                     
                     if action == "store_memory":
-                        response = await self._handle_store_memory(request)
+                        response = self._handle_store_memory(request)
                     elif action == "retrieve_context":
-                        response = await self._handle_retrieve_context(request)
+                        response = self._handle_retrieve_context(request)
                     elif action == "update_memory":
-                        response = await self._handle_update_memory(request)
+                        response = self._handle_update_memory(request)
                     elif action == "delete_memory":
-                        response = await self._handle_delete_memory(request)
+                        response = self._handle_delete_memory(request)
                     elif action == "desktop_create_folder":
                         path = request.get("path")
                         try:
@@ -93,7 +98,7 @@ class MockWebSocketServer:
                         }
                     
                     print(f"Sending response: {json.dumps(response)}")  # Debug logging
-                    await websocket.send(json.dumps(response))
+                    websocket.send(json.dumps(response))
                     
                 except json.JSONDecodeError as e:
                     error_response = {
@@ -111,7 +116,7 @@ class MockWebSocketServer:
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")  # Debug logging
     
-    async def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle store_memory action.
         
         Args:
@@ -153,7 +158,7 @@ class MockWebSocketServer:
                 "message": f"Failed to store memory: {str(e)}"
             }
     
-    async def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle retrieve_context action.
         
         Args:
@@ -175,7 +180,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    async def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle update_memory action.
         
         Args:
@@ -210,7 +215,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    async def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle delete_memory action.
         
         Args:
