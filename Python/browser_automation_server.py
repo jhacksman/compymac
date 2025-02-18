@@ -615,4 +615,4 @@ class BrowserAutomationServer:
             }
 if __name__ == "__main__":
     server = BrowserAutomationServer()
-    asyncio.run(server.start_server())
+    server.start_server()
