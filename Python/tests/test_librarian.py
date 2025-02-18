@@ -34,11 +34,12 @@ def librarian(mock_venice_client):
     return LibrarianAgent(mock_venice_client)
 
 
-def test_store_memory_basic(librarian):
+@pytest.mark.asyncio
+async def test_store_memory_basic(librarian):
     """Test basic memory storage."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
-    memory_id = librarian.store_memory(
+    memory_id = await librarian.store_memory(
         "test content",
         metadata
     )
@@ -48,7 +49,8 @@ def test_store_memory_basic(librarian):
     assert librarian.recent_memories[0]["content"] == "test content"
 
 
-def test_store_memory_with_surprise(librarian):
+@pytest.mark.asyncio
+async def test_store_memory_with_surprise(librarian):
     """Test memory storage with surprise-based filtering."""
     metadata = MemoryMetadata(
         timestamp=datetime.now().timestamp(),
@@ -56,7 +58,7 @@ def test_store_memory_with_surprise(librarian):
     )
     
     # Store with high surprise score
-    memory_id = librarian.store_memory(
+    memory_id = await librarian.store_memory(
         "surprising content",
         metadata,
         surprise_score=0.8
