@@ -50,10 +50,10 @@
   - [x] Concurrent operation handling
   - [x] Queue management
 
-- [ ] Resource Utilization Tests
-  - [ ] CPU usage monitoring
-  - [ ] RAM consumption tracking
-  - [ ] Disk I/O benchmarks
+- [x] Resource Utilization Tests
+  - [x] CPU usage monitoring
+  - [x] RAM consumption tracking
+  - [x] Disk I/O benchmarks
 
 ## 4. Error Handling and Recovery Tests
 - [ ] Connection Error Tests
