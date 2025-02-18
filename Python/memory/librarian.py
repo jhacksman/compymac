@@ -143,18 +143,33 @@ class LibrarianAgent:
                 
             # Filter by importance if specified
             if min_importance is not None:
-                memories = [
-                    memory for memory in memories
-                    if memory.get("metadata", {}).get("importance", 0.0) >= min_importance
-                ]
+                filtered_memories = []
+                for memory in memories:
+                    metadata = memory.get("metadata")
+                    if isinstance(metadata, dict):
+                        if metadata.get("importance", 0.0) >= min_importance:
+                            filtered_memories.append(memory)
+                    elif hasattr(metadata, "importance"):
+                        if metadata.importance >= min_importance:
+                            filtered_memories.append(memory)
+                memories = filtered_memories
                 
             # Sort by hybrid score (importance + recency)
             now = datetime.now().timestamp()
             for memory in memories:
-                memory_time = memory.get("metadata", {}).get("timestamp", now)
+                metadata = memory.get("metadata")
+                if isinstance(metadata, dict):
+                    memory_time = metadata.get("timestamp", now)
+                    importance = metadata.get("importance", 0.0)
+                elif hasattr(metadata, "timestamp"):
+                    memory_time = metadata.timestamp
+                    importance = getattr(metadata, "importance", 0.0)
+                else:
+                    memory_time = now
+                    importance = 0.0
+                    
                 time_diff = now - memory_time
                 recency_score = 1.0 / (1.0 + time_diff / 86400)  # Decay over days
-                importance = memory.get("metadata", {}).get("importance", 0.0)
                 memory["_score"] = importance + recency_score
                 
             memories.sort(key=lambda x: x["_score"], reverse=True)
