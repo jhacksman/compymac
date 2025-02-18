@@ -26,8 +26,11 @@ jobs:
         pip install -r requirements.txt
         pip install -r tests/requirements-test.txt
         python -m playwright install
+        python -m playwright install-deps
         
     - name: Run tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}/Python
       run: |
         cd Python
         python -m pytest tests/ -v
