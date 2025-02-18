@@ -33,6 +33,11 @@ class VeniceClient:
         self._base_url = base_url
         self._model = VENICE_MODEL  # Use configured model name
         
+        # Rate limiting settings
+        self.max_retries = 3
+        self.retry_delay = 1.0  # Initial delay in seconds
+        self.max_delay = 8.0  # Maximum delay in seconds
+        
         # Set up headers with proper authentication
         self.headers = {
             "Content-Type": "application/json",
@@ -79,8 +84,21 @@ class VeniceClient:
             "Access-Control-Request-Headers": "content-type, authorization"
         }
         
-    def _stream_chunks(self, response: requests.Response) -> Generator[str, None, None]:
+    def _handle_rate_limit(self, retry_count: int) -> None:
+        """Handle rate limiting with exponential backoff."""
+        if retry_count >= self.max_retries:
+            raise VeniceAPIError("Max retries exceeded due to rate limiting")
+            
+        delay = min(self.retry_delay * (2 ** retry_count), self.max_delay)
+        print(f"Rate limited. Retrying in {delay} seconds...")  # Debug log
+        time.sleep(delay)
+
+    def _stream_chunks(self, response: requests.Response, retry_count: int = 0) -> Generator[str, None, None]:
         """Stream chunks from response."""
+        if response.status_code == 429:  # Rate limit exceeded
+            self._handle_rate_limit(retry_count)
+            return
+            
         buffer = ""
         content_buffer = ""
         for chunk in response.iter_content(chunk_size=512):
@@ -136,7 +154,8 @@ class VeniceClient:
         self,
         content: str,
         metadata: MemoryMetadata,
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        retry_count: int = 0
     ) -> Generator[str, None, None]:
         """Stream memory storage response."""
         try:
@@ -188,6 +207,13 @@ class VeniceClient:
                 print(f"Response status: {response.status_code}")  # Debug log
                 print(f"Response headers: {response.headers}")  # Debug log
                 
+                if response.status_code == 429 and retry_count < self.max_retries:
+                    self._handle_rate_limit(retry_count)
+                    # Retry with incremented count
+                    for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
+                        yield chunk
+                    return
+                    
                 if response.status_code != 200:
                     error_text = response.text
                     print(f"Error response body: {error_text}")  # Debug log
@@ -195,7 +221,7 @@ class VeniceClient:
                         f"Failed to store memory: {response.status_code} - {error_text}"
                     )
                     
-                for chunk in self._stream_chunks(response):
+                for chunk in self._stream_chunks(response, retry_count):
                     yield chunk
                         
         except Exception as e:
