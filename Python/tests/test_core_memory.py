@@ -1,6 +1,7 @@
 """Tests for core memory module."""
 
 import pytest
+import pytest_asyncio
 from datetime import datetime
 
 from memory.core_memory import CoreMemory, CoreMemoryConfig
@@ -66,13 +67,14 @@ async def test_add_to_context(core_memory):
         core_memory.add_to_context("overflow", metadata)
 
 
-def test_get_context_window(core_memory):
+@pytest.mark.asyncio
+async def test_get_context_window(core_memory):
     """Test getting context window."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
     # Add some content
     for i in range(3):
-        core_memory.add_to_context(f"content {i}", metadata)
+        await core_memory.add_to_context(f"content {i}", metadata)
         
     # Get full context
     context = core_memory.get_context_window()
@@ -115,12 +117,13 @@ async def test_process_context(core_memory, mock_venice_client):
     assert memories[0]["content"] == "test content"
 
 
-def test_reset_context(core_memory):
+@pytest.mark.asyncio
+async def test_reset_context(core_memory):
     """Test resetting context."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
     # Add content
-    core_memory.add_to_context("test content", metadata)
+    await core_memory.add_to_context("test content", metadata)
     assert len(core_memory.current_context) == 1
     
     # Reset
@@ -128,7 +131,8 @@ def test_reset_context(core_memory):
     assert len(core_memory.current_context) == 0
 
 
-def test_summarize_context(core_memory):
+@pytest.mark.asyncio
+async def test_summarize_context(core_memory):
     """Test context summarization."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
@@ -137,8 +141,8 @@ def test_summarize_context(core_memory):
         core_memory.summarize_context()
         
     # Add content and summarize
-    core_memory.add_to_context("first content", metadata)
-    core_memory.add_to_context("second content", metadata)
+    await core_memory.add_to_context("first content", metadata)
+    await core_memory.add_to_context("second content", metadata)
     
     summary = core_memory.summarize_context()
     assert isinstance(summary, str)
