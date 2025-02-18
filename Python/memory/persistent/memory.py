@@ -93,7 +93,7 @@ class PersistentMemory(nn.Module):
             nn.Linear(self.config.hidden_size, self.config.intermediate_size),
             nn.ReLU(),
             nn.Linear(self.config.intermediate_size, self.config.hidden_size)
-        ).to(self.device)
+        )
         
         # Multi-head attention for knowledge access
         self.knowledge_attention = nn.MultiheadAttention(
@@ -101,13 +101,16 @@ class PersistentMemory(nn.Module):
             num_heads=self.config.num_attention_heads,
             batch_first=True,
             dropout=0.0
-        ).to(self.device)
+        )
         
         # Task embeddings
         self.task_embeddings = nn.Embedding(
             self.config.max_tasks,
             self.config.hidden_size
-        ).to(self.device)
+        )
+        
+        # Move all components to device at once
+        self.to(self.device)
             
     async def store_knowledge(
         self,
