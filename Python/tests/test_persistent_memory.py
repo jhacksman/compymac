@@ -23,14 +23,20 @@ async def mock_venice_client():
         memory_id="test_id"
     ))
     
-    # Simple default mock response
+    # Return test memory for task-based retrieval
     client.retrieve_context = AsyncMock(return_value=MemoryResponse(
         action="retrieve_context",
         success=True,
-        memories=[]
+        memories=[{
+            "id": "test_id",
+            "content": "important content",
+            "metadata": {
+                "timestamp": datetime.now().timestamp(),
+                "importance": 0.8,
+                "context_ids": []
+            }
+        }]
     ))
-    
-    client.retrieve_context = AsyncMock(side_effect=mock_retrieve_context)
     return client
 
 
