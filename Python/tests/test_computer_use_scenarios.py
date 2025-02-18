@@ -15,13 +15,6 @@ def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
     
-    async def mock_store_memory(*args, **kwargs):
-        return MemoryResponse(
-            action="store_memory",
-            success=True,
-            memory_id="test_id"
-        )
-    
     stored_memories = []
 
     async def mock_store_memory(*args, **kwargs):
