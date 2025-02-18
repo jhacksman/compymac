@@ -119,7 +119,7 @@ class PersistentMemory:
             memories = await self.librarian.retrieve_memories(
                 query=query,
                 context_id=f"task_{task_id}" if task_id is not None else None,
-                limit=limit,
+                limit=None,  # Get all memories first, then filter
                 min_importance=min_importance
             )
             

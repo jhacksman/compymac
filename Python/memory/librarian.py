@@ -126,7 +126,8 @@ class LibrarianAgent:
             if context_id:
                 memories = [
                     memory for memory in memories
-                    if context_id in memory.get("metadata", {}).get("context_ids", [])
+                    if (isinstance(memory.get("metadata"), dict) and 
+                        context_id in memory.get("metadata", {}).get("context_ids", []))
                 ]
                 
             # Filter by importance if specified
