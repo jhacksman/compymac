@@ -160,13 +160,15 @@ class LibrarianAgent:
                 metadata = memory.get("metadata")
                 if isinstance(metadata, dict):
                     memory_time = metadata.get("timestamp", now)
-                    importance = metadata.get("importance", 0.0) or 0.0
+                    importance = metadata.get("importance")
                 elif hasattr(metadata, "timestamp"):
                     memory_time = metadata.timestamp
-                    importance = getattr(metadata, "importance", 0.0) or 0.0
+                    importance = getattr(metadata, "importance", None)
                 else:
                     memory_time = now
-                    importance = 0.0
+                    importance = None
+                    
+                importance = float(importance if importance is not None else 0.0)
                     
                 time_diff = now - memory_time
                 recency_score = 1.0 / (1.0 + time_diff / 86400)  # Decay over days
