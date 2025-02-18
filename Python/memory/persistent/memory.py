@@ -67,7 +67,7 @@ class PersistentMemory(nn.Module):
         # Calculate head dimension
         self.head_dim = self.config.hidden_size // self.config.num_attention_heads
         
-        # Create model components and move to device
+        # Create model components
         self.knowledge_transform = nn.Sequential(
             nn.Linear(
                 self.config.hidden_size,
@@ -78,7 +78,7 @@ class PersistentMemory(nn.Module):
                 self.config.intermediate_size,
                 self.config.hidden_size
             )
-        ).to(self.device)
+        )
         
         # Multi-head attention for knowledge access
         self.knowledge_attention = nn.MultiheadAttention(
@@ -86,7 +86,10 @@ class PersistentMemory(nn.Module):
             num_heads=self.config.num_attention_heads,
             batch_first=True,
             dropout=0.0
-        ).to(self.device)
+        )
+        
+        # Move all components to device
+        self.to(self.device)
             
     async def store_knowledge(
         self,
