@@ -15,7 +15,7 @@ import torch.nn as nn
 from transformers import (
     AutoModel,
     AutoTokenizer,
-    AutoModelForConditionalGeneration,
+    BartForConditionalGeneration,
     AutoConfig
 )
 
@@ -60,7 +60,7 @@ class CoreMemory(nn.Module):
         self.encoder_tokenizer = AutoTokenizer.from_pretrained(config.encoder_model)
         self.encoder = AutoModel.from_pretrained(config.encoder_model)
         self.generator_tokenizer = AutoTokenizer.from_pretrained(config.generator_model)
-        self.generator = AutoModelForConditionalGeneration.from_pretrained(config.generator_model)
+        self.generator = BartForConditionalGeneration.from_pretrained(config.generator_model)
         
         # Attention components
         self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)

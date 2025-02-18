@@ -33,14 +33,15 @@ class MockWebSocketServer:
         def run_server():
             try:
                 # Create WebSocket server
-                self.server = ws_server.serve(
+                with ws_server.serve(
                     self.handle_connection,
                     self.host,
                     self.port,
                     ping_interval=None,  # Disable ping/pong
                     ping_timeout=None
-                )
-                self.server.serve_forever()
+                ) as server:
+                    self.server = server
+                    server.serve_forever()
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
