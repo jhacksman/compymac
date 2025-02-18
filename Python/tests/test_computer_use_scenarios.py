@@ -22,19 +22,29 @@ def mock_venice_client():
             memory_id="test_id"
         )
     
+    stored_memories = []
+
+    async def mock_store_memory(*args, **kwargs):
+        memory_id = f"test_id_{len(stored_memories)}"
+        memory = {
+            "id": memory_id,
+            "content": args[0],
+            "metadata": args[1].__dict__ if hasattr(args[1], '__dict__') else args[1]
+        }
+        stored_memories.append(memory)
+        return MemoryResponse(
+            action="store_memory",
+            success=True,
+            memory_id=memory_id
+        )
+
     async def mock_retrieve_context(*args, **kwargs):
+        context_id = kwargs.get("context_id")
+        memories = [m for m in stored_memories if context_id in m["metadata"]["context_ids"]]
         return MemoryResponse(
             action="retrieve_context",
             success=True,
-            memories=[{
-                "id": "test_id",
-                "content": args[0] if args else "test content",
-                "metadata": {
-                    "timestamp": kwargs.get("timestamp", datetime.now().timestamp()),
-                    "tags": kwargs.get("tags", []),
-                    "context_ids": kwargs.get("context_ids", [])
-                }
-            }]
+            memories=memories
         )
     
     client.store_memory = mock_store_memory
