@@ -1,10 +1,9 @@
 """Tests for memory corruption handling."""
 
 import pytest
-import pytest_asyncio
 import json
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
@@ -12,35 +11,34 @@ from memory.librarian import LibrarianAgent
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory = AsyncMock(return_value=MemoryResponse(
+    client.store_memory.return_value = MemoryResponse(
         action="store_memory",
         success=True,
         memory_id="test_id"
-    ))
-    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
+    )
+    client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[]
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian fixture."""
     return LibrarianAgent(mock_venice_client)
 
 
-@pytest.mark.asyncio
-async def test_invalid_metadata_handling(librarian, mock_venice_client):
+def test_invalid_metadata_handling(librarian, mock_venice_client):
     """Test handling of invalid metadata."""
     # Test missing required fields
     with pytest.raises(MemoryError) as exc_info:
-        await librarian.store_memory(
+        librarian.store_memory(
             "test content",
             None  # Missing metadata
         )
@@ -48,7 +46,7 @@ async def test_invalid_metadata_handling(librarian, mock_venice_client):
     
     # Test invalid timestamp
     with pytest.raises(MemoryError) as exc_info:
-        await librarian.store_memory(
+        librarian.store_memory(
             "test content",
             MemoryMetadata(
                 timestamp="invalid",  # Invalid timestamp
@@ -68,12 +66,11 @@ async def test_invalid_metadata_handling(librarian, mock_venice_client):
         }]
     )
     
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     assert len(memories) == 0  # Invalid memories filtered out
 
 
-@pytest.mark.asyncio
-async def test_corrupted_content_recovery(librarian, mock_venice_client):
+def test_corrupted_content_recovery(librarian, mock_venice_client):
     """Test recovery from corrupted content."""
     # Test handling of corrupted JSON content
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -88,7 +85,7 @@ async def test_corrupted_content_recovery(librarian, mock_venice_client):
         }]
     )
     
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     assert len(memories) == 0  # Corrupted content filtered
     
     # Test partial content corruption
@@ -113,13 +110,12 @@ async def test_corrupted_content_recovery(librarian, mock_venice_client):
         ]
     )
     
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     assert len(memories) == 1  # Only valid content retained
     assert memories[0]["id"] == "valid_id"
 
 
-@pytest.mark.asyncio
-async def test_index_rebuilding(librarian, mock_venice_client):
+def test_index_rebuilding(librarian, mock_venice_client):
     """Test index rebuilding after corruption."""
     # Simulate index corruption by returning invalid index data
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -129,7 +125,7 @@ async def test_index_rebuilding(librarian, mock_venice_client):
     )
     
     # Attempt retrieval with corrupted index
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     assert len(memories) == 0
     
     # Verify system remains functional after index failure
@@ -145,13 +141,12 @@ async def test_index_rebuilding(librarian, mock_venice_client):
         }]
     )
     
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     assert len(memories) == 1
     assert memories[0]["content"] == "recovered content"
 
 
-@pytest.mark.asyncio
-async def test_metadata_sanitization(librarian):
+def test_metadata_sanitization(librarian):
     """Test metadata sanitization and validation."""
     # Test sanitization of malicious metadata
     metadata = MemoryMetadata(
@@ -160,7 +155,7 @@ async def test_metadata_sanitization(librarian):
         context_ids=["valid_context"]
     )
     
-    memory_id = await librarian.store_memory(
+    memory_id = librarian.store_memory(
         "test content",
         metadata
     )
@@ -170,8 +165,7 @@ async def test_metadata_sanitization(librarian):
     assert "<script>" not in stored["metadata"].tags[0]
 
 
-@pytest.mark.asyncio
-async def test_memory_repair(librarian, mock_venice_client):
+def test_memory_repair(librarian, mock_venice_client):
     """Test memory repair mechanisms."""
     # Store initial valid memory
     initial_metadata = MemoryMetadata(
@@ -180,21 +174,21 @@ async def test_memory_repair(librarian, mock_venice_client):
         tags=["test"]
     )
     
-    await librarian.store_memory(
+    librarian.store_memory(
         "initial content",
         initial_metadata
     )
     
     # Simulate memory corruption during update
-    mock_venice_client.update_memory = AsyncMock(side_effect=json.JSONDecodeError(
+    mock_venice_client.update_memory.side_effect = json.JSONDecodeError(
         "Invalid JSON",
         doc="corrupted",
         pos=0
-    ))
+    )
     
     # Attempt update with corrupted memory
     with pytest.raises(MemoryError) as exc_info:
-        await librarian.update_memory(
+        librarian.update_memory(
             "test_id",
             "updated content",
             initial_metadata
