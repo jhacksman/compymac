@@ -105,25 +105,31 @@ class LibrarianAgent:
                 query=query,
                 context_id=context_id,
                 time_range=time_range.total_seconds() if time_range else None,
-                limit=limit
+                limit=None  # Get all memories first, then filter
             )
-            
-            # Filter by time range if specified
-            if time_range:
-                now = datetime.now().timestamp()
-                cutoff = now - time_range.total_seconds()
-                memories = [
-                    memory for memory in response.memories or []
-                    if memory.get("metadata", {}).get("timestamp", 0) >= cutoff
-                ]
-                response.memories = memories
             
             if not response.success:
                 raise MemoryError(f"Failed to retrieve memories: {response.error}")
                 
             memories = response.memories or []
             
-            # Apply importance filter
+            # Filter by time range if specified
+            if time_range:
+                now = datetime.now().timestamp()
+                cutoff = now - time_range.total_seconds()
+                memories = [
+                    memory for memory in memories
+                    if memory.get("metadata", {}).get("timestamp", 0) >= cutoff
+                ]
+                
+            # Filter by context ID if specified
+            if context_id:
+                memories = [
+                    memory for memory in memories
+                    if context_id in memory.get("metadata", {}).get("context_ids", [])
+                ]
+                
+            # Filter by importance if specified
             if min_importance is not None:
                 memories = [
                     memory for memory in memories
@@ -141,6 +147,10 @@ class LibrarianAgent:
                 
             memories.sort(key=lambda x: x["_score"], reverse=True)
             
+            # Apply limit after all filtering
+            if limit is not None:
+                memories = memories[:limit]
+                
             # Remove scoring field
             for memory in memories:
                 memory.pop("_score", None)
