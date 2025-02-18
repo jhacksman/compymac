@@ -3,7 +3,7 @@
 import pytest
 import json
 from unittest.mock import MagicMock, AsyncMock
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, AsyncGenerator
 import json
 
 from langchain_core.language_models.llms import BaseLLM
@@ -93,6 +93,18 @@ from langchain_core.runnables import Runnable
 
 class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
     """Mock LLM for testing."""
+
+    def get_name(self) -> str:
+        """Get name of the runnable."""
+        return "MockLLM"
+
+    def get_input_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
+        """Get input schema."""
+        return {"type": "object", "properties": {"input": {"type": "string"}}}
+
+    def get_output_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
+        """Get output schema."""
+        return {"type": "string"}
 
     def get_input_schema(self, config: Optional[RunnableConfig] = None) -> Dict:
         """Get input schema."""
