@@ -15,6 +15,7 @@ from ...agents.executor import ExecutorAgent
 from ...agents.planner import PlannerAgent
 from ...agents.reflector import ReflectorAgent
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
+from ...agents.manager import ManagerAgent
 
 @pytest.fixture
 def memory_manager():
