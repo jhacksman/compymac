@@ -1,10 +1,10 @@
-import asyncio
 import json
 import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from websockets import serve
-from playwright.async_api import async_playwright
+from websockets.sync.server import serve
+from playwright.sync_api import sync_playwright
 
 from desktop_automation import DesktopAutomation
 from memory.protocol import MemoryMessage
@@ -21,36 +21,36 @@ class BrowserAutomationServer:
         self.mock_mode = mock_mode
         print("Desktop Automation initialized in mock mode" if mock_mode else "Desktop Automation initialized")
 
-    async def start(self):
+    def start(self):
         """Start the automation server."""
-        await self.desktop.start()
-        await self._setup_browser()
+        self.desktop.start()
+        self._setup_browser()
 
-    async def stop(self):
+    def stop(self):
         """Stop the automation server."""
-        await self.desktop.stop()
-        await self._cleanup_browser()
+        self.desktop.stop()
+        self._cleanup_browser()
         
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.start()
+    def __enter__(self):
+        """Context manager entry."""
+        self.start()
         return self
         
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.stop()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.stop()
         
-    async def _cleanup_browser(self):
+    def _cleanup_browser(self):
         """Clean up browser resources."""
         try:
             if self.page:
-                await self.page.close()
+                self.page.close()
                 self.page = None
             if self.browser:
-                await self.browser.close()
+                self.browser.close()
                 self.browser = None
             if self.playwright:
-                await self.playwright.stop()
+                self.playwright.stop()
                 self.playwright = None
         except Exception:
             # Reset attributes even if cleanup fails
@@ -58,7 +58,7 @@ class BrowserAutomationServer:
             self.browser = None
             self.playwright = None
     
-    async def _setup_browser(self):
+    def _setup_browser(self):
         """Initialize browser instance with Playwright."""
         if self.mock_mode:
             self.page = True  # Just set a truthy value for mock mode
@@ -66,48 +66,50 @@ class BrowserAutomationServer:
             
         try:
             # Clean up any existing browser resources
-            await self._cleanup_browser()
+            self._cleanup_browser()
             
             # Initialize new browser resources
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.webkit.launch(headless=True)
-            self.page = await self.browser.new_page()
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.webkit.launch(headless=True)
+            self.page = self.browser.new_page()
             return True
         except Exception as e:
             print(f"Failed to initialize browser: {e}")
-            await self._cleanup_browser()
+            self._cleanup_browser()
             return False
     
-    async def start_server(self):
+    def start_server(self):
         """Start the WebSocket server."""
         try:
-            async with serve(
+            with serve(
                 self.handle_client_message,
                 "localhost",
                 8765,
                 reuse_address=True
             ) as server:
                 print("Browser automation server listening on ws://localhost:8765")
-                await asyncio.Future()  # run forever
+                while True:  # run forever
+                    time.sleep(0.1)
         except OSError as e:
             if e.errno in (98, 48, 61):  # Address already in use
                 print("Address in use, waiting for socket to close...")
-                await asyncio.sleep(0.1)  # Give time for socket to close
-                async with serve(
+                time.sleep(0.1)  # Give time for socket to close
+                with serve(
                     self.handle_client_message,
                     "localhost",
                     8765,
                     reuse_address=True
                 ) as server:
                     print("Browser automation server listening on ws://localhost:8765")
-                    await asyncio.Future()  # run forever
+                    while True:  # run forever
+                        time.sleep(0.1)
             else:
                 print(f"Failed to start server: {e}")
-                await self.stop()
+                self.stop()
     
-    async def handle_client_message(self, websocket):
+    def handle_client_message(self, websocket):
         print("Swift client connected")
-        async for message in websocket:
+        for message in websocket:
             try:
                 request = json.loads(message)
             except json.JSONDecodeError:
@@ -116,16 +118,16 @@ class BrowserAutomationServer:
                     "status": "error",
                     "message": "Invalid JSON format"
                 }
-                await websocket.send(json.dumps(error_response))
+                websocket.send(json.dumps(error_response))
                 continue
             
             action = request.get("action")
-            response = await self.execute_browser_action(action, request)
-            await websocket.send(json.dumps(response))
+            response = self.execute_browser_action(action, request)
+            websocket.send(json.dumps(response))
     
-    async def execute_browser_action(self, action: str, params: dict):
+    def execute_browser_action(self, action: str, params: dict):
         if action.startswith("desktop_"):
-            return await self.execute_desktop_action(action, params)
+            return self.execute_desktop_action(action, params)
             
         if action == "openBrowser":
             try:
@@ -144,22 +146,22 @@ class BrowserAutomationServer:
                         "url": params["url"]
                     }
                     
-                if not await self._setup_browser():
+                if not self._setup_browser():
                     return {
                         "action": action,
                         "status": "error",
                         "message": "Failed to initialize browser"
                     }
                     
-                await self.page.goto(params["url"])
+                self.page.goto(params["url"])
                 return {
                     "action": action,
                     "status": "success",
-                    "title": await self.page.title(),
+                    "title": self.page.title(),
                     "url": params["url"]
                 }
             except Exception as e:
-                await self._cleanup_browser()
+                self._cleanup_browser()
                 return {
                     "action": action,
                     "status": "error",
@@ -435,7 +437,7 @@ class BrowserAutomationServer:
                 "message": "Unsupported action"
             }
 
-    async def execute_desktop_action(self, action: str, params: dict):
+    def execute_desktop_action(self, action: str, params: dict):
         """Execute desktop automation actions.
         
         Args:
@@ -460,7 +462,7 @@ class BrowserAutomationServer:
                         "status": "success",
                         "message": "Folder opened (mock mode)"
                     }
-                success = await self.desktop.open_folder(path)
+                success = self.desktop.open_folder(path)
                 return {
                     "action": action,
                     "status": "success" if success else "error",
