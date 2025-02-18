@@ -1,7 +1,6 @@
 """Test fixtures for memory system tests."""
 
 import pytest
-import pytest_asyncio
 import os
 from datetime import datetime
 
@@ -23,23 +22,17 @@ VENICE_BASE_URL = os.getenv("VENICE_BASE_URL")
 VENICE_MODEL = os.getenv("VENICE_MODEL")
 
 
-@pytest_asyncio.fixture(scope="function")
-async def venice_client():
+@pytest.fixture(scope="function")
+def venice_client():
     """Create Venice client for memory operations."""
     client = VeniceClient(api_key=VENICE_API_KEY)
     client.base_url = VENICE_BASE_URL
     client.model = VENICE_MODEL
-    
-    try:
-        yield client
-    finally:
-        # Cleanup any open sessions
-        if hasattr(client, '_session'):
-            await client._session.close()
+    return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(venice_client):
+@pytest.fixture(scope="function")
+def librarian(venice_client):
     """Create librarian with Venice client."""
     agent = LibrarianAgent(venice_client)
     try:
