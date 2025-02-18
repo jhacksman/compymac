@@ -9,6 +9,7 @@ from datetime import datetime
 
 from ..message_types import MemoryMetadata
 from ..venice_client import VeniceClient
+from ..librarian import LibrarianAgent
 from .config import PersistentMemoryConfig
 from ..exceptions import MemoryError
 
@@ -28,7 +29,7 @@ class PersistentMemory:
             venice_client: Client for Venice.ai API
         """
         self.config = config
-        self.venice_client = venice_client
+        self.librarian = LibrarianAgent(venice_client)
         
         # Memory storage
         self.memory_chunks: List[Dict] = []
@@ -38,7 +39,8 @@ class PersistentMemory:
         self,
         content: str,
         metadata: MemoryMetadata,
-        task_id: Optional[int] = None
+        task_id: Optional[int] = None,
+        surprise_score: float = 0.0
     ) -> str:
         """Store new knowledge in persistent memory.
         
@@ -46,6 +48,7 @@ class PersistentMemory:
             content: Knowledge content to store
             metadata: Associated metadata
             task_id: Optional task context ID
+            surprise_score: Score indicating how surprising/novel the content is
             
         Returns:
             ID of stored knowledge
@@ -58,19 +61,13 @@ class PersistentMemory:
             if task_id is not None:
                 metadata.context_ids = [f"task_{task_id}"]
                 
-            # Store in Venice.ai
-            response = await self.venice_client.store_memory(
+            # Store via librarian with surprise-based filtering
+            memory_id = await self.librarian.store_memory(
                 content=content,
-                metadata=metadata
+                metadata=metadata,
+                surprise_score=surprise_score
             )
             
-            if not response.success:
-                raise MemoryError(f"Failed to store knowledge: {response.error}")
-                
-            memory_id = response.memory_id
-            if not memory_id:
-                raise MemoryError("No memory ID returned from Venice.ai")
-                
             # Add to current chunk
             memory_entry = {
                 "id": memory_id,
@@ -99,7 +96,8 @@ class PersistentMemory:
         self,
         query: str,
         task_id: Optional[int] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        min_importance: Optional[float] = None
     ) -> List[Dict]:
         """Retrieve relevant knowledge based on query.
         
@@ -107,6 +105,7 @@ class PersistentMemory:
             query: Search query
             task_id: Optional task context ID
             limit: Maximum number of results
+            min_importance: Minimum importance score filter
             
         Returns:
             List of relevant knowledge entries
@@ -115,19 +114,15 @@ class PersistentMemory:
             MemoryError: If retrieval fails
         """
         try:
-            # Get knowledge from Venice.ai
-            response = await self.venice_client.retrieve_context(
+            # Get knowledge via librarian with hybrid ranking
+            memories = await self.librarian.retrieve_memories(
                 query=query,
                 context_id=str(task_id) if task_id is not None else None,
-                limit=limit
+                limit=limit,
+                min_importance=min_importance
             )
             
-            if not response.success:
-                raise MemoryError(
-                    f"Failed to retrieve knowledge: {response.error}"
-                )
-                
-            return response.memories or []
+            return memories
             
         except Exception as e:
             raise MemoryError(f"Failed to retrieve knowledge: {str(e)}")
