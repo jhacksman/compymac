@@ -4,7 +4,7 @@ import json
 import re
 import os
 import time
-import requests
+import aiohttp
 from typing import Dict, List, Optional, Generator
 
 from .message_types import MemoryMetadata, MemoryResponse
@@ -252,7 +252,7 @@ class VeniceClient:
         except Exception as e:
             raise VeniceAPIError(f"Failed to stream memory: {str(e)}")
             
-    def store_memory(
+    async def store_memory(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -311,7 +311,7 @@ class VeniceClient:
         except Exception as e:
             raise VeniceAPIError(f"Failed to store memory: {str(e)}")
             
-    def retrieve_context(
+    async def retrieve_context(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -380,7 +380,7 @@ class VeniceClient:
         except Exception as e:
             raise VeniceAPIError(f"Failed to retrieve memories: {str(e)}")
             
-    def update_memory(
+    async def update_memory(
         self,
         memory_id: str,
         content: Optional[str] = None,
