@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock
 from datetime import datetime
 
-from Python.agents.manager import ManagerAgent
+from ..agents.manager import ManagerAgent
 from ..agents.config import AgentConfig
 from ..agents.protocols import TaskResult
 from ..memory import MemoryManager
