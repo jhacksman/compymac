@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime
 
 from memory.core_memory import CoreMemory, CoreMemoryConfig
-from memory.message_types import MemoryMetadata
+from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.exceptions import MemoryError
 from memory.venice_client import VeniceClient
 from unittest.mock import Mock, AsyncMock
