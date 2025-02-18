@@ -65,7 +65,7 @@ async def test_store_memory_with_surprise(librarian):
     )
     
     assert memory_id == "test_id"
-    assert librarian.recent_memories[0]["metadata"].importance == 0.8
+    assert librarian.recent_memories[0]["metadata"]["importance"] == 0.8
 
 
 @pytest.mark.asyncio
