@@ -129,7 +129,7 @@ class VeniceClient:
             
         buffer = ""
         content_buffer = ""
-        for chunk in response.iter_content(chunk_size=512):
+        async for chunk in response.content.iter_chunked(512):
             if chunk:
                 try:
                     text = chunk.decode("utf-8")
@@ -236,10 +236,10 @@ class VeniceClient:
                     print(f"Response headers: {response.headers}")  # Debug log
                     
                     if response.status == 429 and retry_count < self.max_retries:
-                    self._handle_rate_limit(retry_count)
-                    # Retry with incremented count
-                    for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
-                        yield chunk
+                        self._handle_rate_limit(retry_count)
+                        # Retry with incremented count
+                        async for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
+                            yield chunk
                     return
                     
                 if response.status_code != 200:
@@ -405,16 +405,16 @@ class VeniceClient:
                     headers=self.headers,
                     timeout=timeout
                 ) as response:
-                if response.status_code == 429 and retry_count < self.max_retries:
-                    self._handle_rate_limit(retry_count)
-                    # Retry with incremented count
-                    return self.update_memory(
-                        memory_id,
-                        content,
-                        metadata,
-                        timeout,
-                        retry_count + 1
-                    )
+                    if response.status == 429 and retry_count < self.max_retries:
+                        self._handle_rate_limit(retry_count)
+                        # Retry with incremented count
+                        return await self.update_memory(
+                            memory_id,
+                            content,
+                            metadata,
+                            timeout,
+                            retry_count + 1
+                        )
                 if response.status_code != 200:
                     error_text = response.text
                     print(f"Error response body: {error_text}")  # Debug log
