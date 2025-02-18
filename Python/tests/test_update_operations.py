@@ -83,8 +83,8 @@ async def test_update_memory_metadata(librarian, mock_venice_client):
         None
     )
     assert updated is not None
-    assert updated["metadata"]["importance"] == 0.8
-    assert "updated" in updated["metadata"]["tags"]
+    assert updated["metadata"].importance == 0.8
+    assert "updated" in updated["metadata"].tags
 
 
 @pytest.mark.asyncio
