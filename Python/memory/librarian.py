@@ -160,10 +160,10 @@ class LibrarianAgent:
                 metadata = memory.get("metadata")
                 if isinstance(metadata, dict):
                     memory_time = metadata.get("timestamp", now)
-                    importance = metadata.get("importance", 0.0)
+                    importance = metadata.get("importance", 0.0) or 0.0
                 elif hasattr(metadata, "timestamp"):
                     memory_time = metadata.timestamp
-                    importance = getattr(metadata, "importance", 0.0)
+                    importance = getattr(metadata, "importance", 0.0) or 0.0
                 else:
                     memory_time = now
                     importance = 0.0
