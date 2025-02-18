@@ -8,7 +8,12 @@ filtering through the librarian agent.
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import time
+import math
 from datetime import datetime, timedelta
+
+import torch
+import torch.nn as nn
+from transformers import AutoModel, AutoTokenizer
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
@@ -25,9 +30,12 @@ class LongTermMemoryConfig:
     summary_threshold: int = 100  # Messages before summarization
     context_window_size: int = 10  # Recent messages to keep in full
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
+    model_name: str = "google/flan-t5-base"  # Base transformer model
+    hidden_size: int = 768  # Hidden size for transformer
+    num_attention_heads: int = 12  # Number of attention heads
 
 
-class LongTermMemory:
+class LongTermMemory(nn.Module):
     """Long-term memory module for storing historical information."""
     
     def __init__(
@@ -41,12 +49,34 @@ class LongTermMemory:
             config: Configuration for the module
             venice_client: Client for Venice.ai API
         """
+        super().__init__()
         self.config = config
         self.librarian = LibrarianAgent(venice_client)
         self.venice_client = venice_client  # Store venice_client for direct use
         
+        # Initialize transformer components
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+        self.transformer = AutoModel.from_pretrained(config.model_name)
+        
+        # Memory components
+        self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.key_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.value_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        
+        # Memory write gate
+        self.write_gate = nn.Sequential(
+            nn.Linear(config.hidden_size * 2, config.hidden_size),
+            nn.ReLU(),
+            nn.Linear(config.hidden_size, 1),
+            nn.Sigmoid()
+        )
+        
         # Recent context
         self.recent_context: List[Dict] = []
+        
+        # Move to GPU if available
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
         
     def store_memory(
         self,
