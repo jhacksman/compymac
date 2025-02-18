@@ -1,12 +1,13 @@
 import pytest
 import pytest_asyncio
 import asyncio
+import pytest
+import pytest_asyncio
 import websockets
 import json
 import os
 from .mock_websocket_server import MockWebSocketServer
-
-from browser_automation_server import BrowserAutomationServer
+from ..browser_automation_server import BrowserAutomationServer
 
 @pytest_asyncio.fixture
 async def server():
