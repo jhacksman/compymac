@@ -23,20 +23,7 @@ async def mock_venice_client():
         memory_id="test_id"
     ))
     
-    # Return test memory for task-based retrieval
-    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
-        action="retrieve_context",
-        success=True,
-        memories=[{
-            "id": "test_id",
-            "content": "important content",
-            "metadata": {
-                "timestamp": datetime.now().timestamp(),
-                "importance": 0.8,
-                "context_ids": []
-            }
-        }]
-    ))
+    client.retrieve_context = AsyncMock()
     return client
 
 
@@ -126,7 +113,8 @@ async def test_store_knowledge_chunks(persistent_memory):
 @pytest.mark.asyncio
 async def test_retrieve_knowledge_basic(persistent_memory, mock_venice_client):
     """Test basic knowledge retrieval."""
-    # Setup mock response
+    # Setup mock response for basic retrieval
+    mock_venice_client.retrieve_context.side_effect = None  # Clear any previous side effects
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
@@ -154,6 +142,7 @@ async def test_retrieve_knowledge_basic(persistent_memory, mock_venice_client):
 async def test_retrieve_knowledge_with_importance(persistent_memory, mock_venice_client):
     """Test knowledge retrieval with importance filter."""
     # Setup mock response
+    mock_venice_client.retrieve_context.side_effect = None  # Clear any previous side effects
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
@@ -163,7 +152,8 @@ async def test_retrieve_knowledge_with_importance(persistent_memory, mock_venice
                 "content": "important content",
                 "metadata": {
                     "timestamp": datetime.now().timestamp(),
-                    "importance": 0.8
+                    "importance": 0.8,
+                    "context_ids": []
                 }
             },
             {
@@ -171,7 +161,8 @@ async def test_retrieve_knowledge_with_importance(persistent_memory, mock_venice
                 "content": "less important content",
                 "metadata": {
                     "timestamp": datetime.now().timestamp(),
-                    "importance": 0.3
+                    "importance": 0.3,
+                    "context_ids": []
                 }
             }
         ]
