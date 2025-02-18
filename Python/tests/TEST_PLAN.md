@@ -13,10 +13,10 @@
   - [x] Task-specific context retrieval
   - [x] Importance-based filtering
 
-- [ ] Update Operation Tests
-  - [ ] Memory content updates
-  - [ ] Metadata updates
-  - [ ] Context window management
+- [x] Update Operation Tests
+  - [x] Memory content updates
+  - [x] Metadata updates
+  - [x] Context window management
 
 - [ ] Prune Operation Tests
   - [ ] Automatic memory pruning
