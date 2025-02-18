@@ -51,20 +51,20 @@ async def test_add_to_context(core_memory):
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
     # Add content
-    core_memory.add_to_context("test content", metadata)
+    await core_memory.add_to_context("test content", metadata)
     assert len(core_memory.current_context) == 1
     assert core_memory.current_context[0]["content"] == "test content"
     
     # Add more content
-    core_memory.add_to_context("more content", metadata)
+    await core_memory.add_to_context("more content", metadata)
     assert len(core_memory.current_context) == 2
     
     # Test context size limit
     for _ in range(2):
-        core_memory.add_to_context("content", metadata)
+        await core_memory.add_to_context("content", metadata)
         
     with pytest.raises(MemoryError):
-        core_memory.add_to_context("overflow", metadata)
+        await core_memory.add_to_context("overflow", metadata)
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_process_context(core_memory, mock_venice_client):
         await core_memory.process_context()
         
     # Add content and process
-    core_memory.add_to_context("test content", metadata)
+    await core_memory.add_to_context("test content", metadata)
     memories = await core_memory.process_context()
     
     assert isinstance(memories, list)
