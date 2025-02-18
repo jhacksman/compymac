@@ -1,10 +1,9 @@
 """Tests for librarian agent."""
 
 import pytest
-import pytest_asyncio
 import time
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from memory.librarian import LibrarianAgent
 from memory.message_types import MemoryMetadata, MemoryResponse
@@ -12,35 +11,34 @@ from memory.venice_client import VeniceClient
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory = AsyncMock(return_value=MemoryResponse(
+    client.store_memory.return_value = MemoryResponse(
         action="store_memory",
         success=True,
         memory_id="test_id"
-    ))
-    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
+    )
+    client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[]
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian agent fixture."""
     return LibrarianAgent(mock_venice_client)
 
 
-@pytest.mark.asyncio
-async def test_store_memory_basic(librarian):
+def test_store_memory_basic(librarian):
     """Test basic memory storage."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
-    memory_id = await librarian.store_memory(
+    memory_id = librarian.store_memory(
         "test content",
         metadata
     )
@@ -50,8 +48,7 @@ async def test_store_memory_basic(librarian):
     assert librarian.recent_memories[0]["content"] == "test content"
 
 
-@pytest.mark.asyncio
-async def test_store_memory_with_surprise(librarian):
+def test_store_memory_with_surprise(librarian):
     """Test memory storage with surprise-based filtering."""
     metadata = MemoryMetadata(
         timestamp=datetime.now().timestamp(),
@@ -59,7 +56,7 @@ async def test_store_memory_with_surprise(librarian):
     )
     
     # Store with high surprise score
-    memory_id = await librarian.store_memory(
+    memory_id = librarian.store_memory(
         "surprising content",
         metadata,
         surprise_score=0.8
@@ -69,8 +66,7 @@ async def test_store_memory_with_surprise(librarian):
     assert librarian.recent_memories[0]["metadata"].importance == 0.8
 
 
-@pytest.mark.asyncio
-async def test_retrieve_memories_basic(librarian, mock_venice_client):
+def test_retrieve_memories_basic(librarian, mock_venice_client):
     """Test basic memory retrieval."""
     # Setup mock response
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -87,14 +83,13 @@ async def test_retrieve_memories_basic(librarian, mock_venice_client):
     )
     
     # Retrieve memories
-    memories = await librarian.retrieve_memories("test query")
+    memories = librarian.retrieve_memories("test query")
     
     assert len(memories) == 1
     assert memories[0]["content"] == "test content"
 
 
-@pytest.mark.asyncio
-async def test_retrieve_memories_with_importance(librarian, mock_venice_client):
+def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     """Test memory retrieval with importance filtering."""
     # Setup mock response with varying importance
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -121,7 +116,7 @@ async def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     )
     
     # Retrieve with importance filter
-    memories = await librarian.retrieve_memories(
+    memories = librarian.retrieve_memories(
         "test query",
         min_importance=0.5
     )
@@ -130,8 +125,7 @@ async def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     assert memories[0]["content"] == "important content"
 
 
-@pytest.mark.asyncio
-async def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
+def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     """Test memory retrieval with time filtering."""
     now = time.time()
     old_time = now - 60*60*24*2  # 2 days ago
@@ -161,7 +155,7 @@ async def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     )
     
     # Retrieve with time range
-    memories = await librarian.retrieve_memories(
+    memories = librarian.retrieve_memories(
         "test query",
         time_range=timedelta(days=1)
     )
