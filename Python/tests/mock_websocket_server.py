@@ -39,9 +39,9 @@ class MockWebSocketServer:
                 sock.bind((self.host, self.port))
                 sock.listen()
                 
-                with ws_server.WebSocketServer(sock) as server:
-                    self.server = server
-                    server.serve_forever()
+                # Create WebSocket server
+                self.server = ws_server.WebSocketServer(sock)
+                self.server.serve(self.handle_connection)
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
@@ -53,6 +53,8 @@ class MockWebSocketServer:
     
     def stop(self):
         """Stop the WebSocket server."""
+        if hasattr(self, 'server'):
+            self.server.shutdown()
         if hasattr(self, 'server_thread'):
             self.server_thread.join(timeout=1.0)
     
