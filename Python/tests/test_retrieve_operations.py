@@ -10,11 +10,11 @@ from memory.librarian import LibrarianAgent
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
+    client.retrieve_context.return_value = MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[{
@@ -26,12 +26,12 @@ async def mock_venice_client():
                 "context_ids": []
             }
         }]
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian fixture."""
     return LibrarianAgent(mock_venice_client)
 
