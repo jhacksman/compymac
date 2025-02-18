@@ -1,82 +1,65 @@
 """Core memory module for immediate context processing.
 
 This module implements the short-term/working memory component that focuses on
-processing the current input using standard attention mechanisms.
+processing the current input using Venice.ai API with dynamic encoding and
+surprise-based filtering.
 """
 
-import torch
-import torch.nn as nn
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass
+from datetime import datetime
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
+from .venice_client import VeniceClient
+from .librarian import LibrarianAgent
 
 
 @dataclass
 class CoreMemoryConfig:
     """Configuration for core memory module."""
     context_size: int = 4096  # Venice.ai default
-    hidden_size: int = 768
-    num_attention_heads: int = 12
-    attention_dropout: float = 0.1
-    max_position_embeddings: int = 4096
+    window_size: int = 100  # Number of recent items to keep
+    surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
 
 
-class CoreMemory(nn.Module):
+class CoreMemory:
     """Core memory module for immediate context processing."""
     
-    def __init__(self, config: CoreMemoryConfig):
+    def __init__(
+        self,
+        config: CoreMemoryConfig,
+        venice_client: VeniceClient
+    ):
         """Initialize core memory module.
         
         Args:
             config: Configuration for the module
+            venice_client: Client for Venice.ai API
         """
-        super().__init__()
         self.config = config
-        
-        # Token embeddings for current context
-        self.token_embedding = nn.Embedding(
-            config.context_size,
-            config.hidden_size
-        )
-        
-        # Position embeddings
-        self.position_embedding = nn.Embedding(
-            config.max_position_embeddings,
-            config.hidden_size
-        )
-        
-        # Multi-head attention for processing current context
-        self.attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size,
-            num_heads=config.num_attention_heads,
-            dropout=config.attention_dropout,
-            batch_first=True
-        )
-        
-        # Layer normalization
-        self.layer_norm = nn.LayerNorm(config.hidden_size)
+        self.venice_client = venice_client
+        self.librarian = LibrarianAgent(venice_client)
         
         # Current context state
         self.current_context: List[Dict] = []
-        self.context_embeddings: Optional[torch.Tensor] = None
         
     def reset_context(self):
         """Reset the current context state."""
         self.current_context = []
-        self.context_embeddings = None
         
-    def add_to_context(
+    async def add_to_context(
         self,
         content: str,
-        metadata: MemoryMetadata
+        metadata: MemoryMetadata,
+        surprise_score: Optional[float] = None
     ) -> None:
-        """Add new content to current context.
+        """Add new content to current context with dynamic encoding.
         
         Args:
             content: Content to add
             metadata: Associated metadata
+            surprise_score: Optional score indicating content novelty
             
         Raises:
             MemoryError: If context size would exceed limit
@@ -87,14 +70,21 @@ class CoreMemory(nn.Module):
                 f"Context size limit ({self.config.context_size}) exceeded"
             )
             
+        # Apply surprise-based filtering
+        if surprise_score is not None and surprise_score > self.config.surprise_threshold:
+            # Store important memories via librarian
+            await self.librarian.store_memory(
+                content=content,
+                metadata=metadata,
+                surprise_score=surprise_score
+            )
+            
         # Add to context
         self.current_context.append({
             "content": content,
-            "metadata": metadata
+            "metadata": metadata,
+            "surprise_score": surprise_score
         })
-        
-        # Reset embeddings since context changed
-        self.context_embeddings = None
         
     def get_context_window(
         self,
@@ -109,21 +99,23 @@ class CoreMemory(nn.Module):
             List of context items up to window_size
         """
         if window_size is None:
-            return self.current_context
+            window_size = self.config.window_size
             
         return self.current_context[-window_size:]
         
-    def process_context(
+    async def process_context(
         self,
-        query: Optional[str] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Process current context through attention mechanism.
+        query: Optional[str] = None,
+        min_importance: Optional[float] = None
+    ) -> List[Dict]:
+        """Process current context through Venice.ai API with hybrid ranking.
         
         Args:
             query: Optional query to focus attention
+            min_importance: Minimum importance score filter
             
         Returns:
-            Tuple of (context_embeddings, attention_weights)
+            List of relevant context items
             
         Raises:
             MemoryError: If no context is available
@@ -131,42 +123,35 @@ class CoreMemory(nn.Module):
         if not self.current_context:
             raise MemoryError("No context available to process")
             
-        # Generate or get context embeddings
-        if self.context_embeddings is None:
-            # Convert context to token IDs (simplified for example)
-            token_ids = torch.arange(len(self.current_context))
-            
-            # Get token embeddings
-            self.context_embeddings = self.token_embedding(token_ids)
-            
-            # Add position embeddings
-            positions = torch.arange(len(self.current_context))
-            position_embeddings = self.position_embedding(positions)
-            self.context_embeddings = self.context_embeddings + position_embeddings
-            
-        # Process through attention
+        # Use librarian to process context with hybrid ranking
         if query is not None:
-            # Use query to generate attention mask (simplified)
-            query_embedding = self.token_embedding(
-                torch.tensor([0])  # Placeholder query token ID
-            )
-            context_output, attention_weights = self.attention(
-                query=query_embedding.unsqueeze(0),
-                key=self.context_embeddings.unsqueeze(0),
-                value=self.context_embeddings.unsqueeze(0)
-            )
-        else:
-            # Self-attention if no query
-            context_output, attention_weights = self.attention(
-                query=self.context_embeddings.unsqueeze(0),
-                key=self.context_embeddings.unsqueeze(0),
-                value=self.context_embeddings.unsqueeze(0)
+            memories = await self.librarian.retrieve_memories(
+                query=query,
+                limit=self.config.window_size,
+                min_importance=min_importance
             )
             
-        # Apply layer norm
-        context_output = self.layer_norm(context_output)
-        
-        return context_output.squeeze(0), attention_weights.squeeze(0)
+            # Combine with recent context
+            recent_context = self.current_context[-self.config.window_size:]
+            all_memories = []
+            seen_ids = set()
+            
+            # Add retrieved memories first
+            for memory in memories:
+                if memory["id"] not in seen_ids:
+                    all_memories.append(memory)
+                    seen_ids.add(memory["id"])
+                    
+            # Add recent context (deduplicated)
+            for context_item in recent_context:
+                if "id" in context_item and context_item["id"] not in seen_ids:
+                    all_memories.append(context_item)
+                    seen_ids.add(context_item["id"])
+                    
+            return all_memories
+            
+        # Return recent context if no query
+        return self.current_context[-self.config.window_size:]
         
     def summarize_context(self) -> str:
         """Generate a summary of current context.
@@ -180,10 +165,5 @@ class CoreMemory(nn.Module):
         if not self.current_context:
             raise MemoryError("No context available to summarize")
             
-        # Process context
-        context_output, _ = self.process_context()
-        
         # For now, just return the most recent content
-        # In practice, you would use the processed embeddings
-        # to generate a proper summary
         return self.current_context[-1]["content"]

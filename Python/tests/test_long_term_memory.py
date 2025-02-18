@@ -2,7 +2,6 @@
 
 import pytest
 import pytest_asyncio
-import torch
 import time
 from datetime import datetime, timedelta
 from unittest.mock import Mock, AsyncMock
@@ -10,6 +9,8 @@ from unittest.mock import Mock, AsyncMock
 from memory.long_term_memory import LongTermMemory, LongTermMemoryConfig
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
+from memory.exceptions import MemoryError
+
 
 @pytest_asyncio.fixture(scope="function")
 async def mock_venice_client():
@@ -20,12 +21,13 @@ async def mock_venice_client():
         success=True,
         memory_id="test_id"  # Fixed ID for tests
     ))
-    client.retrieve_context = AsyncMock(side_effect=lambda **kwargs: MemoryResponse(
+    client.retrieve_context = AsyncMock(return_value=MemoryResponse(
         action="retrieve_context",
         success=True,
         memories=[]  # No memories by default
     ))
     return client
+
 
 @pytest_asyncio.fixture(scope="function")
 async def long_term_memory(mock_venice_client):
@@ -33,15 +35,14 @@ async def long_term_memory(mock_venice_client):
     config = LongTermMemoryConfig(
         max_memories=5,  # Even smaller for tests
         summary_threshold=3,
-        context_window_size=2,
-        embedding_size=32  # Minimal size for tests
+        context_window_size=2
     )
     memory = LongTermMemory(config, mock_venice_client)
+    memory.venice_client = mock_venice_client  # Ensure venice_client is set
     yield memory
     # Cleanup
     memory.recent_context.clear()
-    del memory.memory_transform
-    torch.cuda.empty_cache()
+
 
 @pytest.mark.asyncio
 async def test_store_memory_basic(long_term_memory):
@@ -56,6 +57,7 @@ async def test_store_memory_basic(long_term_memory):
     assert memory_id == "test_id"
     assert len(long_term_memory.recent_context) == 1
     assert long_term_memory.recent_context[0]["content"] == "test content"
+
 
 @pytest.mark.asyncio
 async def test_store_memory_with_summarization(long_term_memory):
@@ -72,6 +74,7 @@ async def test_store_memory_with_summarization(long_term_memory):
     assert len(long_term_memory.recent_context) == 2  # Window size
     assert long_term_memory.recent_context[-1]["content"] == "content 2"
 
+
 @pytest.mark.asyncio
 async def test_retrieve_context_basic(long_term_memory):
     """Test basic context retrieval."""
@@ -85,6 +88,7 @@ async def test_retrieve_context_basic(long_term_memory):
     
     assert len(memories) == 1
     assert memories[0]["content"] == content
+
 
 @pytest.mark.asyncio
 async def test_retrieve_context_with_time_range(long_term_memory):
@@ -110,6 +114,7 @@ async def test_retrieve_context_with_time_range(long_term_memory):
     assert len(memories) == 1
     assert memories[0]["content"] == new_content
 
+
 @pytest.mark.asyncio
 async def test_importance_calculation(long_term_memory):
     """Test memory importance scoring."""
@@ -126,6 +131,7 @@ async def test_importance_calculation(long_term_memory):
     assert len(long_term_memory.recent_context) > 0
     stored_memory = long_term_memory.recent_context[-1]
     assert stored_memory["content"] == content
+
 
 @pytest.mark.asyncio
 async def test_retrieve_context_with_limit(long_term_memory):

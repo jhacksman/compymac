@@ -1,12 +1,11 @@
 """Long-term memory management for CompyMac.
 
-This module implements neural memory mechanism for storing information beyond
-context window, with support for periodic summarization and sliding context.
+This module implements memory management for storing information beyond
+context window using Venice.ai API with dynamic encoding and surprise-based
+filtering through the librarian agent.
 """
 
-import torch
-import torch.nn as nn
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 import time
 from datetime import datetime, timedelta
@@ -14,6 +13,7 @@ from datetime import datetime, timedelta
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
 from .venice_client import VeniceClient
+from .librarian import LibrarianAgent
 
 # Type alias for memory entries
 Memory = Dict[str, any]
@@ -24,11 +24,10 @@ class LongTermMemoryConfig:
     max_memories: int = 1000
     summary_threshold: int = 100  # Messages before summarization
     context_window_size: int = 10  # Recent messages to keep in full
-    embedding_size: int = 768
-    memory_dropout: float = 0.1
+    surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
 
 
-class LongTermMemory(nn.Module):
+class LongTermMemory:
     """Long-term memory module for storing historical information."""
     
     def __init__(
@@ -42,23 +41,10 @@ class LongTermMemory(nn.Module):
             config: Configuration for the module
             venice_client: Client for Venice.ai API
         """
-        super().__init__()
         self.config = config
-        self.venice_client = venice_client
+        self.librarian = LibrarianAgent(venice_client)
         
-        # Memory storage
-        self.recent_context: List[Dict] = []
-        
-        # Neural components (using smaller dimensions to reduce memory)
-        hidden_size = config.embedding_size // 4  # Reduce dimension
-        self.memory_transform = nn.Sequential(
-            nn.Linear(config.embedding_size, hidden_size),
-            nn.ReLU(),
-            nn.Dropout(config.memory_dropout),
-            nn.Linear(hidden_size, config.embedding_size)
-        )
-        
-        # Context window
+        # Recent context
         self.recent_context: List[Dict] = []
         
     async def store_memory(
@@ -230,5 +216,9 @@ class LongTermMemory(nn.Module):
         # Update recent context first to prevent recursion
         self.recent_context = self.recent_context[-self.config.context_window_size:]
         
-        # Store summary after updating context
-        await self.venice_client.store_memory(summary_content, summary_metadata)
+        # Store summary via librarian
+        await self.librarian.store_memory(
+            content=summary_content,
+            metadata=summary_metadata,
+            surprise_score=1.0  # High surprise score for summaries
+        )
