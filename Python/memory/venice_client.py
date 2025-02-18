@@ -113,19 +113,19 @@ class VeniceClient:
             "Access-Control-Request-Headers": "content-type, authorization"
         }
         
-    def _handle_rate_limit(self, retry_count: int) -> None:
+    async def _handle_rate_limit(self, retry_count: int) -> None:
         """Handle rate limiting with exponential backoff."""
         if retry_count >= self.max_retries:
             raise VeniceAPIError("Max retries exceeded due to rate limiting")
             
         delay = min(self.retry_delay * (2 ** retry_count), self.max_delay)
         print(f"Rate limited. Retrying in {delay} seconds...")  # Debug log
-        time.sleep(delay)
+        await asyncio.sleep(delay)
 
     async def _stream_chunks(self, response: aiohttp.ClientResponse, retry_count: int = 0) -> AsyncGenerator[str, None]:
         """Stream chunks from response."""
         if response.status == 429:  # Rate limit exceeded
-            self._handle_rate_limit(retry_count)
+            await self._handle_rate_limit(retry_count)
             return
             
         buffer = ""
@@ -364,7 +364,7 @@ class VeniceClient:
                     )
                     
                 memories = []
-                for chunk in self._stream_chunks(response):
+                async for chunk in self._stream_chunks(response):
                     try:
                         data = json.loads(chunk)
                         if "memories" in data:
