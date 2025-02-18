@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from typing import Dict, List, Optional
 
-from ...agents.manager import AgentManager
+from ...agents.manager import ManagerAgent
 from ...agents.executor import ExecutorAgent
 from ...agents.planner import PlannerAgent
 from ...agents.reflector import ReflectorAgent
@@ -19,7 +19,7 @@ def agent_manager(memory_manager, mock_llm):
     executor = ExecutorAgent(memory_manager=memory_manager, llm=mock_llm)
     planner = PlannerAgent(memory_manager=memory_manager, llm=mock_llm)
     reflector = ReflectorAgent(memory_manager=memory_manager, llm=mock_llm)
-    return AgentManager(
+    return ManagerAgent(
         memory_manager=memory_manager,
         executor=executor,
         planner=planner,
