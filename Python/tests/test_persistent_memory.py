@@ -184,6 +184,23 @@ async def test_retrieve_knowledge_with_task(persistent_memory, mock_venice_clien
     task_id = 123
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
+    # Setup mock response for task-based retrieval
+    mock_venice_client.retrieve_context.side_effect = None  # Clear any previous side effects
+    mock_venice_client.retrieve_context.return_value = MemoryResponse(
+        action="retrieve_context",
+        success=True,
+        memories=[{
+            "id": "test_id",
+            "content": "task-specific content",
+            "metadata": {
+                "timestamp": datetime.now().timestamp(),
+                "importance": 0.8,
+                "context_ids": [f"task_{task_id}"],
+                "task_id": task_id
+            }
+        }]
+    )
+    
     # Store with task context
     await persistent_memory.store_knowledge(
         "task-specific content",
