@@ -8,6 +8,7 @@ surprise-based filtering.
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 from datetime import datetime
+import math
 
 import torch
 import torch.nn as nn
@@ -91,8 +92,45 @@ class CoreMemory(nn.Module):
                 f"Context size limit ({self.config.context_size}) exceeded"
             )
             
+        # Encode content
+        inputs = self.tokenizer(
+            content,
+            padding=True,
+            truncation=True,
+            max_length=self.config.context_size,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # Get content embeddings
+        with torch.no_grad():
+            outputs = self.transformer(**inputs)
+            embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
+            
+        # Compute surprise score if not provided
+        if surprise_score is None:
+            # Project query and memory
+            query = self.query_proj(embeddings)
+            keys = self.key_proj(torch.stack([
+                self.transformer(**self.tokenizer(
+                    item["content"],
+                    padding=True,
+                    truncation=True,
+                    max_length=self.config.context_size,
+                    return_tensors="pt"
+                ).to(self.device)).last_hidden_state[:, 0, :]
+                for item in self.current_context[-self.config.window_size:]
+            ]) if self.current_context else torch.empty(0, self.config.hidden_size).to(self.device))
+            
+            if keys.size(0) > 0:
+                attention_scores = torch.matmul(query, keys.transpose(-2, -1))
+                attention_scores = attention_scores / math.sqrt(self.config.hidden_size)
+                max_attention = torch.max(attention_scores).item()
+                surprise_score = 1.0 - max_attention
+            else:
+                surprise_score = 1.0  # First item is surprising
+            
         # Apply surprise-based filtering
-        if surprise_score is not None and surprise_score > self.config.surprise_threshold:
+        if surprise_score > self.config.surprise_threshold:
             # Store important memories via librarian
             self.librarian.store_memory(
                 content=content,
@@ -100,11 +138,12 @@ class CoreMemory(nn.Module):
                 surprise_score=surprise_score
             )
             
-        # Add to context
+        # Add to context with embeddings
         self.current_context.append({
             "content": content,
             "metadata": metadata,
-            "surprise_score": surprise_score
+            "surprise_score": surprise_score,
+            "embeddings": embeddings
         })
         
     def get_context_window(
