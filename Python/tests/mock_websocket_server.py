@@ -29,19 +29,16 @@ class MockWebSocketServer:
         """Start the WebSocket server."""
         import threading
         import websockets.sync.server as ws_server
-        import socket
         
         def run_server():
             try:
-                # Create socket with SO_REUSEADDR
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind((self.host, self.port))
-                sock.listen()
-                
                 # Create WebSocket server
-                self.server = ws_server.WebSocketServer(sock)
-                self.server.serve(self.handle_connection)
+                self.server = ws_server.serve(
+                    self.handle_connection,
+                    self.host,
+                    self.port
+                )
+                self.server.serve_forever()
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
@@ -49,7 +46,7 @@ class MockWebSocketServer:
         self.server_thread.start()
         # Give server time to start
         import time
-        time.sleep(1)
+        time.sleep(2)  # Increased wait time for server startup
     
     def stop(self):
         """Stop the WebSocket server."""

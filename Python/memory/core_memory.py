@@ -26,7 +26,7 @@ class CoreMemoryConfig:
     context_size: int = 4096  # Transformer context window
     window_size: int = 100  # Number of recent items to keep
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
-    model_name: str = "sentence-transformers/all-mpnet-base-v2"  # Base transformer model
+    model_name: str = "facebook/bart-base"  # Base transformer model
     hidden_size: int = 768  # Hidden size for transformer
     num_attention_heads: int = 12  # Number of attention heads
 
@@ -227,7 +227,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = item.get("metadata", {}).get("importance", 0.0)
+                importance = item["metadata"].importance if hasattr(item["metadata"], "importance") else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
