@@ -48,7 +48,7 @@ class CoreMemory:
         """Reset the current context state."""
         self.current_context = []
         
-    async def add_to_context(
+    def add_to_context(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -73,7 +73,7 @@ class CoreMemory:
         # Apply surprise-based filtering
         if surprise_score is not None and surprise_score > self.config.surprise_threshold:
             # Store important memories via librarian
-            await self.librarian.store_memory(
+            self.librarian.store_memory(
                 content=content,
                 metadata=metadata,
                 surprise_score=surprise_score
@@ -103,7 +103,7 @@ class CoreMemory:
             
         return self.current_context[-window_size:]
         
-    async def process_context(
+    def process_context(
         self,
         query: Optional[str] = None,
         min_importance: Optional[float] = None
@@ -125,7 +125,7 @@ class CoreMemory:
             
         # Use librarian to process context with hybrid ranking
         if query is not None:
-            memories = await self.librarian.retrieve_memories(
+            memories = self.librarian.retrieve_memories(
                 query=query,
                 limit=self.config.window_size,
                 min_importance=min_importance
@@ -154,7 +154,7 @@ class CoreMemory:
         return self.current_context[-self.config.window_size:]
         
     def summarize_context(self) -> str:
-        """Generate a summary of current context.
+        """Generate a summary of current context using streaming responses.
         
         Returns:
             Summary string of current context
@@ -165,5 +165,26 @@ class CoreMemory:
         if not self.current_context:
             raise MemoryError("No context available to summarize")
             
-        # For now, just return the most recent content
-        return self.current_context[-1]["content"]
+        try:
+            # Combine context into single string
+            context_str = "\n".join(
+                entry["content"] for entry in self.current_context
+            )
+            
+            # Stream through Venice.ai for summarization
+            summary = ""
+            for chunk in self.venice_client.stream_memory(
+                content=context_str,
+                metadata=MemoryMetadata(
+                    timestamp=datetime.now().timestamp(),
+                    importance=1.0,  # High importance for summaries
+                    tags=["summary"],
+                    source="summarization"
+                )
+            ):
+                summary += chunk
+                
+            return summary
+            
+        except Exception as e:
+            raise MemoryError(f"Failed to summarize context: {str(e)}")
