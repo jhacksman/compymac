@@ -241,7 +241,7 @@ class VeniceClient:
                         # Retry with incremented count
                         async for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
                             yield chunk
-                    return
+                        return
                     
                     if response.status != 200:
                         error_text = await response.text()
