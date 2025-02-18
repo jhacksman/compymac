@@ -123,7 +123,7 @@ class VeniceClient:
 
     async def _stream_chunks(self, response: aiohttp.ClientResponse, retry_count: int = 0) -> Generator[str, None, None]:
         """Stream chunks from response."""
-        if response.status_code == 429:  # Rate limit exceeded
+        if response.status == 429:  # Rate limit exceeded
             self._handle_rate_limit(retry_count)
             return
             
@@ -178,7 +178,7 @@ class VeniceClient:
                     raise VeniceAPIError(f"Failed to decode chunk: {str(e)}")
             time.sleep(0.01)  # Small delay to prevent CPU spinning
             
-    def stream_memory(
+    async def stream_memory(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -232,10 +232,10 @@ class VeniceClient:
                     headers=self.headers,
                     timeout=timeout
                 ) as response:
-                print(f"Response status: {response.status_code}")  # Debug log
-                print(f"Response headers: {response.headers}")  # Debug log
-                
-                if response.status_code == 429 and retry_count < self.max_retries:
+                    print(f"Response status: {response.status}")  # Debug log
+                    print(f"Response headers: {response.headers}")  # Debug log
+                    
+                    if response.status == 429 and retry_count < self.max_retries:
                     self._handle_rate_limit(retry_count)
                     # Retry with incremented count
                     for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
@@ -344,10 +344,10 @@ class VeniceClient:
                     headers=self.headers,
                     timeout=timeout
                 ) as response:
-                if response.status_code == 429 and retry_count < self.max_retries:
-                    self._handle_rate_limit(retry_count)
-                    # Retry with incremented count
-                    return self.retrieve_context(
+                    if response.status == 429 and retry_count < self.max_retries:
+                        self._handle_rate_limit(retry_count)
+                        # Retry with incremented count
+                        return await self.retrieve_context(
                         query,
                         context_id,
                         time_range,
