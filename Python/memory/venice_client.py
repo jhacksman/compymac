@@ -292,7 +292,8 @@ class VeniceClient:
         context_id: Optional[str] = None,
         time_range: Optional[float] = None,
         limit: Optional[int] = None,
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        retry_count: int = 0
     ) -> MemoryResponse:
         """Retrieve memories from Venice.ai."""
         try:
@@ -315,6 +316,17 @@ class VeniceClient:
                 timeout=timeout,
                 stream=True
             ) as response:
+                if response.status_code == 429 and retry_count < self.max_retries:
+                    self._handle_rate_limit(retry_count)
+                    # Retry with incremented count
+                    return self.retrieve_context(
+                        query,
+                        context_id,
+                        time_range,
+                        limit,
+                        timeout,
+                        retry_count + 1
+                    )
                 if response.status_code != 200:
                     error_text = response.text
                     print(f"Error response body: {error_text}")  # Debug log
@@ -348,7 +360,8 @@ class VeniceClient:
         memory_id: str,
         content: Optional[str] = None,
         metadata: Optional[MemoryMetadata] = None,
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        retry_count: int = 0
     ) -> MemoryResponse:
         """Update memory in Venice.ai."""
         try:
@@ -364,6 +377,16 @@ class VeniceClient:
                 timeout=timeout,
                 stream=True
             ) as response:
+                if response.status_code == 429 and retry_count < self.max_retries:
+                    self._handle_rate_limit(retry_count)
+                    # Retry with incremented count
+                    return self.update_memory(
+                        memory_id,
+                        content,
+                        metadata,
+                        timeout,
+                        retry_count + 1
+                    )
                 if response.status_code != 200:
                     error_text = response.text
                     print(f"Error response body: {error_text}")  # Debug log
