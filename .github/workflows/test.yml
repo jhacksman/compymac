@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main, master ]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   test:
@@ -12,6 +12,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -28,7 +30,7 @@ jobs:
     - name: Run tests
       run: |
         cd Python
-        python -m pytest tests/ -v
+        PYTHONPATH=. python -m pytest tests/ -v
         
     - name: Build Swift app
       run: |
