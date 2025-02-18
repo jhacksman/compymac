@@ -1,7 +1,8 @@
 """Long-term memory management for CompyMac.
 
 This module implements memory management for storing information beyond
-context window using Venice.ai API.
+context window using Venice.ai API with dynamic encoding and surprise-based
+filtering through the librarian agent.
 """
 
 from typing import Dict, List, Optional
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
 from .venice_client import VeniceClient
+from .librarian import LibrarianAgent
 
 # Type alias for memory entries
 Memory = Dict[str, any]
@@ -22,6 +24,7 @@ class LongTermMemoryConfig:
     max_memories: int = 1000
     summary_threshold: int = 100  # Messages before summarization
     context_window_size: int = 10  # Recent messages to keep in full
+    surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
 
 
 class LongTermMemory:
@@ -39,7 +42,7 @@ class LongTermMemory:
             venice_client: Client for Venice.ai API
         """
         self.config = config
-        self.venice_client = venice_client
+        self.librarian = LibrarianAgent(venice_client)
         
         # Recent context
         self.recent_context: List[Dict] = []
@@ -213,5 +216,9 @@ class LongTermMemory:
         # Update recent context first to prevent recursion
         self.recent_context = self.recent_context[-self.config.context_window_size:]
         
-        # Store summary after updating context
-        await self.venice_client.store_memory(summary_content, summary_metadata)
+        # Store summary via librarian
+        await self.librarian.store_memory(
+            content=summary_content,
+            metadata=summary_metadata,
+            surprise_score=1.0  # High surprise score for summaries
+        )
