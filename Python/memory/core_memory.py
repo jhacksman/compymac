@@ -111,7 +111,10 @@ class CoreMemory(nn.Module):
         
         # Get content embeddings
         with torch.no_grad():
-            outputs = self.transformer(**inputs)
+            outputs = self.encoder(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"]
+            )
             embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
             
         # Compute surprise score if not provided
@@ -139,7 +142,7 @@ class CoreMemory(nn.Module):
                     context_items = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token for all sequences
                     keys = self.key_proj(context_items)
             else:
-                keys = torch.empty(0, self.config.hidden_size).to(self.device)
+                keys = torch.zeros((0, self.config.hidden_size), device=self.device)
             
             if keys.size(0) > 0:
                 attention_scores = torch.matmul(query, keys.transpose(-2, -1))
@@ -161,9 +164,9 @@ class CoreMemory(nn.Module):
         # Add to context with embeddings
         self.current_context.append({
             "content": content,
-            "metadata": metadata,
-            "surprise_score": surprise_score,
-            "embeddings": embeddings
+            "metadata": metadata if isinstance(metadata, dict) else {},
+            "surprise_score": float(surprise_score) if surprise_score is not None else 1.0,
+            "embeddings": embeddings.detach().cpu()
         })
         
     def get_context_window(
@@ -208,7 +211,7 @@ class CoreMemory(nn.Module):
         
         # Encode context items
         context_texts = [item["content"] for item in recent_context]
-        context_encodings = self.tokenizer(
+        context_encodings = self.encoder_tokenizer(
             context_texts,
             padding=True,
             truncation=True,
@@ -218,7 +221,10 @@ class CoreMemory(nn.Module):
         
         # Get context embeddings
         with torch.no_grad():
-            context_outputs = self.transformer(**context_encodings)
+            context_outputs = self.encoder(
+                input_ids=context_encodings["input_ids"],
+                attention_mask=context_encodings["attention_mask"]
+            )
             context_embeddings = context_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
         
         if query is not None:
