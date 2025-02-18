@@ -18,10 +18,10 @@
   - [x] Metadata updates
   - [x] Context window management
 
-- [ ] Prune Operation Tests
-  - [ ] Automatic memory pruning
-  - [ ] Context window size limits
-  - [ ] Memory consolidation
+- [x] Prune Operation Tests
+  - [x] Automatic memory pruning
+  - [x] Context window size limits
+  - [x] Memory consolidation
 
 ## 2. End-to-End Workflow Tests
 - [ ] Deep Research Session Tests
