@@ -61,10 +61,10 @@
   - [x] Reconnection strategies
   - [x] Data consistency checks
 
-- [ ] Memory Corruption Tests
-  - [ ] Invalid metadata handling
-  - [ ] Corrupted content recovery
-  - [ ] Index rebuilding
+- [x] Memory Corruption Tests
+  - [x] Invalid metadata handling
+  - [x] Corrupted content recovery
+  - [x] Index rebuilding
 
 ## 5. Integration Tests
 - [ ] Venice.ai API Integration
