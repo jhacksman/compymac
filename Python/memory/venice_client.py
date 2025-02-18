@@ -31,7 +31,7 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.delete(
-                    f"{self.base_url}/api/v1/memories/{memory_id}",
+                    f"{self.base_url}/memories/{memory_id}",
                     headers=self.headers
                 ) as response:
                     await response.read()
@@ -228,7 +228,7 @@ class VeniceClient:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/chat/completions",
+                    f"{self.base_url}/memories",
                     json=request_data,
                     headers=self.headers,
                     timeout=timeout
@@ -340,7 +340,7 @@ class VeniceClient:
                 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/memories/search",
+                    f"{self.base_url}/memories/retrieve",
                     json=params,
                     headers=self.headers,
                     timeout=timeout
@@ -396,7 +396,7 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.patch(
-                    f"{self.base_url}/memories/{memory_id}",
+                    f"{self.base_url}/memories/update/{memory_id}",
                     json={
                         "model": self.model,
                         "content": content,
