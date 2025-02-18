@@ -12,7 +12,12 @@ import math
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer, AutoConfig
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    AutoModelForConditionalGeneration,
+    AutoConfig
+)
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
@@ -26,9 +31,10 @@ class CoreMemoryConfig:
     context_size: int = 4096  # Transformer context window
     window_size: int = 100  # Number of recent items to keep
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
-    model_name: str = "facebook/bart-large-cnn"  # Base transformer model for summarization
-    hidden_size: int = 1024  # Hidden size for transformer
-    num_attention_heads: int = 16  # Number of attention heads
+    encoder_model: str = "sentence-transformers/all-mpnet-base-v2"  # Model for encoding
+    generator_model: str = "facebook/bart-large-cnn"  # Model for generation
+    hidden_size: int = 768  # Hidden size for transformer
+    num_attention_heads: int = 12  # Number of attention heads
 
 
 class CoreMemory(nn.Module):
@@ -51,8 +57,10 @@ class CoreMemory(nn.Module):
         self.librarian = LibrarianAgent(venice_client)
         
         # Initialize transformer components
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-        self.transformer = AutoModel.from_pretrained(config.model_name)
+        self.encoder_tokenizer = AutoTokenizer.from_pretrained(config.encoder_model)
+        self.encoder = AutoModel.from_pretrained(config.encoder_model)
+        self.generator_tokenizer = AutoTokenizer.from_pretrained(config.generator_model)
+        self.generator = AutoModelForConditionalGeneration.from_pretrained(config.generator_model)
         
         # Attention components
         self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)
@@ -203,7 +211,7 @@ class CoreMemory(nn.Module):
         
         if query is not None:
             # Encode query
-            query_encoding = self.tokenizer(
+            query_encoding = self.encoder_tokenizer(
                 query,
                 padding=True,
                 truncation=True,
@@ -213,7 +221,7 @@ class CoreMemory(nn.Module):
             
             # Get query embedding
             with torch.no_grad():
-                query_outputs = self.transformer(**query_encoding)
+                query_outputs = self.encoder(**query_encoding)
                 query_embedding = query_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
             
             # Compute attention scores
@@ -255,7 +263,7 @@ class CoreMemory(nn.Module):
             )
             
             # Encode context
-            context_encoding = self.tokenizer(
+            context_encoding = self.generator_tokenizer(
                 context_str,
                 padding=True,
                 truncation=True,
@@ -263,9 +271,9 @@ class CoreMemory(nn.Module):
                 return_tensors="pt"
             ).to(self.device)
             
-            # Generate summary using transformer
+            # Generate summary using generator model
             with torch.no_grad():
-                outputs = self.transformer.generate(
+                outputs = self.generator.generate(
                     **context_encoding,
                     max_length=200,
                     num_beams=4,
@@ -273,7 +281,7 @@ class CoreMemory(nn.Module):
                     early_stopping=True
                 )
                 
-            summary = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            summary = self.generator_tokenizer.decode(outputs[0], skip_special_tokens=True)
             return summary
             
         except Exception as e:

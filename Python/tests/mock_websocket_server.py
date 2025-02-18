@@ -33,13 +33,14 @@ class MockWebSocketServer:
         def run_server():
             try:
                 # Create WebSocket server
-                with ws_server.serve(
+                self.server = ws_server.serve(
                     self.handle_connection,
                     self.host,
-                    self.port
-                ) as server:
-                    self.server = server
-                    server.serve_forever()
+                    self.port,
+                    ping_interval=None,  # Disable ping/pong
+                    ping_timeout=None
+                )
+                self.server.serve_forever()
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
@@ -47,7 +48,7 @@ class MockWebSocketServer:
         self.server_thread.start()
         # Give server time to start
         import time
-        time.sleep(2)  # Increased wait time for server startup
+        time.sleep(3)  # Increased wait time for server startup
     
     def stop(self):
         """Stop the WebSocket server."""
