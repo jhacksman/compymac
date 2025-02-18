@@ -117,18 +117,29 @@ class LibrarianAgent:
             if time_range:
                 now = datetime.now().timestamp()
                 cutoff = now - time_range.total_seconds()
-                memories = [
-                    memory for memory in memories
-                    if memory.get("metadata", {}).get("timestamp", 0) >= cutoff
-                ]
+                filtered_memories = []
+                for memory in memories:
+                    metadata = memory.get("metadata")
+                    if isinstance(metadata, dict):
+                        if metadata.get("timestamp", 0) >= cutoff:
+                            filtered_memories.append(memory)
+                    elif hasattr(metadata, "timestamp"):
+                        if metadata.timestamp >= cutoff:
+                            filtered_memories.append(memory)
+                memories = filtered_memories
                 
             # Filter by context ID if specified
             if context_id:
-                memories = [
-                    memory for memory in memories
-                    if (isinstance(memory.get("metadata"), dict) and 
-                        context_id in memory.get("metadata", {}).get("context_ids", []))
-                ]
+                filtered_memories = []
+                for memory in memories:
+                    metadata = memory.get("metadata")
+                    if isinstance(metadata, dict):
+                        if context_id in metadata.get("context_ids", []):
+                            filtered_memories.append(memory)
+                    elif hasattr(metadata, "context_ids"):
+                        if context_id in metadata.context_ids:
+                            filtered_memories.append(memory)
+                memories = filtered_memories
                 
             # Filter by importance if specified
             if min_importance is not None:
