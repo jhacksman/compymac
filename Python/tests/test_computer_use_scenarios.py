@@ -14,16 +14,31 @@ from memory.exceptions import MemoryError
 def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory.return_value = MemoryResponse(
-        action="store_memory",
-        success=True,
-        memory_id="test_id"
-    )
-    client.retrieve_context.return_value = MemoryResponse(
-        action="retrieve_context",
-        success=True,
-        memories=[]
-    )
+    
+    async def mock_store_memory(*args, **kwargs):
+        return MemoryResponse(
+            action="store_memory",
+            success=True,
+            memory_id="test_id"
+        )
+    
+    async def mock_retrieve_context(*args, **kwargs):
+        return MemoryResponse(
+            action="retrieve_context",
+            success=True,
+            memories=[{
+                "id": "test_id",
+                "content": args[0] if args else "test content",
+                "metadata": {
+                    "timestamp": kwargs.get("timestamp", datetime.now().timestamp()),
+                    "tags": kwargs.get("tags", []),
+                    "context_ids": kwargs.get("context_ids", [])
+                }
+            }]
+        )
+    
+    client.store_memory = mock_store_memory
+    client.retrieve_context = mock_retrieve_context
     return client
 
 
