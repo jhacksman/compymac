@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, AsyncMock
 from typing import Dict
 
 from ..agents.protocols import AgentRole, AgentMessage, TaskResult
-from ..agents.manager import AgentManager
+from ..agents.manager import ManagerAgent
 from ..memory import MemoryManager
 from .test_agents.conftest import MockLLM
 

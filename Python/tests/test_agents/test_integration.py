@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from typing import Dict, List, Optional
 
-from ...agents.manager import AgentManager
+from ...agents.manager import ManagerAgent
 from ...agents.executor import ExecutorAgent
 from ...agents.planner import PlannerAgent
 from ...agents.reflector import ReflectorAgent
