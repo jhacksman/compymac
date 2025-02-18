@@ -33,7 +33,8 @@ def librarian(mock_venice_client):
     return LibrarianAgent(mock_venice_client)
 
 
-def test_browser_automation_memory_integration(librarian):
+@pytest.mark.asyncio
+async def test_browser_automation_memory_integration(librarian):
     """Test browser automation memory integration."""
     # Simulate browser navigation sequence
     browser_metadata = MemoryMetadata(
@@ -51,13 +52,13 @@ def test_browser_automation_memory_integration(librarian):
     
     # Store browser actions
     for action in browser_actions:
-        librarian.store_memory(
+        await librarian.store_memory(
             action,
             browser_metadata
         )
     
     # Verify browser session retrieval
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "browser navigation",
         context_id="browser_session"
     )
@@ -66,7 +67,8 @@ def test_browser_automation_memory_integration(librarian):
     assert all("browser" in m["metadata"]["tags"] for m in memories)
 
 
-def test_finder_operation_memory_tracking(librarian):
+@pytest.mark.asyncio
+async def test_finder_operation_memory_tracking(librarian):
     """Test Finder operation memory tracking."""
     # Simulate Finder operations
     finder_metadata = MemoryMetadata(
@@ -84,13 +86,13 @@ def test_finder_operation_memory_tracking(librarian):
     
     # Store Finder operations
     for operation in finder_operations:
-        librarian.store_memory(
+        await librarian.store_memory(
             operation,
             finder_metadata
         )
     
     # Verify Finder operation retrieval
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "file operations",
         context_id="finder_session"
     )
@@ -99,7 +101,8 @@ def test_finder_operation_memory_tracking(librarian):
     assert all("finder" in m["metadata"]["tags"] for m in memories)
 
 
-def test_terminal_command_memory_logging(librarian):
+@pytest.mark.asyncio
+async def test_terminal_command_memory_logging(librarian):
     """Test terminal command memory logging."""
     # Simulate terminal command sequence
     terminal_metadata = MemoryMetadata(
@@ -117,13 +120,13 @@ def test_terminal_command_memory_logging(librarian):
     
     # Store terminal commands
     for command in terminal_commands:
-        librarian.store_memory(
+        await librarian.store_memory(
             command,
             terminal_metadata
         )
     
     # Verify terminal command retrieval
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "terminal commands",
         context_id="terminal_session"
     )
@@ -132,7 +135,8 @@ def test_terminal_command_memory_logging(librarian):
     assert all("terminal" in m["metadata"]["tags"] for m in memories)
 
 
-def test_cross_application_context(librarian):
+@pytest.mark.asyncio
+async def test_cross_application_context(librarian):
     """Test context preservation across different applications."""
     project_id = "project_xyz"
     
@@ -148,7 +152,7 @@ def test_cross_application_context(librarian):
     
     # Store cross-application actions
     for app_type, action in actions:
-        librarian.store_memory(
+        await librarian.store_memory(
             action,
             MemoryMetadata(
                 timestamp=datetime.now().timestamp(),
@@ -158,7 +162,7 @@ def test_cross_application_context(librarian):
         )
     
     # Verify cross-application context
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "project setup",
         context_id=project_id
     )
@@ -168,7 +172,8 @@ def test_cross_application_context(librarian):
     assert len(unique_apps) == 3  # browser, finder, terminal
 
 
-def test_application_state_tracking(librarian):
+@pytest.mark.asyncio
+async def test_application_state_tracking(librarian):
     """Test application state memory tracking."""
     # Simulate application state changes
     state_metadata = MemoryMetadata(
@@ -186,13 +191,13 @@ def test_application_state_tracking(librarian):
     
     # Store state changes
     for change in state_changes:
-        librarian.store_memory(
+        await librarian.store_memory(
             change,
             state_metadata
         )
     
     # Verify state tracking
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "application states",
         context_id="app_state"
     )
