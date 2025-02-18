@@ -275,10 +275,10 @@ class BrowserAutomationServer:
             
             try:
                 if not self.page:
-                    await self._setup_browser()
+                    self._setup_browser()
                 
-                await self.page.goto(url)
-                title = await self.page.title()
+                self.page.goto(url)
+                title = self.page.title()
                 
                 return {
                     "action": "openBrowser",
@@ -499,7 +499,7 @@ class BrowserAutomationServer:
                             "status": "error",
                             "message": str(e)
                         }
-                success = await self.desktop.create_folder(path)
+                success = self.desktop.create_folder(path)
                 return {
                     "action": action,
                     "status": "success" if success else "error",
@@ -515,7 +515,7 @@ class BrowserAutomationServer:
                         "status": "error",
                         "message": "Source and destination paths required"
                     }
-                success = await self.desktop.move_items(source_paths, destination_path)
+                success = self.desktop.move_items(source_paths, destination_path)
                 return {
                     "action": action,
                     "status": "success" if success else "error",
@@ -524,7 +524,7 @@ class BrowserAutomationServer:
                 
             elif action == "desktop_get_selected":
                 try:
-                    items = await self.desktop.get_selected_items()
+                    items = self.desktop.get_selected_items()
                     return {
                         "action": action,
                         "status": "success",
