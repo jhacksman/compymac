@@ -13,6 +13,7 @@ class MemoryMetadata:
     context_ids: List[str] = None
     tags: List[str] = None
     source: Optional[str] = None
+    task_id: Optional[int] = None  # Added for task-based filtering
     
     def __post_init__(self):
         """Initialize default values."""

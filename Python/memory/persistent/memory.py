@@ -60,6 +60,7 @@ class PersistentMemory:
             # Add task context
             if task_id is not None:
                 metadata.context_ids = [f"task_{task_id}"]
+                metadata.task_id = task_id  # Add task_id directly to metadata
                 
             # Store via librarian with surprise-based filtering
             memory_id = await self.librarian.store_memory(
@@ -117,10 +118,18 @@ class PersistentMemory:
             # Get knowledge via librarian with hybrid ranking
             memories = await self.librarian.retrieve_memories(
                 query=query,
-                context_id=str(task_id) if task_id is not None else None,
+                context_id=f"task_{task_id}" if task_id is not None else None,
                 limit=limit,
                 min_importance=min_importance
             )
+            
+            # Filter by task ID if specified
+            if task_id is not None:
+                memories = [
+                    memory for memory in memories
+                    if memory.get("task_id") == task_id or 
+                    f"task_{task_id}" in memory.get("metadata", {}).get("context_ids", [])
+                ]
             
             return memories
             
