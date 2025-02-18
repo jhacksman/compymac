@@ -20,7 +20,7 @@ from .executor import ExecutorAgent
 from .reflector import ReflectorAgent
 
 class AgentManager:
-    """Manager agent for orchestrating the system."""
+    """Agent manager for orchestrating the system."""
     
     def __init__(self,
                  memory_manager: Optional[MemoryManager] = None,
