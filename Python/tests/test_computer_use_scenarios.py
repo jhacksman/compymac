@@ -82,7 +82,7 @@ async def test_browser_automation_memory_integration(librarian):
     )
     
     assert len(memories) == len(browser_actions)
-    assert all("browser" in m["metadata"]["tags"] for m in memories)
+    assert all("browser" in m["metadata"].tags for m in memories)
 
 
 @pytest.mark.asyncio
@@ -116,7 +116,7 @@ async def test_finder_operation_memory_tracking(librarian):
     )
     
     assert len(memories) == len(finder_operations)
-    assert all("finder" in m["metadata"]["tags"] for m in memories)
+    assert all("finder" in m["metadata"].tags for m in memories)
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_terminal_command_memory_logging(librarian):
     )
     
     assert len(memories) == len(terminal_commands)
-    assert all("terminal" in m["metadata"]["tags"] for m in memories)
+    assert all("terminal" in m["metadata"].tags for m in memories)
 
 
 @pytest.mark.asyncio
@@ -186,7 +186,7 @@ async def test_cross_application_context(librarian):
     )
     
     assert len(memories) == len(actions)
-    unique_apps = {m["metadata"]["tags"][0] for m in memories}
+    unique_apps = {m["metadata"].tags[0] for m in memories}
     assert len(unique_apps) == 3  # browser, finder, terminal
 
 
@@ -221,4 +221,4 @@ async def test_application_state_tracking(librarian):
     )
     
     assert len(memories) == len(state_changes)
-    assert all("state_change" in m["metadata"]["tags"] for m in memories)
+    assert all("state_change" in m["metadata"].tags for m in memories)
