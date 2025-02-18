@@ -38,6 +38,7 @@ async def long_term_memory(mock_venice_client):
         context_window_size=2
     )
     memory = LongTermMemory(config, mock_venice_client)
+    memory.venice_client = mock_venice_client  # Ensure venice_client is set
     yield memory
     # Cleanup
     memory.recent_context.clear()

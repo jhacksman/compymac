@@ -10,7 +10,7 @@ from memory.venice_client import VeniceClient
 from unittest.mock import Mock, AsyncMock
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
@@ -27,14 +27,15 @@ async def mock_venice_client():
     return client
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def core_memory(mock_venice_client):
     """Create core memory fixture."""
     config = CoreMemoryConfig(
         context_size=4,  # Small size for testing
         window_size=2
     )
-    return CoreMemory(config, mock_venice_client)
+    memory = CoreMemory(config, mock_venice_client)
+    return memory
 
 
 def test_core_memory_initialization(core_memory):
