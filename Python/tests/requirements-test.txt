@@ -10,3 +10,4 @@ transformers>=4.37.0  # For memory system models
 langchain>=0.1.17  # For LangChain agent system
 langchain-core>=0.1.17  # For LangChain agent system
 langchain-community>=0.1.17  # For LangChain agent system
+langchain-openai>=0.0.5  # For OpenAI LLM integration
