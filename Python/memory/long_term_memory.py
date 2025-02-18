@@ -47,7 +47,7 @@ class LongTermMemory:
         # Recent context
         self.recent_context: List[Dict] = []
         
-    async def store_memory(
+    def store_memory(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -68,7 +68,7 @@ class LongTermMemory:
         """
         try:
             # Store in Venice.ai
-            response = await self.venice_client.store_memory(content, metadata)
+            response = self.venice_client.store_memory(content, metadata)
             if not response.success:
                 raise MemoryError(f"Failed to store memory: {response.error}")
                 
@@ -87,14 +87,14 @@ class LongTermMemory:
             # Maintain context window size
             if len(self.recent_context) > self.config.context_window_size:
                 # Summarize and store older context
-                await self._summarize_context()
+                self._summarize_context()
                 
             return memory_id
             
         except Exception as e:
             raise MemoryError(f"Failed to store memory: {str(e)}")
             
-    async def retrieve_context(
+    def retrieve_context(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -117,7 +117,7 @@ class LongTermMemory:
         """
         try:
             # Get memories from Venice.ai
-            response = await self.venice_client.retrieve_context(
+            response = self.venice_client.retrieve_context(
                 query=query,
                 context_id=context_id,
                 time_range=time_range.total_seconds() if time_range else None,
@@ -191,7 +191,7 @@ class LongTermMemory:
                 
         return True
         
-    async def _summarize_context(self) -> None:
+    def _summarize_context(self) -> None:
         """Summarize and store older context items."""
         if len(self.recent_context) <= self.config.context_window_size:
             return
@@ -217,7 +217,7 @@ class LongTermMemory:
         self.recent_context = self.recent_context[-self.config.context_window_size:]
         
         # Store summary via librarian
-        await self.librarian.store_memory(
+        self.librarian.store_memory(
             content=summary_content,
             metadata=summary_metadata,
             surprise_score=1.0  # High surprise score for summaries
