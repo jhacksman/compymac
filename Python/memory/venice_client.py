@@ -5,6 +5,7 @@ import re
 import os
 import time
 import aiohttp
+import asyncio
 from typing import Dict, List, Optional, Generator
 
 from .message_types import MemoryMetadata, MemoryResponse
@@ -176,7 +177,7 @@ class VeniceClient:
                 except Exception as e:
                     print(f"Chunk processing error: {e}")  # Debug log
                     raise VeniceAPIError(f"Failed to decode chunk: {str(e)}")
-            time.sleep(0.01)  # Small delay to prevent CPU spinning
+            await asyncio.sleep(0.01)  # Small delay to prevent CPU spinning
             
     async def stream_memory(
         self,
@@ -242,12 +243,12 @@ class VeniceClient:
                             yield chunk
                     return
                     
-                if response.status_code != 200:
-                    error_text = response.text
-                    print(f"Error response body: {error_text}")  # Debug log
-                    raise VeniceAPIError(
-                        f"Failed to store memory: {response.status_code} - {error_text}"
-                    )
+                    if response.status != 200:
+                        error_text = await response.text()
+                        print(f"Error response body: {error_text}")  # Debug log
+                        raise VeniceAPIError(
+                            f"Failed to store memory: {response.status} - {error_text}"
+                        )
                     
                 for chunk in self._stream_chunks(response, retry_count):
                     yield chunk
