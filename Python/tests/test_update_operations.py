@@ -1,7 +1,6 @@
 """Tests for memory update operations."""
 
 import pytest
-import pytest_asyncio
 from datetime import datetime
 from unittest.mock import Mock
 
