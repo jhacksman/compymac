@@ -1,12 +1,12 @@
 """Agent system for CompyMac."""
 
-from .manager import ManagerAgent as AgentManager
+from .manager import ManagerAgent
 from .executor import ExecutorAgent
 from .planner import PlannerAgent
 from .reflector import ReflectorAgent
 
 __all__ = [
-    'AgentManager',
+    'ManagerAgent',
     'ExecutorAgent',
     'PlannerAgent',
     'ReflectorAgent'
