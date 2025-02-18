@@ -1,9 +1,8 @@
 """Tests for memory prune operations."""
 
 import pytest
-import pytest_asyncio
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
@@ -11,32 +10,31 @@ from memory.librarian import LibrarianAgent
 from memory.exceptions import MemoryError
 
 
-@pytest_asyncio.fixture(scope="function")
-async def mock_venice_client():
+@pytest.fixture(scope="function")
+def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory = AsyncMock(return_value=MemoryResponse(
+    client.store_memory.return_value = MemoryResponse(
         action="store_memory",
         success=True,
         memory_id="test_id"
-    ))
-    client.delete_memory = AsyncMock(return_value=MemoryResponse(
+    )
+    client.delete_memory.return_value = MemoryResponse(
         action="delete_memory",
         success=True
-    ))
+    )
     return client
 
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(mock_venice_client):
+@pytest.fixture(scope="function")
+def librarian(mock_venice_client):
     """Create librarian fixture."""
     agent = LibrarianAgent(mock_venice_client)
     agent.max_context_tokens = 1000  # Smaller size for testing
     return agent
 
 
-@pytest.mark.asyncio
-async def test_automatic_memory_pruning(librarian):
+def test_automatic_memory_pruning(librarian):
     """Test automatic pruning of old memories."""
     # Fill context window
     now = datetime.now()
@@ -44,7 +42,7 @@ async def test_automatic_memory_pruning(librarian):
     
     # Add old memories
     for i in range(5):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"old content {i}",
             MemoryMetadata(
                 timestamp=old_time.timestamp(),
@@ -54,7 +52,7 @@ async def test_automatic_memory_pruning(librarian):
     
     # Add recent important memories
     for i in range(5):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"important content {i}",
             MemoryMetadata(
                 timestamp=now.timestamp(),
@@ -64,7 +62,7 @@ async def test_automatic_memory_pruning(librarian):
     
     # Add more memories to trigger pruning
     for i in range(librarian.max_context_tokens // 4):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"new content {i}",
             MemoryMetadata(timestamp=now.timestamp())
         )
@@ -75,14 +73,13 @@ async def test_automatic_memory_pruning(librarian):
     assert any("important content" in content for content in remaining_contents)
 
 
-@pytest.mark.asyncio
-async def test_context_window_size_limits(librarian):
+def test_context_window_size_limits(librarian):
     """Test enforcement of context window size limits."""
     now = datetime.now()
     
     # Fill context window to exactly the limit
     for i in range(librarian.max_context_tokens // 4):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"content {i}",
             MemoryMetadata(timestamp=now.timestamp())
         )
@@ -91,7 +88,7 @@ async def test_context_window_size_limits(librarian):
     assert initial_size == librarian.max_context_tokens // 4
     
     # Add one more memory
-    await librarian.store_memory(
+    librarian.store_memory(
         "overflow content",
         MemoryMetadata(timestamp=now.timestamp())
     )
@@ -102,15 +99,14 @@ async def test_context_window_size_limits(librarian):
     assert "overflow content" in [m["content"] for m in librarian.recent_memories]
 
 
-@pytest.mark.asyncio
-async def test_importance_based_pruning(librarian):
+def test_importance_based_pruning(librarian):
     """Test that important memories are preserved during pruning."""
     now = datetime.now()
     
     # Add important memories
     important_ids = []
     for i in range(5):
-        memory_id = await librarian.store_memory(
+        memory_id = librarian.store_memory(
             f"important content {i}",
             MemoryMetadata(
                 timestamp=now.timestamp(),
@@ -121,7 +117,7 @@ async def test_importance_based_pruning(librarian):
     
     # Fill remaining space with less important memories
     for i in range(librarian.max_context_tokens // 4):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"regular content {i}",
             MemoryMetadata(
                 timestamp=now.timestamp(),
@@ -137,13 +133,12 @@ async def test_importance_based_pruning(librarian):
     )
 
 
-@pytest.mark.asyncio
-async def test_memory_consolidation(librarian, mock_venice_client):
+def test_memory_consolidation(librarian, mock_venice_client):
     """Test memory consolidation during pruning."""
     now = datetime.now()
     
     # Add related memories
-    await librarian.store_memory(
+    librarian.store_memory(
         "Python is a programming language",
         MemoryMetadata(
             timestamp=now.timestamp(),
@@ -151,7 +146,7 @@ async def test_memory_consolidation(librarian, mock_venice_client):
         )
     )
     
-    await librarian.store_memory(
+    librarian.store_memory(
         "Python uses indentation for blocks",
         MemoryMetadata(
             timestamp=now.timestamp(),
@@ -161,7 +156,7 @@ async def test_memory_consolidation(librarian, mock_venice_client):
     
     # Trigger consolidation by filling context
     for i in range(librarian.max_context_tokens // 4):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"filler content {i}",
             MemoryMetadata(timestamp=now.timestamp())
         )
@@ -175,8 +170,7 @@ async def test_memory_consolidation(librarian, mock_venice_client):
     assert len(python_memories) > 0
 
 
-@pytest.mark.asyncio
-async def test_pruning_error_handling(librarian, mock_venice_client):
+def test_pruning_error_handling(librarian, mock_venice_client):
     """Test error handling during memory pruning."""
     # Setup mock to fail deletion
     mock_venice_client.delete_memory.return_value = MemoryResponse(
@@ -188,7 +182,7 @@ async def test_pruning_error_handling(librarian, mock_venice_client):
     # Fill context window
     now = datetime.now()
     for i in range(librarian.max_context_tokens // 4 + 1):
-        await librarian.store_memory(
+        librarian.store_memory(
             f"content {i}",
             MemoryMetadata(timestamp=now.timestamp())
         )
