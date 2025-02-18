@@ -137,9 +137,9 @@ class CoreMemory(nn.Module):
                         input_ids=encodings["input_ids"],
                         attention_mask=encodings["attention_mask"]
                     )
-                    context_items = [outputs.last_hidden_state[i, 0, :] for i in range(len(context_texts))]
+                    context_items = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token for all sequences
                     
-            keys = self.key_proj(torch.stack(context_items) if context_items else torch.empty(0, self.config.hidden_size).to(self.device))
+            keys = self.key_proj(context_items if len(context_items) > 0 else torch.empty(0, self.config.hidden_size).to(self.device))
             
             if keys.size(0) > 0:
                 attention_scores = torch.matmul(query, keys.transpose(-2, -1))
@@ -250,7 +250,7 @@ class CoreMemory(nn.Module):
             # Filter by attention weights and importance
             filtered_context = []
             for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                importance = float(item.get("metadata", {}).get("importance", 0.0))
+                importance = float(item.get("metadata", {}).get("importance", 0.0)) if isinstance(item.get("metadata"), dict) else 0.0
                 if weight > 0.1 and (min_importance is None or importance >= min_importance):
                     filtered_context.append(item)
             
