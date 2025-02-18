@@ -237,7 +237,7 @@ class VeniceClient:
                     print(f"Response headers: {response.headers}")  # Debug log
                     
                     if response.status == 429 and retry_count < self.max_retries:
-                        self._handle_rate_limit(retry_count)
+                        await self._handle_rate_limit(retry_count)
                         # Retry with incremented count
                         async for chunk in self.stream_memory(content, metadata, timeout, retry_count + 1):
                             yield chunk
@@ -346,7 +346,7 @@ class VeniceClient:
                     timeout=timeout
                 ) as response:
                     if response.status == 429 and retry_count < self.max_retries:
-                        self._handle_rate_limit(retry_count)
+                        await self._handle_rate_limit(retry_count)
                         # Retry with incremented count
                         return await self.retrieve_context(
                         query,
@@ -407,7 +407,7 @@ class VeniceClient:
                     timeout=timeout
                 ) as response:
                     if response.status == 429 and retry_count < self.max_retries:
-                        self._handle_rate_limit(retry_count)
+                        await self._handle_rate_limit(retry_count)
                         # Retry with incremented count
                         return await self.update_memory(
                             memory_id,
@@ -424,7 +424,7 @@ class VeniceClient:
                     )
                     
                 success = False
-                for chunk in self._stream_chunks(response):
+                async for chunk in self._stream_chunks(response):
                     try:
                         data = json.loads(chunk)
                         if data.get("success"):
