@@ -79,6 +79,14 @@ def mock_agents(memory_manager, mock_llm):
         artifacts={"metrics": {"success_rate": 0.8}}
     ))
 
+    return ManagerAgent(
+        memory_manager=memory_manager,
+        executor=executor,
+        planner=planner,
+        reflector=reflector,
+        llm=mock_llm
+    )
+
     return executor, planner, reflector
 
 from langchain_core.language_models.llms import BaseLLM
