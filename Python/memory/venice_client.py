@@ -15,6 +15,31 @@ from .config import VENICE_API_KEY, VENICE_BASE_URL, VENICE_MODEL
 class VeniceClient:
     """Client for Venice.ai API."""
     
+    def delete_memory(self, memory_id: str) -> MemoryResponse:
+        """Delete a memory by ID.
+        
+        Args:
+            memory_id: ID of memory to delete
+            
+        Returns:
+            MemoryResponse with success status
+            
+        Raises:
+            VeniceAPIError: If deletion fails
+        """
+        try:
+            response = requests.delete(
+                f"{self.base_url}/api/v1/memories/{memory_id}",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return MemoryResponse(
+                action="delete_memory",
+                success=True
+            )
+        except Exception as e:
+            raise VeniceAPIError(f"Failed to delete memory: {str(e)}")
+    
     def __init__(self, api_key: Optional[str] = None):
         """Initialize Venice client."""
         from .config import VENICE_API_KEY, VENICE_BASE_URL, VENICE_MODEL
