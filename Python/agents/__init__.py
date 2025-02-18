@@ -3,10 +3,10 @@
 from .executor import ExecutorAgent
 from .planner import PlannerAgent
 from .reflector import ReflectorAgent
-from .manager import ManagerAgent
+from .manager import ManagerAgent as AgentManager
 
 __all__ = [
-    'ManagerAgent',
+    'AgentManager',
     'ExecutorAgent',
     'PlannerAgent',
     'ReflectorAgent'
