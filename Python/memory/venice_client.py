@@ -6,7 +6,7 @@ import os
 import time
 import aiohttp
 import asyncio
-from typing import Dict, List, Optional, Generator
+from typing import Dict, List, Optional, AsyncGenerator
 
 from .message_types import MemoryMetadata, MemoryResponse
 from .exceptions import VeniceAPIError
@@ -122,7 +122,7 @@ class VeniceClient:
         print(f"Rate limited. Retrying in {delay} seconds...")  # Debug log
         time.sleep(delay)
 
-    async def _stream_chunks(self, response: aiohttp.ClientResponse, retry_count: int = 0) -> Generator[str, None, None]:
+    async def _stream_chunks(self, response: aiohttp.ClientResponse, retry_count: int = 0) -> AsyncGenerator[str, None]:
         """Stream chunks from response."""
         if response.status == 429:  # Rate limit exceeded
             self._handle_rate_limit(retry_count)
@@ -185,7 +185,7 @@ class VeniceClient:
         metadata: MemoryMetadata,
         timeout: float = 10.0,
         retry_count: int = 0
-    ) -> Generator[str, None, None]:
+    ) -> AsyncGenerator[str, None]:
         """Stream memory storage response."""
         try:
             # Convert metadata to dict format
@@ -250,7 +250,7 @@ class VeniceClient:
                             f"Failed to store memory: {response.status} - {error_text}"
                         )
                     
-                for chunk in self._stream_chunks(response, retry_count):
+                async for chunk in self._stream_chunks(response, retry_count):
                     yield chunk
                         
         except Exception as e:
