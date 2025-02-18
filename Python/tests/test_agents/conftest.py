@@ -109,11 +109,7 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
 
     async def abatch(self, inputs: List[Dict], config: Optional[RunnableConfig] = None, **kwargs) -> List[str]:
         """Async batch process inputs."""
-        results = []
-        for input in inputs:
-            result = await self.ainvoke(input, config, **kwargs)
-            results.append(result)
-        return results
+        return [await self.ainvoke(input, config, **kwargs) for input in inputs]
     
     def _get_response_for_prompt(self, prompt: str) -> Dict:
         """Get appropriate response based on prompt content."""
@@ -256,6 +252,7 @@ class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
         """Stream output."""
         result = await self.ainvoke(input, config, **kwargs)
         yield result
+        yield None
         
     async def ainvoke(self, input: Dict[str, Any], config: Optional[RunnableConfig] = None, **kwargs) -> str:
         """Mock async invoke call."""
