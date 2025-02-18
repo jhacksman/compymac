@@ -34,10 +34,10 @@
   - [x] Hierarchical memory access
   - [x] Context synchronization
 
-- [ ] Computer Use Scenario Tests
-  - [ ] Browser automation memory integration
-  - [ ] Finder operation memory tracking
-  - [ ] Terminal command memory logging
+- [x] Computer Use Scenario Tests
+  - [x] Browser automation memory integration
+  - [x] Finder operation memory tracking
+  - [x] Terminal command memory logging
 
 ## 3. Performance Tests
 - [ ] Latency Tests
