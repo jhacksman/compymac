@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import subprocess
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from websockets.sync.server import serve
@@ -192,7 +193,7 @@ class BrowserAutomationServer:
                 }
                 
             try:
-                await self.page.go_back()
+                self.page.go_back()
                 return {
                     "action": "navigateBack",
                     "status": "success",
@@ -221,7 +222,7 @@ class BrowserAutomationServer:
                 }
                 
             try:
-                await self.page.go_forward()
+                self.page.go_forward()
                 return {
                     "action": "navigateForward",
                     "status": "success",
@@ -250,7 +251,7 @@ class BrowserAutomationServer:
                 }
                 
             try:
-                await self.page.reload()
+                self.page.reload()
                 return {
                     "action": "refresh",
                     "status": "success",
@@ -322,7 +323,7 @@ class BrowserAutomationServer:
                         "message": "No active browser page"
                     }
                 
-                await self.page.click(selector)
+                self.page.click(selector)
                 return {
                     "action": "clickElement",
                     "status": "success"
@@ -358,7 +359,7 @@ class BrowserAutomationServer:
                     }
                 
                 for selector, value in fields.items():
-                    await self.page.fill(selector, value)
+                    self.page.fill(selector, value)
                 
                 return {
                     "action": "fillForm",
@@ -381,12 +382,13 @@ class BrowserAutomationServer:
                 }
             
             try:
-                process = await asyncio.create_subprocess_shell(
+                process = subprocess.Popen(
                     command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=True
                 )
-                stdout, stderr = await process.communicate()
+                stdout, stderr = process.communicate()
                 
                 return {
                     "action": "runCommand",
@@ -412,18 +414,17 @@ class BrowserAutomationServer:
                 }
             
             try:
-                playwright = await async_playwright().start()
-                browser = await playwright.chromium.launch(headless=True)
-                page = await browser.new_page()
-                await page.goto(url)
-                title = await page.title()
-                await browser.close()
-                await playwright.stop()
-                return {
-                    "action": "openPage",
-                    "status": "success",
-                    "title": title
-                }
+                with sync_playwright() as playwright:
+                    browser = playwright.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    page.goto(url)
+                    title = page.title()
+                    browser.close()
+                    return {
+                        "action": "openPage",
+                        "status": "success",
+                        "title": title
+                    }
             except Exception as e:
                 return {
                     "action": "openPage",
