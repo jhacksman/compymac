@@ -10,6 +10,7 @@ from memory.long_term_memory import LongTermMemory, LongTermMemoryConfig
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
 from memory.exceptions import MemoryError
+from .mock_memory_db import MockMemoryDB
 
 
 @pytest.fixture(scope="function")
@@ -109,7 +110,7 @@ async def test_retrieve_context_basic(long_term_memory):
     await long_term_memory.store_memory(content, metadata)
     
     # Retrieve with basic query
-    memories = await long_term_memory.retrieve_context("test query")
+    memories = await long_term_memory.retrieve_memories("test query")
     
     assert len(memories) == 1
     assert memories[0]["content"] == content
