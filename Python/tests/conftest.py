@@ -172,25 +172,27 @@ def mock_llm():
     """Provide mock LLM."""
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
-        from pydantic import Field, BaseModel
+        from pydantic import Field, BaseModel, PrivateAttr
         
         class Config:
             arbitrary_types_allowed = True
+            extra = "allow"
         
-        response: str = Field(default_factory=lambda: json.dumps({
-            "execution_plan": [{
-                "step": "Test step",
-                "verification": "Step complete"
-            }],
-            "success_criteria": {
-                "step_criteria": ["complete"],
-                "overall_criteria": "success"
-            }
-        }))
+        _response: str = PrivateAttr(default=None)
         
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self._lc_kwargs = kwargs
+            self._response = json.dumps({
+                "execution_plan": [{
+                    "step": "Test step",
+                    "verification": "Step complete"
+                }],
+                "success_criteria": {
+                    "step_criteria": ["complete"],
+                    "overall_criteria": "success"
+                }
+            })
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
