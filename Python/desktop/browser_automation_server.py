@@ -83,6 +83,14 @@ class BrowserAutomationServer:
     def start_server(self):
         """Start the WebSocket server."""
         try:
+            import psutil
+            process = psutil.Process()
+            
+            def check_memory():
+                mem_info = process.memory_info()
+                if mem_info.rss > 12 * 1024 * 1024 * 1024:  # 12GB threshold
+                    print("Memory usage warning: {}GB".format(mem_info.rss / 1024**3))
+            
             with serve(
                 self.handle_client_message,
                 "localhost",
@@ -91,6 +99,7 @@ class BrowserAutomationServer:
             ) as server:
                 print("Browser automation server listening on ws://localhost:8765")
                 while True:  # run forever
+                    check_memory()
                     time.sleep(0.1)
         except OSError as e:
             if e.errno in (98, 48, 61):  # Address already in use
