@@ -214,7 +214,13 @@ def mock_llm():
             if isinstance(self._mock_response, dict):
                 return json.dumps(self._mock_response)
             if isinstance(self._mock_response, str):
-                return self._mock_response
+                try:
+                    # If it's already a JSON string, validate it
+                    json.loads(self._mock_response)
+                    return self._mock_response
+                except json.JSONDecodeError:
+                    # If it's not JSON, return as plain string
+                    return self._mock_response
             return str(self._mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
@@ -252,19 +258,13 @@ def mock_llm():
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            if isinstance(self._mock_response, Exception):
-                raise self._mock_response
-            if isinstance(self._mock_response, dict):
-                response = json.dumps(self._mock_response)
-            elif isinstance(self._mock_response, str):
-                response = self._mock_response
-            else:
-                response = str(self._mock_response)
+            response = self._call(prompts[0] if prompts else "", stop, run_manager, **kwargs)
             return LLMResult(generations=[[Generation(text=response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            return self._generate(prompts, stop, run_manager, **kwargs)
+            response = await self._acall(prompts[0] if prompts else "", stop, run_manager, **kwargs)
+            return LLMResult(generations=[[Generation(text=response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
