@@ -30,11 +30,10 @@ class VeniceClient:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
+                async with session.delete(
                     f"{self.base_url}/api/memories/{memory_id}",
                     headers=self.headers,
                     json={
-                        "action": "delete",
                         "model": self.model
                     }
                 ) as response:
@@ -526,11 +525,10 @@ class VeniceClient:
         """Update memory in Venice.ai."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
+                async with session.patch(
                     f"{self.base_url}/api/memories/{memory_id}",
                     headers=self.headers,
                     json={
-                        "action": "update",
                         "content": content,
                         "metadata": metadata.__dict__ if metadata else None,
                         "model": self.model
