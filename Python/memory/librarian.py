@@ -533,7 +533,7 @@ class LibrarianAgent:
         except Exception as e:
             raise MemoryError(f"Failed to update memory: {str(e)}")
             
-    def get_recent_memories(
+    async def get_recent_memories(
         self,
         limit: Optional[int] = None,
         min_importance: Optional[float] = None

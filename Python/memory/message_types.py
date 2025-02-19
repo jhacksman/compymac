@@ -21,6 +21,17 @@ class MemoryMetadata:
             self.context_ids = []
         if self.tags is None:
             self.tags = []
+            
+    def asdict(self) -> Dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "timestamp": self.timestamp,
+            "importance": self.importance,
+            "context_ids": self.context_ids,
+            "tags": self.tags,
+            "source": self.source,
+            "task_id": self.task_id
+        }
 
 
 @dataclass

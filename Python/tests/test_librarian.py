@@ -34,11 +34,12 @@ def librarian(mock_venice_client):
     return LibrarianAgent(mock_venice_client)
 
 
-def test_store_memory_basic(librarian):
+@pytest.mark.asyncio
+async def test_store_memory_basic(librarian):
     """Test basic memory storage."""
     metadata = MemoryMetadata(timestamp=datetime.now().timestamp())
     
-    memory_id = librarian.store_memory(
+    memory_id = await librarian.store_memory(
         "test content",
         metadata
     )
@@ -48,7 +49,8 @@ def test_store_memory_basic(librarian):
     assert librarian.recent_memories[0]["content"] == "test content"
 
 
-def test_store_memory_with_surprise(librarian):
+@pytest.mark.asyncio
+async def test_store_memory_with_surprise(librarian):
     """Test memory storage with surprise-based filtering."""
     metadata = MemoryMetadata(
         timestamp=datetime.now().timestamp(),
@@ -56,17 +58,18 @@ def test_store_memory_with_surprise(librarian):
     )
     
     # Store with high surprise score
-    memory_id = librarian.store_memory(
+    memory_id = await librarian.store_memory(
         "surprising content",
         metadata,
         surprise_score=0.8
     )
     
     assert memory_id == "test_id"
-    assert librarian.recent_memories[0]["metadata"].importance == 0.8
+    assert librarian.recent_memories[0]["metadata"]["importance"] == 0.8
 
 
-def test_retrieve_memories_basic(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_basic(librarian, mock_venice_client):
     """Test basic memory retrieval."""
     # Setup mock response
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -83,13 +86,14 @@ def test_retrieve_memories_basic(librarian, mock_venice_client):
     )
     
     # Retrieve memories
-    memories = librarian.retrieve_memories("test query")
+    memories = await librarian.retrieve_memories("test query")
     
     assert len(memories) == 1
     assert memories[0]["content"] == "test content"
 
 
-def test_retrieve_memories_with_importance(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     """Test memory retrieval with importance filtering."""
     # Setup mock response with varying importance
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -116,7 +120,7 @@ def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     )
     
     # Retrieve with importance filter
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "test query",
         min_importance=0.5
     )
@@ -125,7 +129,8 @@ def test_retrieve_memories_with_importance(librarian, mock_venice_client):
     assert memories[0]["content"] == "important content"
 
 
-def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     """Test memory retrieval with time filtering."""
     now = time.time()
     old_time = now - 60*60*24*2  # 2 days ago
@@ -155,7 +160,7 @@ def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     )
     
     # Retrieve with time range
-    memories = librarian.retrieve_memories(
+    memories = await librarian.retrieve_memories(
         "test query",
         time_range=timedelta(days=1)
     )
@@ -164,7 +169,8 @@ def test_retrieve_memories_with_time_range(librarian, mock_venice_client):
     assert memories[0]["content"] == "new content"
 
 
-def test_get_recent_memories(librarian):
+@pytest.mark.asyncio
+async def test_get_recent_memories(librarian):
     """Test getting recent memories."""
     # Add some test memories
     now = time.time()
@@ -188,11 +194,11 @@ def test_get_recent_memories(librarian):
     ]
     
     # Get with importance filter
-    memories = librarian.get_recent_memories(min_importance=0.5)
+    memories = await librarian.get_recent_memories(min_importance=0.5)
     assert len(memories) == 1
     assert memories[0]["content"] == "content 1"
     
     # Get with limit
-    memories = librarian.get_recent_memories(limit=1)
+    memories = await librarian.get_recent_memories(limit=1)
     assert len(memories) == 1
     assert memories[0]["content"] == "content 2"

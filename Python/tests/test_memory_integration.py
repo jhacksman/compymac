@@ -8,11 +8,15 @@ from datetime import datetime, timezone
 from ..memory.protocol import MemoryMessage
 from ..memory.exceptions import VeniceAPIError
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def server():
+    """Create and start mock WebSocket server."""
     from .mock_websocket_server import MockWebSocketServer
     server = MockWebSocketServer()
     server.start()  # Synchronous start
+    # Wait for server to be ready
+    import time
+    time.sleep(1)
     try:
         yield server
     finally:
