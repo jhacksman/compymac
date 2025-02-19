@@ -160,21 +160,34 @@ def mock_llm():
     from typing import Any, List, Optional, Iterator, AsyncIterator
     
     class MockLLM(BaseLLM):
-        def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
-            return "Mock LLM Response"
-            
-        async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
-            return "Mock LLM Response"
+        def __init__(self):
+            super().__init__()
+            self.response = json.dumps({
+                "execution_plan": [{
+                    "step": "Test step",
+                    "verification": "Step complete"
+                }],
+                "success_criteria": {
+                    "step_criteria": ["complete"],
+                    "overall_criteria": "success"
+                }
+            })
             
         @property
         def _llm_type(self) -> str:
             return "mock"
             
-        def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> Any:
-            return {"generations": [[{"text": "Mock LLM Response"}]]}
+        def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            return self.response
             
-        async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> Any:
-            return {"generations": [[{"text": "Mock LLM Response"}]]}
+        async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            return self.response
+            
+        def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
+            return LLMResult(generations=[[Generation(text=self.response)]])
+            
+        async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
+            return LLMResult(generations=[[Generation(text=self.response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             return self._call(input)
