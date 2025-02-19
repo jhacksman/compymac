@@ -48,5 +48,5 @@ jobs:
         cd Python
         pytest tests/ -v -m "not desktop"
       env:
-        VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+        VENICE_API_KEY: B9Y68yQgatQw8wmpmnIMYcGip1phCt-43CS0OktZU6
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
