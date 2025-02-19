@@ -1,6 +1,7 @@
 """Tests for memory corruption handling."""
 
 import pytest
+import pytest_asyncio
 import json
 from datetime import datetime
 from unittest.mock import Mock
@@ -15,23 +16,33 @@ from memory.exceptions import MemoryError
 def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory.return_value = MemoryResponse(
-        action="store_memory",
-        success=True,
-        memory_id="test_id"
-    )
-    client.retrieve_context.return_value = MemoryResponse(
-        action="retrieve_context",
-        success=True,
-        memories=[]
-    )
+    
+    async def mock_store_memory(*args, **kwargs):
+        return MemoryResponse(
+            action="store_memory",
+            success=True,
+            memory_id="test_id",
+            embedding=[0.1] * 1536,
+            summary="Mock summary"
+        )
+    client.store_memory.side_effect = mock_store_memory
+    
+    async def mock_retrieve_context(*args, **kwargs):
+        return MemoryResponse(
+            action="retrieve_context",
+            success=True,
+            memories=[]
+        )
+    client.retrieve_context.side_effect = mock_retrieve_context
+    
     return client
 
 
-@pytest.fixture(scope="function")
-def librarian(mock_venice_client):
+@pytest_asyncio.fixture(scope="function")
+async def librarian(mock_venice_client, mock_memory_db):
     """Create librarian fixture."""
-    return LibrarianAgent(mock_venice_client)
+    agent = LibrarianAgent(mock_venice_client, mock_memory_db)
+    return agent
 
 
 def test_invalid_metadata_handling(librarian, mock_venice_client):
@@ -49,7 +60,7 @@ def test_invalid_metadata_handling(librarian, mock_venice_client):
         librarian.store_memory(
             "test content",
             MemoryMetadata(
-                timestamp="invalid",  # Invalid timestamp
+                timestamp=-1.0,  # Invalid timestamp
                 tags=["test"]
             )
         )
