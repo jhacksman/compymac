@@ -16,16 +16,42 @@ from memory.exceptions import MemoryError
 def mock_venice_client():
     """Create mock Venice client."""
     client = Mock(spec=VeniceClient)
-    client.store_memory.return_value = MemoryResponse(
-        action="store_memory",
-        success=True,
-        memory_id="test_id"  # Fixed ID for tests
-    )
-    client.retrieve_context.return_value = MemoryResponse(
-        action="retrieve_context",
-        success=True,
-        memories=[]  # No memories by default
-    )
+    
+    # Mock store_memory response
+    async def mock_store_memory(*args, **kwargs):
+        return MemoryResponse(
+            action="store_memory",
+            success=True,
+            memory_id="test_id"  # Fixed ID for tests
+        )
+    client.store_memory.side_effect = mock_store_memory
+    
+    # Mock retrieve_context response
+    async def mock_retrieve_context(*args, **kwargs):
+        return MemoryResponse(
+            action="retrieve_context",
+            success=True,
+            memories=[]  # No memories by default
+        )
+    client.retrieve_context.side_effect = mock_retrieve_context
+    
+    # Mock get_embedding response
+    async def mock_get_embedding(*args, **kwargs):
+        return MemoryResponse(
+            action="get_embedding",
+            success=True,
+            embedding=[0.1] * 1536
+        )
+    client.get_embedding.side_effect = mock_get_embedding
+    
+    # Mock generate_summary response
+    async def mock_generate_summary(*args, **kwargs):
+        return MemoryResponse(
+            action="generate_summary",
+            success=True,
+            summary="Mock summary"
+        )
+    client.generate_summary.side_effect = mock_generate_summary
     return client
 
 
