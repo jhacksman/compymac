@@ -172,7 +172,11 @@ def mock_llm():
     """Provide mock LLM."""
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
-        from pydantic import Field, PrivateAttr
+        from pydantic import Field, BaseModel
+        
+        class Config:
+            arbitrary_types_allowed = True
+        
         response: str = Field(default_factory=lambda: json.dumps({
             "execution_plan": [{
                 "step": "Test step",

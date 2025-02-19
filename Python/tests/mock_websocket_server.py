@@ -115,6 +115,8 @@ class MockWebSocketServer:
             async for message in websocket:
                 try:
                     print(f"Received message: {message}")  # Debug logging
+                    if not isinstance(message, str):
+                        message = message.decode('utf-8')
                     request = json.loads(message)
                     action = request.get("action")
                     
