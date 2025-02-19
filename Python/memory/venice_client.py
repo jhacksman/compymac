@@ -30,10 +30,13 @@ class VeniceClient:
         """
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.delete(
-                    f"{self.base_url}/memories/{memory_id}",
+                async with session.post(
+                    f"{self.base_url}/memories/delete",
                     headers=self.headers,
-                    json={"action": "delete_memory"}
+                    json={
+                        "action": "delete_memory",
+                        "memory_id": memory_id
+                    }
                 ) as response:
                     await response.read()
                     if response.status != 200:
@@ -509,14 +512,15 @@ class VeniceClient:
         """Update memory in Venice.ai."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.put(
-                    f"{self.base_url}/memories/{memory_id}",
+                async with session.post(
+                    f"{self.base_url}/memories/update",
+                    headers=self.headers,
                     json={
                         "action": "update_memory",
+                        "memory_id": memory_id,
                         "content": content,
                         "metadata": metadata.__dict__ if metadata else None
                     },
-                    headers=self.headers,
                     timeout=timeout
                 ) as response:
                     if response.status == 429 and retry_count < self.max_retries:

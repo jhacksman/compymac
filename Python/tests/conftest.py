@@ -181,7 +181,7 @@ def mock_llm():
             validate_assignment = True
             allow_inf_nan = True
         
-        _response: str = PrivateAttr(default="", exclude=True) # Initialize with empty string
+        _response: str = PrivateAttr(default="") # Initialize with empty string
         
         def __init__(self, **kwargs):
             super().__init__(**kwargs)

@@ -1,7 +1,8 @@
 """Integration tests for memory operations."""
 
 import pytest
-import websockets.sync.client as websockets
+import pytest_asyncio
+import websockets
 import json
 from datetime import datetime, timezone
 
@@ -40,8 +41,8 @@ async def test_store_memory_roundtrip(websocket):
     )
     store_request["action"] = "store_memory"
     
-    websocket.send(json.dumps(store_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(store_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "success"
     assert response["id"] is not None
@@ -73,8 +74,8 @@ async def test_retrieve_context_roundtrip(websocket):
         }
     }
     
-    websocket.send(json.dumps(retrieve_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(retrieve_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "success"
     assert len(response["memories"]) > 0
@@ -107,8 +108,8 @@ async def test_update_memory_roundtrip(websocket):
         }
     }
     
-    websocket.send(json.dumps(update_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(update_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "success"
     assert response["content"] == "updated memory"
@@ -137,8 +138,8 @@ async def test_delete_memory_roundtrip(websocket):
         "memory_id": memory_id
     }
     
-    websocket.send(json.dumps(delete_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(delete_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "success"
     
@@ -148,8 +149,8 @@ async def test_delete_memory_roundtrip(websocket):
         "query": "test memory"
     }
     
-    websocket.send(json.dumps(retrieve_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(retrieve_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "success"
     assert len(response["memories"]) == 0
@@ -164,8 +165,8 @@ async def test_error_handling(websocket):
         "updates": {"content": "test"}
     }
     
-    websocket.send(json.dumps(update_request))
-    response = json.loads(websocket.recv())
+    await websocket.send(json.dumps(update_request))
+    response = json.loads(await websocket.recv())
     
     assert response["status"] == "error"
     assert "memory not found" in response["message"].lower()
