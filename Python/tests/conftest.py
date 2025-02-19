@@ -252,35 +252,35 @@ def mock_llm():
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
-            return self._call(input)
+            return self._call(str(input))
             
         async def ainvoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM asynchronously."""
-            return await self._acall(input)
+            return await self._acall(str(input))
             
         def stream(self, input: Any, config: Optional[RunnableConfig] = None) -> Iterator[Any]:
             """Stream output."""
-            yield self._call(input)
+            yield self._call(str(input))
             
         async def astream(self, input: Any, config: Optional[RunnableConfig] = None) -> AsyncIterator[Any]:
             """Stream output asynchronously."""
-            yield await self._acall(input)
+            yield await self._acall(str(input))
             
         def transform(self, input: Any) -> Any:
             """Transform input."""
-            return self._call(input)
+            return self._call(str(input))
             
         async def atransform(self, input: Any) -> Any:
             """Transform input asynchronously."""
-            return await self._acall(input)
+            return await self._acall(str(input))
             
         def batch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
             """Process a batch of inputs."""
-            return [self._call(input) for input in inputs]
+            return [self._call(str(input)) for input in inputs]
             
         async def abatch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
             """Process a batch of inputs asynchronously."""
-            return [await self._acall(input) for input in inputs]
+            return [await self._acall(str(input)) for input in inputs]
             
         @property
         def _llm_type(self) -> str:
