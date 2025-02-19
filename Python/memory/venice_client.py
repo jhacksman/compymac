@@ -238,9 +238,9 @@ class VeniceClient:
                     f"{self.base_url}/api/memories",
                     json={
                         "action": "store",
-                        **request_data,
+                        "content": content,
                         "metadata": metadata_dict,
-                        "content": content
+                        "model": self.model
                     },
                     headers=self.headers,
                     timeout=timeout
