@@ -197,19 +197,19 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            return self.response
+            return self._response
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            return self.response
+            return self._response
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            return LLMResult(generations=[[Generation(text=self.response)]])
+            return LLMResult(generations=[[Generation(text=self._response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            return LLMResult(generations=[[Generation(text=self.response)]])
+            return LLMResult(generations=[[Generation(text=self._response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
