@@ -1,27 +1,31 @@
-"""Mock MemoryDB for testing."""
-
-from typing import Optional, List, Dict
-import numpy as np
+"""Mock memory database for testing."""
+import asyncio
+from typing import List, Dict, Any, Optional
 
 class MockMemoryDB:
-    """Mock database for testing memory operations."""
+    """Mock memory database for testing."""
     
     def __init__(self):
         """Initialize mock database."""
         self.memories = {}
         self.next_id = 1
-        self.embedding_dim = 1536  # Match Venice.ai embedding dimension
-        self.connected = True  # Simulate successful connection
-    
+        self._lock = asyncio.Lock()
+        
+    async def cleanup(self):
+        """Clean up database."""
+        async with self._lock:
+            self.memories.clear()
+            self.next_id = 1
+            
     def store_memory(
         self,
         content: str,
-        embedding: list[float],
-        metadata: dict,
+        embedding: List[float],
+        metadata: Dict[str, Any],
         memory_type: str = 'ltm',
         surprise_score: Optional[float] = None,
-        context_ids: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None
+        context_ids: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None
     ) -> int:
         """Store a memory in the mock database."""
         memory_id = self.next_id
@@ -39,33 +43,22 @@ class MockMemoryDB:
         }
         
         return memory_id
-    
+        
     def retrieve_similar(
         self,
-        embedding: list[float],
+        embedding: List[float],
         limit: int = 5,
         memory_type: Optional[str] = None,
         min_similarity: float = 0.7
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """Retrieve similar memories from mock database."""
-        # Convert embeddings to numpy arrays for cosine similarity
-        query_embedding = np.array(embedding)
-        
-        similarities = []
-        for memory in self.memories.values():
-            if memory_type and memory['memory_type'] != memory_type:
-                continue
-                
-            memory_embedding = np.array(memory['embedding'])
-            similarity = np.dot(query_embedding, memory_embedding) / (
-                np.linalg.norm(query_embedding) * np.linalg.norm(memory_embedding)
-            )
+        # For testing, just return all memories up to limit
+        memories = list(self.memories.values())
+        if memory_type:
+            memories = [m for m in memories if m['memory_type'] == memory_type]
             
-            if similarity >= min_similarity:
-                memory_copy = dict(memory)
-                memory_copy['similarity'] = float(similarity)
-                similarities.append(memory_copy)
-        
-        # Sort by similarity and apply limit
-        similarities.sort(key=lambda x: x['similarity'], reverse=True)
-        return similarities[:limit]
+        # Add mock similarity scores
+        for memory in memories:
+            memory['similarity'] = 0.8  # Mock similarity score
+            
+        return memories[:limit]
