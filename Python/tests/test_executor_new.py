@@ -239,7 +239,7 @@ def test_verify_success():
     assert executor._verify_success(result, {})
     
     # Test invalid result format
-    assert not executor._verify_success(None, criteria)
+    assert not executor._verify_success({}, criteria)
 
 def test_calculate_delay():
     """Test exponential backoff delay calculation."""

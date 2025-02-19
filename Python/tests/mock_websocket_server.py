@@ -22,19 +22,19 @@ class MockWebSocketServer:
         self.host = host
         self.port = port
         self.server = None
+        self.server_task = None
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
         self.connected = True  # Simulate successful connection
         
-    def start(self):
+    async def start(self):
         """Start the WebSocket server."""
-        import threading
-        import websockets.sync.server as ws_server
+        import asyncio
+        import websockets
         
-        def run_server():
+        async def run_server():
             try:
-                # Create WebSocket server
-                self.server = ws_server.serve(
+                self.server = await websockets.serve(
                     self.handle_connection,
                     self.host,
                     self.port,
@@ -42,24 +42,26 @@ class MockWebSocketServer:
                     ping_timeout=None,
                     close_timeout=None
                 )
-                self.server.serve_forever()
+                await self.server.wait_closed()
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
-        self.server_thread = threading.Thread(target=run_server, daemon=True)
-        self.server_thread.start()
+        self.server_task = asyncio.create_task(run_server())
         # Give server time to start
-        import time
-        time.sleep(5)  # Increased wait time for server startup
+        await asyncio.sleep(1)
     
-    def stop(self):
+    async def stop(self):
         """Stop the WebSocket server."""
         try:
             if self.server:
-                self.server.shutdown()
-                self.server.server_close()
-            if self.server_thread and self.server_thread.is_alive():
-                self.server_thread.join(timeout=1.0)
+                self.server.close()
+                await self.server.wait_closed()
+            if self.server_task:
+                self.server_task.cancel()
+                try:
+                    await self.server_task
+                except asyncio.CancelledError:
+                    pass
         except Exception as e:
             print(f"Error stopping server: {str(e)}")
         finally:

@@ -161,6 +161,9 @@ Response:""",
             
         Returns:
             Task execution result
+        
+        Raises:
+            Exception: If task execution fails
         """
         for attempt in range(self.config.max_retries):
             try:
