@@ -103,19 +103,18 @@ class CoreMemory:
             else:
                 surprise_score = 1.0  # First item is surprising
             
-        # Apply surprise-based filtering
+        # Store memory regardless of surprise score
+        memory_id = self.memory_db.store_memory(
+            content=content,
+            embedding=embedding,
+            metadata=metadata if isinstance(metadata, dict) else {},
+            memory_type='stm',
+            surprise_score=float(surprise_score),
+            tags=['short_term']
+        )
+        
+        # Store via librarian only if surprising enough
         if surprise_score > self.config.surprise_threshold:
-            # Store important memories
-            memory_id = self.memory_db.store_memory(
-                content=content,
-                embedding=embedding,
-                metadata=metadata if isinstance(metadata, dict) else {},
-                memory_type='stm',
-                surprise_score=float(surprise_score),
-                tags=['short_term']
-            )
-            
-            # Also store via librarian for long-term consideration
             await self.librarian.store_memory(
                 content=content,
                 metadata=metadata,
