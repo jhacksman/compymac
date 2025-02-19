@@ -226,7 +226,12 @@ def mock_llm():
             if isinstance(response, Exception):
                 raise response
             if isinstance(response, str):
-                return response
+                try:
+                    # Try to parse as JSON to validate
+                    json.loads(response)
+                    return response
+                except json.JSONDecodeError:
+                    return response
             if isinstance(response, dict):
                 return json.dumps(response)
             return str(response)
