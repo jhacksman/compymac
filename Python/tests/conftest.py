@@ -209,13 +209,39 @@ def mock_llm():
                 return self._response
             return json.dumps(self._response)
             
+        def predict(self, **kwargs) -> str:
+            """Sync predict method."""
+            return self._call(**kwargs)
+            
         async def apredict(self, **kwargs) -> str:
             """Async predict method."""
             return await self._acall(**kwargs)
             
+        def run(self, **kwargs) -> str:
+            """Sync run method."""
+            return self._call(**kwargs)
+            
         async def arun(self, **kwargs) -> str:
             """Async run method."""
             return await self._acall(**kwargs)
+            
+        def __getattr__(self, name):
+            """Handle dynamic attribute access."""
+            if name in ['predict', 'apredict', 'run', 'arun']:
+                return getattr(self, name)
+            return super().__getattr__(name)
+            
+        def predict(self, **kwargs) -> str:
+            """Sync predict method."""
+            if isinstance(self._response, str):
+                return self._response
+            return json.dumps(self._response)
+            
+        def run(self, **kwargs) -> str:
+            """Sync run method."""
+            if isinstance(self._response, str):
+                return self._response
+            return json.dumps(self._response)
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""

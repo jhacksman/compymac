@@ -44,16 +44,36 @@ class MockWebSocketServer:
                 if hasattr(self, 'server') and self.server:
                     self.server.close()
                     await self.server.wait_closed()
+                    await asyncio.sleep(1)  # Wait for port to be freed
                     
-                server = await websockets.serve(
-                    self.handle_connection,
-                    self.host,
-                    self.port,
-                    ping_interval=None,  # Disable ping/pong for tests
-                    ping_timeout=None,
-                    close_timeout=None,
-                    max_size=None  # Allow any message size
-                )
+                # Try to start server with retries
+                for attempt in range(3):
+                    try:
+                        # Clean up any existing connections
+                        if hasattr(self, 'server') and self.server:
+                            self.server.close()
+                            await self.server.wait_closed()
+                            await asyncio.sleep(1)  # Wait for port to be freed
+                            
+                        # Try to start server
+                        server = await websockets.serve(
+                            self.handle_connection,
+                            self.host,
+                            self.port,
+                            ping_interval=None,  # Disable ping/pong for tests
+                            ping_timeout=None,
+                            close_timeout=None,
+                            max_size=None  # Allow any message size
+                        )
+                        self.server = server
+                        self.connected = True
+                        break
+                    except OSError:
+                        await asyncio.sleep(1)  # Wait before retry
+                        continue
+                    except Exception as e:
+                        print(f"Failed to start server: {e}")
+                        raise
                 self.server = server
                 self.connected = True
                 self._ready_event.set()  # Signal server is ready
