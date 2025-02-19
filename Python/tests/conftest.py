@@ -33,8 +33,12 @@ if not os.getenv("VENICE_MODEL"):
 
 # Get environment variables
 VENICE_API_KEY = os.getenv("VENICE_API_KEY")
-VENICE_BASE_URL = os.getenv("VENICE_BASE_URL")
-VENICE_MODEL = os.getenv("VENICE_MODEL")
+VENICE_BASE_URL = os.getenv("VENICE_BASE_URL", "https://api.venice.ai")
+VENICE_MODEL = os.getenv("VENICE_MODEL", "llama-3.3-70b")
+
+# Export for use in tests
+os.environ["VENICE_BASE_URL"] = VENICE_BASE_URL
+os.environ["VENICE_MODEL"] = VENICE_MODEL
 
 @pytest_asyncio.fixture(scope="function")
 async def venice_client():
