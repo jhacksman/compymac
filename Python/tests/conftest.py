@@ -79,6 +79,10 @@ async def venice_client():
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
+        # Mock embedding and summary generation
+        embedding = [0.1] * 1536
+        summary = "Mock summary for: " + content[:50]
+        
         response = MemoryResponse(
             action="store_memory",
             success=True,
@@ -86,7 +90,9 @@ async def venice_client():
             memories=[{
                 "id": memory_id,
                 "content": content,
-                "metadata": metadata_dict
+                "metadata": metadata_dict,
+                "embedding": embedding,
+                "summary": summary
             }]
         )
         
@@ -110,7 +116,9 @@ async def venice_client():
                     "id": memory["id"],
                     "content": memory["content"],
                     "metadata": dict(metadata),  # Make a copy of metadata
-                    "timestamp": memory.get("timestamp", datetime.now().timestamp())
+                    "timestamp": memory.get("timestamp", datetime.now().timestamp()),
+                    "embedding": [0.1] * 1536,  # Mock embedding
+                    "summary": f"Mock summary for: {memory['content'][:50]}"  # Mock summary
                 }
                 memories.append(memory_copy)
                 
