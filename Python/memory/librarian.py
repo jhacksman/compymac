@@ -1,20 +1,23 @@
 """Librarian agent for memory management."""
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
-from .message_types import MemoryMetadata
+from .message_types import MemoryMetadata, MemoryResponse
 from .venice_client import VeniceClient
 from .exceptions import MemoryError
 
 class LibrarianAgent:
     """Agent responsible for memory storage and retrieval."""
     
+    _shared_memories: List[Dict[str, Any]] = []  # Class-level shared memories
+    
     def __init__(
         self,
         venice_client: VeniceClient,
         importance_threshold: float = 0.5,
-        max_context_size: int = 10
+        max_context_size: int = 10,
+        max_context_tokens: int = 2000
     ):
         """Initialize librarian agent.
         
@@ -22,11 +25,13 @@ class LibrarianAgent:
             venice_client: Venice.ai API client
             importance_threshold: Minimum importance score for memories
             max_context_size: Maximum number of memories to keep in context
+            max_context_tokens: Maximum tokens in context window
         """
         self.venice_client = venice_client
         self.importance_threshold = importance_threshold
         self.max_context_size = max_context_size
-        self.recent_memories = []  # Cache of recent memories
+        self.max_context_tokens = max_context_tokens
+        self.recent_memories = []  # Instance-level recent memories
         
     async def store_memory(
         self,
@@ -63,34 +68,13 @@ class LibrarianAgent:
                     task_id=None
                 )
             
-            # Sanitize tags to prevent XSS
-            if metadata.tags:
-                sanitized_tags = []
-                for tag in metadata.tags:
-                    # Remove potential script tags and other dangerous content
-                    sanitized = tag.replace("<", "&lt;").replace(">", "&gt;")
-                    sanitized = sanitized.replace("javascript:", "")
-                    sanitized = sanitized.replace("data:", "")
-                    sanitized_tags.append(sanitized)
-                metadata.tags = sanitized_tags
-            
-            # Validate timestamp
-            try:
-                if not metadata.timestamp or not isinstance(metadata.timestamp, (int, float)):
-                    raise MemoryError("Invalid timestamp format")
-            except (AttributeError, TypeError):
-                raise MemoryError("Invalid timestamp format")
-            
             # Apply surprise-based filtering
             if surprise_score > self.importance_threshold:
                 metadata.importance = max(metadata.importance or 0.0, surprise_score)
             
-            memory_id = None
-            last_error = None
-            
+            # Store in Venice.ai with retry logic
             for attempt in range(max_retries):
                 try:
-                    # Store in Venice.ai with timeout handling
                     response = await self.venice_client.store_memory(content, metadata)
                     
                     # Handle dict response
@@ -98,42 +82,48 @@ class LibrarianAgent:
                         if response.get("success") and response.get("memory_id"):
                             memory_id = response["memory_id"]
                             # Cache the memory
-                            self.recent_memories.append({
+                            memory_entry = {
                                 "id": memory_id,
                                 "content": content,
-                                "metadata": metadata.to_dict() if metadata else {}
-                            })
-                            # Trim cache if needed
+                                "metadata": metadata.to_dict()
+                            }
+                            self.recent_memories.append(memory_entry)
+                            self._shared_memories.append(memory_entry)
+                            
+                            # Trim caches if needed
                             if len(self.recent_memories) > self.max_context_size:
                                 self.recent_memories.pop(0)
-                            break
+                            if len(self._shared_memories) > self.max_context_size * 2:
+                                self._shared_memories = self._shared_memories[-self.max_context_size:]
+                                
+                            return memory_id
                     else:
                         if response.success and response.memory_id:
                             memory_id = response.memory_id
                             # Cache the memory
-                            self.recent_memories.append({
+                            memory_entry = {
                                 "id": memory_id,
                                 "content": content,
-                                "metadata": metadata.to_dict() if metadata else {}
-                            })
-                            # Trim cache if needed
+                                "metadata": metadata.to_dict()
+                            }
+                            self.recent_memories.append(memory_entry)
+                            self._shared_memories.append(memory_entry)
+                            
+                            # Trim caches if needed
                             if len(self.recent_memories) > self.max_context_size:
                                 self.recent_memories.pop(0)
-                            break
+                            if len(self._shared_memories) > self.max_context_size * 2:
+                                self._shared_memories = self._shared_memories[-self.max_context_size:]
+                                
+                            return memory_id
                             
-                except (TimeoutError, ConnectionError) as e:
-                    last_error = e
+                except Exception as e:
                     if attempt < max_retries - 1:
-                        time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                        time.sleep(retry_delay * (2 ** attempt))
                         continue
                     raise MemoryError(f"Venice.ai API error after {max_retries} retries: {str(e)}")
-                except Exception as e:
-                    raise MemoryError(f"Venice.ai API error: {str(e)}")
                     
-            if not memory_id:
-                raise MemoryError("Failed to store memory after retries")
-                
-            return memory_id
+            raise MemoryError("Failed to store memory after retries")
             
         except Exception as e:
             raise MemoryError(f"Memory storage error: {str(e)}")
@@ -186,3 +176,60 @@ class LibrarianAgent:
             
         except Exception as e:
             raise MemoryError(f"Memory retrieval error: {str(e)}")
+            
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Update an existing memory's content or metadata.
+        
+        Args:
+            memory_id: ID of memory to update
+            content: Optional new content
+            metadata: Optional metadata updates
+            
+        Returns:
+            Updated memory entry
+            
+        Raises:
+            MemoryError: If update fails
+        """
+        try:
+            # Find memory in cache first
+            memory = None
+            for mem in self._shared_memories:
+                if mem["id"] == memory_id:
+                    memory = mem
+                    break
+                    
+            if not memory:
+                raise MemoryError(f"Memory {memory_id} not found")
+                
+            # Update content if provided
+            if content is not None:
+                memory["content"] = content
+                
+            # Update metadata if provided
+            if metadata is not None:
+                memory["metadata"].update(metadata)
+                
+            # Update in Venice.ai
+            response = await self.venice_client.update_memory(
+                memory_id,
+                content=content,
+                metadata=memory["metadata"]
+            )
+            
+            if isinstance(response, dict):
+                if not response.get("success"):
+                    raise MemoryError(f"Failed to update memory: {response.get('error')}")
+            else:
+                if not response.success:
+                    raise MemoryError(f"Failed to update memory: {response.error}")
+                    
+            return memory
+            
+        except Exception as e:
+            raise MemoryError(f"Memory update error: {str(e)}")
