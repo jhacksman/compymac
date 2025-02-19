@@ -1,19 +1,17 @@
-"""Message types for memory operations."""
-
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+"""Message types for memory system."""
+from dataclasses import dataclass, asdict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
-
 
 @dataclass
 class MemoryMetadata:
     """Metadata for memory entries."""
     timestamp: float
-    importance: Optional[float] = None
+    importance: float = 0.0
     context_ids: List[str] = None
     tags: List[str] = None
     source: Optional[str] = None
-    task_id: Optional[int] = None  # Added for task-based filtering
+    task_id: Optional[str] = None
     
     def __post_init__(self):
         """Initialize default values."""
@@ -22,28 +20,13 @@ class MemoryMetadata:
         if self.tags is None:
             self.tags = []
             
-    def asdict(self) -> Dict:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "timestamp": self.timestamp,
-            "importance": self.importance,
-            "context_ids": self.context_ids,
-            "tags": self.tags,
-            "source": self.source,
-            "task_id": self.task_id
-        }
-
-
-@dataclass
-class MemoryRequest:
-    """Request for memory operations."""
-    action: str
-    content: Optional[str] = None
-    metadata: Optional[Dict] = None
-    memory_id: Optional[str] = None
-    query: Optional[str] = None
-    filters: Optional[Dict] = None
-
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert metadata to dictionary.
+        
+        Returns:
+            Dictionary representation of metadata
+        """
+        return asdict(self)
 
 @dataclass
 class MemoryResponse:
@@ -51,5 +34,7 @@ class MemoryResponse:
     action: str
     success: bool
     memory_id: Optional[str] = None
-    memories: Optional[List[Dict]] = None
+    memories: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
+    summary: Optional[str] = None
+    embedding: Optional[List[float]] = None

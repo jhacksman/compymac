@@ -1,6 +1,7 @@
 """Tests for manager agent."""
 
 import pytest
+import json
 from unittest.mock import Mock, AsyncMock
 from datetime import datetime
 
@@ -18,18 +19,18 @@ def memory_manager():
     return manager
 
 @pytest.fixture
-def manager_agent(memory_manager):
-    """Create manager agent with mock memory manager."""
-    return AgentManager(memory_manager)
+def manager_agent(memory_manager, mock_llm):
+    """Create manager agent with mock memory manager and LLM."""
+    return AgentManager(memory_manager, llm=mock_llm)
 
 @pytest.mark.asyncio
 async def test_execute_task_success(manager_agent):
     """Test successful task execution."""
-    # Mock agent executor
-    manager_agent.agent_executor.arun = AsyncMock(return_value={
+    # Set mock LLM response
+    manager_agent.llm.mock_response = {
         "output": "Task completed",
         "intermediate_steps": []
-    })
+    }
     
     result = await manager_agent.execute_task("Test task")
     
@@ -46,11 +47,9 @@ async def test_execute_task_success(manager_agent):
 @pytest.mark.asyncio
 async def test_execute_task_failure(manager_agent):
     """Test task execution failure."""
-    # Mock agent executor to raise exception
+    # Set mock LLM to raise exception
     error_msg = "Test error"
-    manager_agent.agent_executor.arun = AsyncMock(
-        side_effect=Exception(error_msg)
-    )
+    manager_agent.llm.mock_response = Exception(error_msg)
     
     result = await manager_agent.execute_task("Test task")
     
@@ -82,14 +81,14 @@ async def test_tool_integration(manager_agent):
         "recommendations": []
     })
     
-    # Mock agent executor
-    manager_agent.agent_executor.arun = AsyncMock(return_value={
+    # Set mock LLM response
+    manager_agent.llm.mock_response = {
         "output": "Task completed",
         "intermediate_steps": [
             ("plan_task", {"subtasks": ["step1"]}),
             ("execute_task", {"success": True})
         ]
-    })
+    }
     
     result = await manager_agent.execute_task("Test task")
     

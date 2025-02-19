@@ -1,176 +1,101 @@
-"""Test fixtures for memory system tests."""
-
+"""Test configuration and fixtures."""
 import os
-import uuid
-import time
-import asyncio
 import pytest
 import pytest_asyncio
-from datetime import datetime
-from unittest.mock import Mock, AsyncMock, MagicMock
+from unittest.mock import Mock, AsyncMock
+import asyncio
+import json
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
+from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
+from .mock_memory_db import MockMemoryDB
 
-# Global memory store for tests
-_test_memories = []
+# Mock LLM for testing
+class MockLLM:
+    """Mock LLM for testing."""
+    def __init__(self, response=None):
+        self._response = response or {}
+        
+    async def apredict(self, *args, **kwargs):
+        """Mock async prediction."""
+        if isinstance(self._response, Exception):
+            raise self._response
+        return json.dumps(self._response)
+        
+    def predict(self, *args, **kwargs):
+        """Mock sync prediction."""
+        if isinstance(self._response, Exception):
+            raise self._response
+        return json.dumps(self._response)
 
-# Set test environment variables if not already set
-if not os.getenv("VENICE_API_KEY"):
-    os.environ["VENICE_API_KEY"] = "test-key"
-if not os.getenv("VENICE_BASE_URL"):
-    os.environ["VENICE_BASE_URL"] = "https://api.venice.ai"
-if not os.getenv("VENICE_MODEL"):
-    os.environ["VENICE_MODEL"] = "llama-3.3-70b"
+@pytest.fixture
+def mock_llm():
+    """Create mock LLM."""
+    return MockLLM()
 
-# Get environment variables
-VENICE_API_KEY = os.getenv("VENICE_API_KEY")
-VENICE_BASE_URL = os.getenv("VENICE_BASE_URL")
-VENICE_MODEL = os.getenv("VENICE_MODEL")
+@pytest_asyncio.fixture
+async def mock_memory_db():
+    """Create mock memory database."""
+    db = MockMemoryDB()
+    yield db
+    await db.cleanup()
 
-@pytest_asyncio.fixture(scope="function")
-async def venice_client():
-    """Create mock Venice client for testing."""
-    client = MagicMock(spec=VeniceClient)
+@pytest_asyncio.fixture
+async def mock_venice_client():
+    """Create mock Venice client."""
+    client = Mock(spec=VeniceClient)
     
-    async def mock_store_memory(content, metadata=None):
-        """Mock store_memory with async behavior."""
-        memory_id = str(uuid.uuid4())
-        
-        # Create default metadata if none provided
-        if metadata is None:
-            metadata = MemoryMetadata(
-                timestamp=datetime.now().timestamp(),
-                importance=0.0,
-                context_ids=[],
-                tags=[],
-                source=None,
-                task_id=None
-            )
-            
-        # Convert metadata to dict for storage
-        if isinstance(metadata, MemoryMetadata):
-            metadata_dict = {
-                "timestamp": metadata.timestamp,
-                "importance": metadata.importance or 0.0,
-                "context_ids": metadata.context_ids or [],
-                "tags": metadata.tags or [],
-                "source": metadata.source,
-                "task_id": metadata.task_id
-            }
-        else:
-            metadata_dict = dict(metadata)
-            
-        # Create memory entry
-        memory = {
-            "id": memory_id,
-            "content": content,
-            "metadata": metadata_dict,
-            "timestamp": datetime.now().timestamp()
-        }
-        
-        # Store memory
-        _test_memories.append(memory)
-        
-        # Add small delay to simulate network latency
-        await asyncio.sleep(0.1)
-        
-        response = MemoryResponse(
+    async def mock_store(*args, **kwargs):
+        return MemoryResponse(
             action="store_memory",
             success=True,
-            memory_id=memory_id,
-            content=content,
-            metadata=metadata_dict
+            memory_id="test_id"
         )
-        
-        return response
-        
-    async def mock_retrieve_context(query=None, context_id=None, **kwargs):
-        """Mock retrieve_context with async behavior."""
-        # Add small delay to simulate network latency
-        await asyncio.sleep(0.1)
-        
-        memories = []
-        for memory in _test_memories:
-            metadata = memory.get("metadata", {})
-            if not isinstance(metadata, dict):
-                continue
-                
-            context_ids = metadata.get("context_ids", [])
-            if not context_id or context_id in context_ids:
-                # Create a copy to avoid modifying original
-                memory_copy = {
-                    "id": memory["id"],
-                    "content": memory["content"],
-                    "metadata": dict(metadata),  # Make a copy of metadata
-                    "timestamp": memory.get("timestamp", datetime.now().timestamp())
-                }
-                memories.append(memory_copy)
-                
+    
+    async def mock_retrieve(*args, **kwargs):
         return MemoryResponse(
             action="retrieve_context",
             success=True,
-            memories=memories
+            memories=[{
+                "id": "test_id",
+                "content": "test content",
+                "metadata": {
+                    "timestamp": 1234567890,
+                    "importance": 0.8
+                }
+            }]
         )
-        
-    async def mock_update_memory(memory_id, content=None, metadata=None):
-        """Mock update_memory with async behavior."""
-        # Add small delay to simulate network latency
-        await asyncio.sleep(0.1)
-        
-        for memory in _test_memories:
-            if memory["id"] == memory_id:
-                if content is not None:
-                    memory["content"] = content
-                if metadata is not None:
-                    memory["metadata"] = metadata
-                memory["timestamp"] = datetime.now().timestamp()
-                break
-                
-        return MemoryResponse(
-            action="update_memory",
-            success=True
-        )
-        
-    async def mock_delete_memory(memory_id):
-        """Mock delete_memory with async behavior."""
-        # Add small delay to simulate network latency
-        await asyncio.sleep(0.1)
-        
-        # Remove memory if it exists
-        for i, memory in enumerate(_test_memories):
-            if memory["id"] == memory_id:
-                _test_memories.pop(i)
-                break
-                
-        return MemoryResponse(
-            action="delete_memory",
-            success=True
-        )
-        
-    # Set up async mock methods
-    client.store_memory = AsyncMock(side_effect=mock_store_memory)
-    client.retrieve_context = AsyncMock(side_effect=mock_retrieve_context)
-    client.update_memory = AsyncMock(side_effect=mock_update_memory)
-    client.delete_memory = AsyncMock(side_effect=mock_delete_memory)
     
+    async def mock_embedding(*args, **kwargs):
+        return MemoryResponse(
+            action="get_embedding",
+            success=True,
+            embedding=[0.1] * 1536
+        )
+    
+    client.store_memory = AsyncMock(side_effect=mock_store)
+    client.retrieve_context = AsyncMock(side_effect=mock_retrieve)
+    client.get_embedding = AsyncMock(side_effect=mock_embedding)
     return client
 
-@pytest_asyncio.fixture(scope="function")
-async def librarian(venice_client):
-    """Create librarian with Venice client."""
-    agent = LibrarianAgent(venice_client)
-    
-    # Clear memories at start
-    _test_memories.clear()
-    agent.recent_memories.clear()
-    LibrarianAgent._shared_memories.clear()
-    
-    try:
-        yield agent
-    finally:
-        # Clear any shared memories
-        agent.recent_memories.clear()
-        LibrarianAgent._shared_memories.clear()
-        _test_memories.clear()
+@pytest_asyncio.fixture
+async def librarian(mock_venice_client, mock_memory_db):
+    """Create librarian agent with mocks."""
+    agent = LibrarianAgent(
+        venice_client=mock_venice_client,
+        importance_threshold=0.5,
+        max_context_size=10
+    )
+    agent._shared_memories = []  # Reset shared memories
+    return agent
+
+# Skip desktop automation tests in CI
+def pytest_collection_modifyitems(config, items):
+    """Skip desktop automation tests in CI."""
+    if os.environ.get("CI"):
+        skip_desktop = pytest.mark.skip(reason="Desktop automation tests disabled in CI")
+        for item in items:
+            if "desktop" in item.keywords:
+                item.add_marker(skip_desktop)

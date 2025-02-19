@@ -17,9 +17,9 @@ def memory_manager():
     return manager
 
 @pytest.fixture
-def planner_agent(memory_manager):
-    """Create planner agent with mock memory manager."""
-    return PlannerAgent(memory_manager)
+def planner_agent(memory_manager, mock_llm):
+    """Create planner agent with mock memory manager and LLM."""
+    return PlannerAgent(memory_manager, llm=mock_llm)
 
 def test_create_plan_success(planner_agent):
     """Test successful plan creation."""
@@ -96,9 +96,9 @@ def test_create_plan_error_handling(planner_agent):
     assert error_msg in plan["subtasks"][0]["description"]
     assert plan["criteria"]["timeout"] == 60  # Error timeout
 
-def test_create_plan_without_memory_manager():
+def test_create_plan_without_memory_manager(mock_llm):
     """Test plan creation without memory manager."""
-    planner = PlannerAgent()  # No memory manager
+    planner = PlannerAgent(llm=mock_llm)  # No memory manager
     
     # Mock planning chain
     planner.planning_chain.predict = Mock(return_value=json.dumps({

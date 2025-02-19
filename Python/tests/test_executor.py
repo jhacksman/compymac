@@ -62,8 +62,8 @@ def executor_agent(memory_manager, mock_llm):
 @pytest.mark.asyncio
 async def test_execute_task_success(executor_agent):
     """Test successful task execution."""
-    # Mock execution chain
-    executor_agent.execution_chain.apredict = AsyncMock(return_value=json.dumps({
+    # Set mock LLM response
+    executor_agent.llm._response = json.dumps({
         "execution_plan": [{
             "step": "Test step",
             "verification": "Step complete"
@@ -72,7 +72,7 @@ async def test_execute_task_success(executor_agent):
             "step_criteria": ["complete"],
             "overall_criteria": "success"
         }
-    }))
+    })
     
     task = {
         "subtasks": ["Test step"],

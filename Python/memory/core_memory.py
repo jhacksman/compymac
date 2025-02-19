@@ -9,76 +9,53 @@ from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 from datetime import datetime
 import math
-
-import torch
-import torch.nn as nn
-from transformers import (
-    AutoModel,
-    AutoTokenizer,
-    BartForConditionalGeneration,
-    AutoConfig
-)
+import asyncio
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
 from .venice_client import VeniceClient
 from .librarian import LibrarianAgent
+from .db import MemoryDB
 
 
 @dataclass
 class CoreMemoryConfig:
     """Configuration for core memory module."""
-    context_size: int = 4096  # Transformer context window
+    context_size: int = 4096  # Context window size
     window_size: int = 100  # Number of recent items to keep
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
-    encoder_model: str = "sentence-transformers/all-mpnet-base-v2"  # Model for encoding
-    generator_model: str = "facebook/bart-large-cnn"  # Model for generation
-    hidden_size: int = 768  # Hidden size for transformer
-    num_attention_heads: int = 12  # Number of attention heads
+    min_similarity: float = 0.7  # Minimum similarity threshold for retrieval
 
 
-class CoreMemory(nn.Module):
+class CoreMemory:
     """Core memory module for immediate context processing."""
     
     def __init__(
         self,
         config: CoreMemoryConfig,
-        venice_client: VeniceClient
+        venice_client: VeniceClient,
+        memory_db: MemoryDB
     ):
         """Initialize core memory module.
         
         Args:
             config: Configuration for the module
             venice_client: Client for Venice.ai API
+            memory_db: Database connection for memory storage
         """
-        super().__init__()
         self.config = config
         self.venice_client = venice_client
         self.librarian = LibrarianAgent(venice_client)
-        
-        # Initialize transformer components
-        self.encoder_tokenizer = AutoTokenizer.from_pretrained(config.encoder_model)
-        self.encoder = AutoModel.from_pretrained(config.encoder_model)
-        self.generator_tokenizer = AutoTokenizer.from_pretrained(config.generator_model)
-        self.generator = BartForConditionalGeneration.from_pretrained(config.generator_model)
-        
-        # Attention components
-        self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.key_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.value_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.memory_db = memory_db
         
         # Current context state
         self.current_context: List[Dict] = []
-        
-        # Move model to GPU if available
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
         
     def reset_context(self):
         """Reset the current context state."""
         self.current_context = []
         
-    def add_to_context(
+    async def add_to_context(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -94,79 +71,63 @@ class CoreMemory(nn.Module):
         Raises:
             MemoryError: If context size would exceed limit
         """
-        # Check context size limit
-        if len(self.current_context) >= self.config.context_size:
-            raise MemoryError(
-                f"Context size limit ({self.config.context_size}) exceeded"
-            )
+        try:
+            # Check context size limit
+            if len(self.current_context) >= self.config.context_size:
+                raise MemoryError(
+                    f"Context size limit ({self.config.context_size}) exceeded"
+                )
+            # Get embedding from Venice.ai
+            embedding_response = await self.venice_client.get_embedding(content)
+            if not embedding_response.success:
+                raise MemoryError(f"Failed to get embedding: {embedding_response.error}")
             
-        # Encode content
-        inputs = self.encoder_tokenizer(
-            content,
-            padding=True,
-            truncation=True,
-            max_length=self.config.context_size,
-            return_tensors="pt"
-        ).to(self.device)
+            if not embedding_response.embedding:
+                raise MemoryError("No embedding returned from Venice.ai")
+                
+            embedding = embedding_response.embedding
+        except Exception as e:
+            raise MemoryError(f"Failed to process content: {str(e)}")
         
-        # Get content embeddings
-        with torch.no_grad():
-            outputs = self.encoder(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"]
-            )
-            embeddings = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
-            
         # Compute surprise score if not provided
         if surprise_score is None:
-            # Project query and memory
-            query = self.query_proj(embeddings)
-            
-            # Get context embeddings
             if self.current_context:
-                # Batch encode all context items
-                context_texts = [item["content"] for item in self.current_context[-self.config.window_size:]]
-                encodings = self.encoder_tokenizer(
-                    context_texts,
-                    padding=True,
-                    truncation=True,
-                    max_length=self.config.context_size,
-                    return_tensors="pt"
-                ).to(self.device)
-                
-                with torch.no_grad():
-                    outputs = self.encoder(
-                        input_ids=encodings["input_ids"],
-                        attention_mask=encodings["attention_mask"]
-                    )
-                    context_items = outputs.last_hidden_state[:, 0, :]  # Use [CLS] token for all sequences
-                    keys = self.key_proj(context_items)
-            else:
-                keys = torch.zeros((0, self.config.hidden_size), device=self.device)
-            
-            if keys.size(0) > 0:
-                attention_scores = torch.matmul(query, keys.transpose(-2, -1))
-                attention_scores = attention_scores / math.sqrt(self.config.hidden_size)
-                max_attention = torch.max(attention_scores).item()
-                surprise_score = 1.0 - max_attention
+                # Get similar memories to compute surprise
+                similar_memories = self.memory_db.retrieve_similar(
+                    embedding=embedding,
+                    limit=1,
+                    memory_type='stm',
+                    min_similarity=self.config.min_similarity
+                )
+                surprise_score = 1.0 - similar_memories[0]['similarity'] if similar_memories else 1.0
             else:
                 surprise_score = 1.0  # First item is surprising
             
-        # Apply surprise-based filtering
+        # Store memory regardless of surprise score
+        memory_id = self.memory_db.store_memory(
+            content=content,
+            embedding=embedding,
+            metadata=metadata if isinstance(metadata, dict) else {},
+            memory_type='stm',
+            surprise_score=float(surprise_score),
+            tags=['short_term']
+        )
+        
+        # Store via librarian only if surprising enough
         if surprise_score > self.config.surprise_threshold:
-            # Store important memories via librarian
-            self.librarian.store_memory(
+            await self.librarian.store_memory(
                 content=content,
                 metadata=metadata,
-                surprise_score=surprise_score
+                surprise_score=float(surprise_score)
             )
             
-        # Add to context with embeddings
+        # Add to context
         self.current_context.append({
+            "id": memory_id,
             "content": content,
             "metadata": metadata if isinstance(metadata, dict) else {},
-            "surprise_score": float(surprise_score) if surprise_score is not None else 1.0,
-            "embeddings": embeddings.detach().cpu()
+            "surprise_score": float(surprise_score),
+            "embedding": embedding
         })
         
     def get_context_window(
@@ -186,12 +147,12 @@ class CoreMemory(nn.Module):
             
         return self.current_context[-window_size:]
         
-    def process_context(
+    async def process_context(
         self,
         query: Optional[str] = None,
         min_importance: Optional[float] = None
     ) -> List[Dict]:
-        """Process current context through transformer attention.
+        """Process current context using Venice.ai embeddings.
         
         Args:
             query: Optional query to focus attention
@@ -209,65 +170,37 @@ class CoreMemory(nn.Module):
         # Get recent context window
         recent_context = self.current_context[-self.config.window_size:]
         
-        # Encode context items
-        context_texts = [item["content"] for item in recent_context]
-        context_encodings = self.encoder_tokenizer(
-            context_texts,
-            padding=True,
-            truncation=True,
-            max_length=self.config.context_size,
-            return_tensors="pt"
-        ).to(self.device)
-        
-        # Get context embeddings
-        with torch.no_grad():
-            context_outputs = self.encoder(
-                input_ids=context_encodings["input_ids"],
-                attention_mask=context_encodings["attention_mask"]
-            )
-            context_embeddings = context_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
-        
         if query is not None:
-            # Encode query
-            query_encoding = self.encoder_tokenizer(
-                query,
-                padding=True,
-                truncation=True,
-                max_length=self.config.context_size,
-                return_tensors="pt"
-            ).to(self.device)
+            # Get query embedding from Venice.ai
+            query_response = await self.venice_client.get_embedding(query)
+            if not query_response.success:
+                raise MemoryError(f"Failed to get query embedding: {query_response.error}")
+                
+            if not query_response.embedding:
+                raise MemoryError("No embedding returned from Venice.ai")
             
-            # Get query embedding
-            with torch.no_grad():
-                query_outputs = self.encoder(
-                    input_ids=query_encoding["input_ids"],
-                    attention_mask=query_encoding["attention_mask"]
-                )
-                query_embedding = query_outputs.last_hidden_state[:, 0, :]  # Use [CLS] token
+            # Get similar memories from database
+            similar_memories = self.memory_db.retrieve_similar(
+                embedding=query_response.embedding,
+                limit=self.config.window_size,
+                memory_type='stm',
+                min_similarity=self.config.min_similarity
+            )
             
-            # Compute attention scores
-            query_proj = self.query_proj(query_embedding)
-            key_proj = self.key_proj(context_embeddings)
+            # Filter by importance if needed
+            if min_importance is not None:
+                similar_memories = [
+                    mem for mem in similar_memories
+                    if float(mem['metadata'].get('importance', 0.0)) >= min_importance
+                ]
             
-            attention_scores = torch.matmul(query_proj, key_proj.transpose(-2, -1))
-            attention_scores = attention_scores / math.sqrt(self.config.hidden_size)
-            attention_weights = torch.softmax(attention_scores, dim=-1)
-            
-            # Filter by attention weights and importance
-            filtered_context = []
-            for idx, (item, weight) in enumerate(zip(recent_context, attention_weights[0])):
-                metadata = item.get("metadata", {})
-                importance = float(metadata.get("importance", 0.0)) if isinstance(metadata, dict) else 0.0
-                if weight > 0.1 and (min_importance is None or importance >= min_importance):
-                    filtered_context.append(item)
-            
-            return filtered_context
+            return similar_memories
         
         # Return recent context if no query
         return recent_context
         
-    def summarize_context(self) -> str:
-        """Generate a summary of current context using transformer model.
+    async def summarize_context(self) -> str:
+        """Generate a summary of current context using Venice.ai.
         
         Returns:
             Summary string of current context
@@ -284,29 +217,15 @@ class CoreMemory(nn.Module):
                 entry["content"] for entry in self.current_context
             )
             
-            # Encode context
-            context_encoding = self.generator_tokenizer(
-                context_str,
-                padding=True,
-                truncation=True,
-                max_length=self.config.context_size,
-                return_tensors="pt"
-            ).to(self.device)
-            
-            # Generate summary using generator model
-            with torch.no_grad():
-                outputs = self.generator.generate(
-                    input_ids=context_encoding["input_ids"],
-                    attention_mask=context_encoding["attention_mask"],
-                    max_length=200,
-                    num_beams=4,
-                    length_penalty=2.0,
-                    early_stopping=True,
-                    use_cache=True
-                )
+            # Use Venice.ai to generate summary
+            summary_response = await self.venice_client.generate_summary(context_str)
+            if not summary_response.success:
+                raise MemoryError(f"Failed to generate summary: {summary_response.error}")
                 
-            summary = self.generator_tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return summary
+            if not summary_response.summary:
+                raise MemoryError("No summary returned from Venice.ai")
+            
+            return summary_response.summary
             
         except Exception as e:
             raise MemoryError(f"Failed to summarize context: {str(e)}")

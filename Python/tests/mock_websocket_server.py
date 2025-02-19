@@ -12,77 +12,153 @@ from ..memory.protocol import MemoryMessage
 class MockWebSocketServer:
     """Mock WebSocket server for testing memory operations."""
     
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "localhost", port: int = 0):  # Use port 0 to let OS assign port
         """Initialize mock server.
         
         Args:
             host: Server host (default: localhost)
-            port: Server port (default: 8765)
+            port: Server port (0 for auto-assign)
         """
         self.host = host
         self.port = port
         self.server = None
+        self.server_task = None
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
+        self.connected = True  # Simulate successful connection
+        self.actual_port = None  # Will be set after server starts
         
-    def start(self):
+    async def start(self):
         """Start the WebSocket server."""
-        import threading
-        import websockets.sync.server as ws_server
+        import asyncio
+        import websockets
         
-        def run_server():
+        if hasattr(self, 'server') and self.server:
+            return  # Server already running
+            
+        self._stop_event = asyncio.Event()
+        self._ready_event = asyncio.Event()
+        
+        async def run_server():
             try:
-                # Create WebSocket server
-                self.server = ws_server.serve(
-                    self.handle_connection,
-                    self.host,
-                    self.port,
-                    ping_interval=None,  # Disable ping/pong
-                    ping_timeout=None,
-                    close_timeout=None
-                )
-                self.server.serve_forever()
+                # Clean up any existing connections
+                if hasattr(self, 'server') and self.server:
+                    self.server.close()
+                    await self.server.wait_closed()
+                    await asyncio.sleep(1)  # Wait for port to be freed
+                    
+                # Try to start server with retries
+                last_error = None
+                for attempt in range(3):
+                    try:
+                        # Try to start server
+                        server = await websockets.serve(
+                            self.handle_connection,
+                            self.host,
+                            self.port,
+                            ping_interval=None,  # Disable ping/pong for tests
+                            ping_timeout=None,
+                            close_timeout=None,
+                            max_size=None  # Allow any message size
+                        )
+                        self.server = server
+                        self.connected = True
+                        # Get actual port assigned by OS
+                        self.actual_port = server.sockets[0].getsockname()[1]
+                        self._ready_event.set()  # Signal server is ready
+                        await asyncio.sleep(0.1)  # Give server time to fully start
+                        return  # Success
+                    except OSError as e:
+                        last_error = e
+                        if attempt < 2:  # Only sleep if we're going to retry
+                            await asyncio.sleep(1)  # Wait before retry
+                        continue
+                    except Exception as e:
+                        print(f"Failed to start server: {e}")
+                        self.connected = False
+                        self._ready_event.set()  # Signal server failed
+                        raise
+                        
+                # All retries failed
+                self.connected = False
+                self._ready_event.set()  # Signal server failed
+                raise last_error or Exception("Failed to start server after retries")
             except Exception as e:
                 print(f"Server error: {str(e)}")
+                self.connected = False
+                self._ready_event.set()  # Signal server failed to start
+            finally:
+                if hasattr(self, 'server') and self.server:
+                    self.server.close()
+                    await self.server.wait_closed()
+                self.connected = False
+                self.server = None
                 
-        self.server_thread = threading.Thread(target=run_server, daemon=True)
-        self.server_thread.start()
-        # Give server time to start
-        import time
-        time.sleep(5)  # Increased wait time for server startup
+        # Start server with retries
+        for attempt in range(3):  # Try 3 times
+            try:
+                # Clean up any existing server
+                if hasattr(self, 'server_task') and self.server_task:
+                    self.server_task.cancel()
+                    try:
+                        await self.server_task
+                    except asyncio.CancelledError:
+                        pass
+                    
+                self.server_task = asyncio.create_task(run_server())
+                await asyncio.sleep(1.0)  # Give server more time to start
+                await asyncio.wait_for(self._ready_event.wait(), timeout=5.0)  # Longer timeout
+                if self.connected:
+                    await asyncio.sleep(0.5)  # Additional wait to ensure stability
+                    return  # Server started successfully
+            except (asyncio.TimeoutError, Exception) as e:
+                print(f"Server start attempt {attempt + 1} failed: {str(e)}")
+                await asyncio.sleep(2.0)  # Longer wait between retries
+                
+        raise Exception("Failed to start WebSocket server after retries")
     
-    def stop(self):
+    async def stop(self):
         """Stop the WebSocket server."""
         try:
-            if hasattr(self, 'server'):
+            if self.server:
                 self.server.close()
-            if hasattr(self, 'server_thread'):
-                self.server_thread.join(timeout=1.0)
-        except:
-            pass  # Ignore errors during cleanup
+                await self.server.wait_closed()
+            if self.server_task and not self.server_task.done():
+                self.server_task.cancel()
+                try:
+                    await self.server_task
+                except asyncio.CancelledError:
+                    pass
+        except Exception as e:
+            print(f"Error stopping server: {str(e)}")
+        finally:
+            self.connected = False
+            self.server = None
+            self.server_task = None
     
-    def handle_connection(self, websocket):
+    async def handle_connection(self, websocket):
         """Handle WebSocket connection.
         
         Args:
             websocket: WebSocket connection
         """
         try:
-            while True:
+            async for message in websocket:
                 try:
-                    message = websocket.recv()
                     print(f"Received message: {message}")  # Debug logging
+                    if not isinstance(message, str):
+                        message = message.decode('utf-8')
                     request = json.loads(message)
                     action = request.get("action")
                     
                     if action == "store_memory":
-                        response = self._handle_store_memory(request)
+                        response = await self._handle_store_memory(request)
                     elif action == "retrieve_context":
-                        response = self._handle_retrieve_context(request)
+                        response = await self._handle_retrieve_context(request)
                     elif action == "update_memory":
-                        response = self._handle_update_memory(request)
+                        response = await self._handle_update_memory(request)
                     elif action == "delete_memory":
-                        response = self._handle_delete_memory(request)
+                        response = await self._handle_delete_memory(request)
                     elif action == "desktop_create_folder":
                         path = request.get("path")
                         try:
@@ -110,25 +186,25 @@ class MockWebSocketServer:
                         response["action"] = action
                         
                     print(f"Sending response: {json.dumps(response)}")  # Debug logging
-                    websocket.send(json.dumps(response))
+                    await websocket.send(json.dumps(response))
                     
                 except json.JSONDecodeError as e:
                     error_response = {
                         "status": "error",
                         "message": f"Invalid JSON format: {str(e)}"
                     }
-                    websocket.send(json.dumps(error_response))
+                    await websocket.send(json.dumps(error_response))
                 except Exception as e:
                     error_response = {
                         "status": "error",
                         "message": f"Internal server error: {str(e)}"
                     }
-                    websocket.send(json.dumps(error_response))
+                    await websocket.send(json.dumps(error_response))
                     
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")  # Debug logging
     
-    def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle store_memory action.
         
         Args:
@@ -170,7 +246,7 @@ class MockWebSocketServer:
                 "message": f"Failed to store memory: {str(e)}"
             }
     
-    def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle retrieve_context action.
         
         Args:
@@ -216,7 +292,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle update_memory action.
         
         Args:
@@ -251,7 +327,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle delete_memory action.
         
         Args:

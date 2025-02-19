@@ -110,27 +110,40 @@ Response:""",
             if not criteria:
                 return True
                 
-            # Parse execution result
-            if "artifacts" not in result:
+            # Check for artifacts
+            if not result or "artifacts" not in result:
                 return False
                 
-            execution_result = json.loads(result["artifacts"].get("execution_plan", "{}"))
-            if not execution_result:
+            artifacts = result["artifacts"]
+            if not isinstance(artifacts, dict):
+                return False
+                
+            # Parse execution plan from artifacts
+            execution_plan = artifacts.get("execution_plan", "{}")
+            if isinstance(execution_plan, str):
+                try:
+                    execution_plan = json.loads(execution_plan)
+                except json.JSONDecodeError:
+                    return False
+                    
+                if not isinstance(execution_plan, dict):
+                    return False
+                
+            # Check success criteria
+            success_criteria = execution_plan.get("success_criteria", {})
+            if not success_criteria:
                 return False
                 
             # Check step criteria
-            result_criteria = execution_result.get("success_criteria", {})
-            if not result_criteria:
-                return False
-                
-            # Verify step criteria match if specified
-            if criteria.get("step_criteria") and result_criteria.get("step_criteria") != criteria.get("step_criteria"):
-                return False
-                
-            # Verify overall criteria match if specified
-            if criteria.get("overall_criteria") and result_criteria.get("overall_criteria") != criteria.get("overall_criteria"):
-                return False
-                
+            if criteria.get("step_criteria"):
+                if success_criteria.get("step_criteria") != criteria.get("step_criteria"):
+                    return False
+                    
+            # Check overall criteria
+            if criteria.get("overall_criteria"):
+                if success_criteria.get("overall_criteria") != criteria.get("overall_criteria"):
+                    return False
+                    
             return True
             
         except Exception:
@@ -160,8 +173,9 @@ Response:""",
             task: Task specification with subtasks and criteria
             
         Returns:
-            Task execution result
+            TaskResult: Task execution result with success status, message, and artifacts
         """
+        last_error = None
         for attempt in range(self.config.max_retries):
             try:
                 # Get relevant context if memory manager exists
@@ -212,9 +226,11 @@ Response:""",
                     )
                 
                 # Success criteria not met
-                raise Exception("Success criteria not met")
+                last_error = Exception("Success criteria not met")
+                raise last_error
                 
             except Exception as e:
+                last_error = e
                 error_msg = f"Attempt {attempt + 1} failed: {str(e)}"
                 
                 # Store error in memory if manager exists
@@ -233,14 +249,14 @@ Response:""",
                     delay = self._calculate_delay(attempt)
                     await asyncio.sleep(delay)
                     continue
-                
-                # All retries failed
-                return TaskResult(
-                    success=False,
-                    message=f"Task failed after {attempt + 1} attempts",
-                    artifacts={
-                        "last_error": str(e),
-                        "attempts": attempt + 1
-                    },
-                    error=str(e)
-                )
+        
+        # All retries failed
+        return TaskResult(
+            success=False,
+            message=f"Task failed after {self.config.max_retries} attempts",
+            artifacts={
+                "last_error": str(last_error),
+                "attempts": self.config.max_retries
+            },
+            error=str(last_error)
+        )

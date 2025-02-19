@@ -1,50 +1,54 @@
+"""Integration tests for memory system."""
 import pytest
-import websockets.sync.client as websockets
+import asyncio
+import websockets
 import json
-from ..browser_automation_server import BrowserAutomationServer
+from datetime import datetime
 
-@pytest.fixture
-def server():
-    """Create WebSocket server for testing."""
-    server = BrowserAutomationServer(mock_mode=True)
-    server.start()  # Synchronous start
-    yield server
-    server.stop()  # Synchronous stop
+from memory.message_types import MemoryMetadata
+from .mock_websocket_server import MockWebSocketServer
 
-def test_websocket_command_roundtrip(server):
+@pytest.fixture(scope="function")
+async def server():
+    """Create and start WebSocket server."""
+    server = MockWebSocketServer()
+    await server.start()
+    try:
+        yield server
+    finally:
+        await server.stop()
+
+@pytest.mark.asyncio
+async def test_websocket_command_roundtrip(server):
     """Test complete WebSocket message round-trip with command execution"""
-    with websockets.connect('ws://localhost:8765') as websocket:
-        # Send command request
-        command_request = {
-            "action": "runCommand",
-            "command": "echo 'test message'"
+    async with websockets.connect(f'ws://localhost:{server.actual_port}') as websocket:
+        request = {
+            "action": "store_memory",
+            "content": "Test memory content",
+            "metadata": {
+                "timestamp": datetime.now().timestamp(),
+                "importance": 0.8,
+                "tags": ["test"]
+            }
         }
-        websocket.send(json.dumps(command_request))
         
-        # Receive response
-        response = json.loads(websocket.recv())
+        await websocket.send(json.dumps(request))
+        response = json.loads(await websocket.recv())
         
-        # Verify response structure
-        assert response["action"] == "runCommand"
         assert response["status"] == "success"
-        assert "test message" in response["output"]
-        assert response["returnCode"] == 0
+        assert "memory_id" in response
 
-def test_websocket_error_handling(server):
+@pytest.mark.asyncio
+async def test_websocket_error_handling(server):
     """Test WebSocket error handling with invalid command"""
-    with websockets.connect('ws://localhost:8765') as websocket:
-        # Send invalid command request
-        command_request = {
-            "action": "runCommand",
-            "command": "invalid_command_xyz"
+    async with websockets.connect(f'ws://localhost:{server.actual_port}') as websocket:
+        request = {
+            "action": "invalid_action",
+            "data": "test"
         }
-        websocket.send(json.dumps(command_request))
         
-        # Receive response
-        response = json.loads(websocket.recv())
+        await websocket.send(json.dumps(request))
+        response = json.loads(await websocket.recv())
         
-        # Verify error handling
-        assert response["action"] == "runCommand"
         assert response["status"] == "error"
-        assert response["error"] != ""
-        assert response["returnCode"] != 0
+        assert "message" in response

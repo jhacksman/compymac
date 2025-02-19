@@ -23,22 +23,8 @@ def memory_manager():
     return manager
 
 @pytest.fixture
-def executor_agent(memory_manager):
+def executor_agent(memory_manager, mock_llm):
     """Create executor agent with mock dependencies."""
-    # Create mock LLM
-    mock_llm = MagicMock()
-    mock_llm._llm_type = "mock"
-    mock_llm._generate.return_value = LLMResult(generations=[[Generation(text=json.dumps({
-        "execution_plan": [{
-            "step": "Test step",
-            "verification": "Step complete"
-        }],
-        "success_criteria": {
-            "step_criteria": ["complete"],
-            "overall_criteria": "success"
-        }
-    }))]])
-    
     agent = ExecutorAgent(memory_manager=memory_manager, llm=mock_llm)
     # Mock execution chain
     agent.execution_chain = MagicMock()
