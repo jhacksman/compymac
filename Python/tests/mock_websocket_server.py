@@ -32,6 +32,8 @@ class MockWebSocketServer:
         import asyncio
         import websockets
         
+        self._stop_event = asyncio.Event()
+        
         async def run_server():
             try:
                 self.server = await websockets.serve(
@@ -42,13 +44,24 @@ class MockWebSocketServer:
                     ping_timeout=None,
                     close_timeout=None
                 )
-                await asyncio.Future()  # Keep server running
+                self.connected = True
+                await self._stop_event.wait()  # Wait until stop is called
             except Exception as e:
                 print(f"Server error: {str(e)}")
+                self.connected = False
+            finally:
+                if self.server:
+                    self.server.close()
+                    await self.server.wait_closed()
+                self.connected = False
                 
         self.server_task = asyncio.create_task(run_server())
-        # Give server time to start
-        await asyncio.sleep(0.1)  # Reduced wait time
+        # Give server time to start and verify connection
+        for _ in range(5):  # Try up to 5 times
+            await asyncio.sleep(0.2)  # Longer wait between checks
+            if self.connected:
+                return  # Server is ready
+        raise Exception("Failed to start WebSocket server")
     
     async def stop(self):
         """Stop the WebSocket server."""

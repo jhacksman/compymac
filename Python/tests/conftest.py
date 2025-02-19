@@ -114,6 +114,10 @@ async def venice_client():
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
+        # Validate memory_id
+        if not memory_id:
+            raise Exception("Memory ID is required")
+            
         found = False
         for memory in _test_memories:
             if memory["id"] == memory_id:
@@ -166,7 +170,7 @@ async def venice_client():
 @pytest.fixture
 def mock_llm():
     """Provide mock LLM."""
-    class MockLLM(BaseLLM, Runnable):
+    class MockLLM(BaseLLM):
         def __init__(self):
             super().__init__()
             self.response = json.dumps({
@@ -179,6 +183,20 @@ def mock_llm():
                     "overall_criteria": "success"
                 }
             })
+            
+        def __or__(self, other):
+            """Support for | operator."""
+            from langchain.schema.runnable import RunnableParallel
+            if isinstance(other, (BaseLLM, RunnableParallel)):
+                return RunnableParallel(llm=self, chain=other)
+            return self
+            
+        def __rrshift__(self, other):
+            """Support for >> operator."""
+            from langchain.schema.runnable import RunnableSequence
+            if isinstance(other, (BaseLLM, RunnableSequence)):
+                return RunnableSequence(first=other, second=self)
+            return self
             
         @property
         def _llm_type(self) -> str:
