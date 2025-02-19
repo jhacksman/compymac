@@ -234,7 +234,7 @@ class VeniceClient:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/memories",
+                    f"{self.base_url}/api/memories/store",
                     json=request_data,
                     headers=self.headers,
                     timeout=timeout
@@ -346,7 +346,7 @@ class VeniceClient:
                 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/memories/retrieve",
+                    f"{self.base_url}/api/memories/retrieve",
                     json=params,
                     headers=self.headers,
                     timeout=timeout
