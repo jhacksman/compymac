@@ -199,19 +199,19 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            if isinstance(self._response, Exception):
-                raise self._response
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            if isinstance(self.mock_response, Exception):
+                raise self.mock_response
+            if isinstance(self.mock_response, str):
+                return self.mock_response
+            return json.dumps(self.mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            if isinstance(self._response, Exception):
-                raise self._response
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            if isinstance(self.mock_response, Exception):
+                raise self.mock_response
+            if isinstance(self.mock_response, str):
+                return self.mock_response
+            return json.dumps(self.mock_response)
             
         def _format_response(self, response: Any) -> str:
             """Format response consistently."""
@@ -247,16 +247,16 @@ def mock_llm():
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            if isinstance(self._response, Exception):
-                raise self._response
-            response = self._response if isinstance(self._response, str) else json.dumps(self._response)
+            if isinstance(self.mock_response, Exception):
+                raise self.mock_response
+            response = self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
             return LLMResult(generations=[[Generation(text=response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            if isinstance(self._response, Exception):
-                raise self._response
-            response = self._response if isinstance(self._response, str) else json.dumps(self._response)
+            if isinstance(self.mock_response, Exception):
+                raise self.mock_response
+            response = self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
             return LLMResult(generations=[[Generation(text=response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
