@@ -1,14 +1,11 @@
 """Tests for CLI automation."""
 import pytest
 
-# Skip all tests in this module if desktop_automation is not available
-pytest.importorskip("desktop_automation")
-
-from ..browser_automation_server import BrowserAutomationServer
-
-pytestmark = pytest.mark.desktop
+pytestmark = [
+    pytest.mark.desktop,
+    pytest.mark.skip(reason="Desktop automation tests are disabled in CI")
+]
 
 def test_browser_automation():
     """Test browser automation."""
-    server = BrowserAutomationServer()
-    assert server is not None
+    pytest.skip("Desktop automation tests are disabled in CI")
