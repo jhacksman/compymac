@@ -1,0 +1,1 @@
+"""Desktop automation package."""
