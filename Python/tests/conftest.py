@@ -211,7 +211,11 @@ def mock_llm():
             """Call the LLM."""
             if isinstance(self._mock_response, Exception):
                 raise self._mock_response
-            return self._format_response(self._mock_response)
+            if isinstance(self._mock_response, str):
+                return self._mock_response
+            if isinstance(self._mock_response, dict):
+                return json.dumps(self._mock_response)
+            return str(self._mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
