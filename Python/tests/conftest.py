@@ -186,7 +186,8 @@ def mock_llm():
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self._lc_kwargs = kwargs
-            self._mock_response = json.dumps({
+            self._mock_response = {
+                "output": "Test response",
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -195,7 +196,7 @@ def mock_llm():
                     "step_criteria": ["complete"],
                     "overall_criteria": "success"
                 }
-            })
+            }
             
         @property
         def mock_response(self) -> Any:
@@ -211,10 +212,20 @@ def mock_llm():
             """Call the LLM."""
             if isinstance(self._mock_response, Exception):
                 raise self._mock_response
-            if isinstance(self._mock_response, str):
-                return self._mock_response
             if isinstance(self._mock_response, dict):
+                if "output" not in self._mock_response:
+                    return json.dumps({"output": json.dumps(self._mock_response)})
                 return json.dumps(self._mock_response)
+            if isinstance(self._mock_response, str):
+                try:
+                    # If it's already valid JSON with output field, return as is
+                    parsed = json.loads(self._mock_response)
+                    if isinstance(parsed, dict) and "output" in parsed:
+                        return self._mock_response
+                    # Otherwise wrap in output field
+                    return json.dumps({"output": self._mock_response})
+                except json.JSONDecodeError:
+                    return json.dumps({"output": self._mock_response})
             return json.dumps({"output": str(self._mock_response)})
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
