@@ -18,7 +18,7 @@ from langchain_core.language_models.llms import BaseLLM
 
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
-from ..memory import MemoryManager
+from memory import MemoryManager
 
 class ExecutorAgent:
     """Execution agent for carrying out tasks."""
