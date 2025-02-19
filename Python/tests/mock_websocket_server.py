@@ -47,6 +47,7 @@ class MockWebSocketServer:
                     await asyncio.sleep(1)  # Wait for port to be freed
                     
                 # Try to start server with retries
+                last_error = None
                 for attempt in range(3):
                     try:
                         # Clean up any existing connections
@@ -68,19 +69,21 @@ class MockWebSocketServer:
                         self.server = server
                         self.connected = True
                         self._ready_event.set()  # Signal server is ready
-                        break
-                    except OSError:
+                        return  # Success
+                    except OSError as e:
+                        last_error = e
                         await asyncio.sleep(1)  # Wait before retry
-                        if attempt == 2:  # Last attempt
-                            self.connected = False
-                            self._ready_event.set()  # Signal server failed
-                            raise
                         continue
                     except Exception as e:
                         print(f"Failed to start server: {e}")
                         self.connected = False
                         self._ready_event.set()  # Signal server failed
                         raise
+                        
+                # All retries failed
+                self.connected = False
+                self._ready_event.set()  # Signal server failed
+                raise last_error or Exception("Failed to start server after retries")
                 self.server = server
                 self.connected = True
                 self._ready_event.set()  # Signal server is ready

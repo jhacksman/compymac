@@ -209,36 +209,33 @@ def mock_llm():
                 return self._response
             return json.dumps(self._response)
             
+        def _format_response(self, response: str) -> str:
+            """Format response consistently."""
+            if isinstance(response, str):
+                return response
+            return json.dumps(response)
+            
         def predict(self, **kwargs) -> str:
             """Sync predict method."""
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            return self._format_response(self._response)
             
         async def apredict(self, **kwargs) -> str:
             """Async predict method."""
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            return self._format_response(self._response)
             
         def run(self, **kwargs) -> str:
             """Sync run method."""
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            return self._format_response(self._response)
             
         async def arun(self, **kwargs) -> str:
             """Async run method."""
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
+            return self._format_response(self._response)
             
         def __getattr__(self, name):
             """Handle dynamic attribute access."""
             if name in ['predict', 'apredict', 'run', 'arun']:
                 return getattr(self, name)
             return super().__getattr__(name)
-            return json.dumps(self._response)
             
         def run(self, **kwargs) -> str:
             """Sync run method."""
