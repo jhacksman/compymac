@@ -4,12 +4,13 @@ import pytest
 import pytest_asyncio
 import websockets
 import json
+import asyncio
 from datetime import datetime, timezone
 
 from ..memory.protocol import MemoryMessage
 from ..memory.exceptions import VeniceAPIError
 
-@pytest_asyncio.fixture(scope="module")
+@pytest.fixture(scope="module")
 async def server():
     """Create and start mock WebSocket server."""
     from .mock_websocket_server import MockWebSocketServer
@@ -20,7 +21,7 @@ async def server():
     finally:
         await server.stop()  # Async stop
 
-@pytest_asyncio.fixture
+@pytest.fixture
 async def websocket(server):
     """Create WebSocket connection."""
     try:
