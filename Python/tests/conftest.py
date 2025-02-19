@@ -25,11 +25,11 @@ _test_memories = []
 
 # Set test environment variables if not already set
 if not os.getenv("VENICE_API_KEY"):
-    os.environ["VENICE_API_KEY"] = "test-key"
+    raise ValueError("VENICE_API_KEY environment variable is required for tests")
 if not os.getenv("VENICE_BASE_URL"):
-    os.environ["VENICE_BASE_URL"] = "https://api.venice.ai"
+    os.environ["VENICE_BASE_URL"] = "https://api.venice.ai"  # Use production API
 if not os.getenv("VENICE_MODEL"):
-    os.environ["VENICE_MODEL"] = "llama-3.3-70b"
+    os.environ["VENICE_MODEL"] = "llama-3.3-70b"  # Use default model
 
 # Get environment variables
 VENICE_API_KEY = os.getenv("VENICE_API_KEY")
@@ -168,12 +168,25 @@ async def venice_client():
     return client
 
 @pytest.fixture
+def venice_llm():
+    """Provide Venice.ai LLM for testing."""
+    from langchain.llms import VeniceAI
+    
+    # Create real Venice.ai LLM instance
+    llm = VeniceAI(
+        model=VENICE_MODEL,
+        api_key=VENICE_API_KEY,
+        base_url=VENICE_BASE_URL
+    )
+    return llm
+
+@pytest.fixture
 def mock_llm():
-    """Provide mock LLM."""
+    """Provide mock LLM for backward compatibility."""
+    from pydantic import Field, BaseModel, PrivateAttr
+    
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
-        from pydantic import Field, BaseModel, PrivateAttr
-        
         class Config:
             arbitrary_types_allowed = True
             extra = "allow"
@@ -184,7 +197,7 @@ def mock_llm():
         _mock_response: Any = None
         
         def __init__(self, **kwargs):
-            super().__init__(**kwargs)
+            super(MockLLM, self).__init__(**kwargs)
             self._lc_kwargs = kwargs
             self._mock_response = {
                 "output": "Test response",
@@ -259,7 +272,7 @@ def mock_llm():
             """Handle dynamic attribute access."""
             if name == '_response':  # For backward compatibility
                 return self._mock_response
-            return super().__getattr__(name)
+            return super(MockLLM, self).__getattr__(name)
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
