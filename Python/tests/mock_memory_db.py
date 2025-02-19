@@ -10,6 +10,8 @@ class MockMemoryDB:
         """Initialize mock database."""
         self.memories = {}
         self.next_id = 1
+        self.embedding_dim = 1536  # Match Venice.ai embedding dimension
+        self.connected = True  # Simulate successful connection
     
     def store_memory(
         self,

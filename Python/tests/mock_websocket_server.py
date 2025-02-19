@@ -53,13 +53,11 @@ class MockWebSocketServer:
     
     def stop(self):
         """Stop the WebSocket server."""
-        try:
-            if hasattr(self, 'server'):
-                self.server.close()
-            if hasattr(self, 'server_thread'):
-                self.server_thread.join(timeout=1.0)
-        except:
-            pass  # Ignore errors during cleanup
+        if self.server:
+            self.server.shutdown()
+            self.server.server_close()
+        if self.server_thread:
+            self.server_thread.join(timeout=1.0)
     
     def handle_connection(self, websocket):
         """Handle WebSocket connection.
