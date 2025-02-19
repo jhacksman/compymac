@@ -24,11 +24,11 @@ class MemoryMetadata:
             
     def __iter__(self):
         """Make metadata iterable."""
-        yield from self.asdict().items()
+        return iter(self.asdict().items())
         
     def __getitem__(self, key):
         """Make metadata subscriptable."""
-        return getattr(self, key)
+        return self.asdict()[key]
             
     def asdict(self) -> Dict:
         """Convert to dictionary for JSON serialization."""

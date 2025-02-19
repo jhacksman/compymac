@@ -40,6 +40,11 @@ class MockWebSocketServer:
         
         async def run_server():
             try:
+                # Clean up any existing connections
+                if hasattr(self, 'server') and self.server:
+                    self.server.close()
+                    await self.server.wait_closed()
+                    
                 server = await websockets.serve(
                     self.handle_connection,
                     self.host,
@@ -47,8 +52,7 @@ class MockWebSocketServer:
                     ping_interval=None,  # Disable ping/pong for tests
                     ping_timeout=None,
                     close_timeout=None,
-                    max_size=None,  # Allow any message size
-                    max_queue=None  # No limit on message queue
+                    max_size=None  # Allow any message size
                 )
                 self.server = server
                 self.connected = True

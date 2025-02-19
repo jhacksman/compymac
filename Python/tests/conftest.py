@@ -205,7 +205,17 @@ def mock_llm():
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            return self._response
+            if isinstance(self._response, str):
+                return self._response
+            return json.dumps(self._response)
+            
+        async def apredict(self, **kwargs) -> str:
+            """Async predict method."""
+            return await self._acall(**kwargs)
+            
+        async def arun(self, **kwargs) -> str:
+            """Async run method."""
+            return await self._acall(**kwargs)
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
