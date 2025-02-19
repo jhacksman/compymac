@@ -17,23 +17,46 @@ def mock_venice_client():
     client = Mock(spec=VeniceClient)
     
     # Mock store_memory response
-    client.store_memory.return_value = MemoryResponse(
-        action="store_memory",
-        success=True,
-        memory_id="test_id"
-    )
+    async def mock_store_memory(*args, **kwargs):
+        return MemoryResponse(
+            action="store_memory",
+            success=True,
+            memory_id="test_id"
+        )
+    client.store_memory.side_effect = mock_store_memory
     
     # Mock retrieve_context response
-    client.retrieve_context.return_value = MemoryResponse(
-        action="retrieve_context",
-        success=True,
-        memories=[]
-    )
+    async def mock_retrieve_context(*args, **kwargs):
+        return MemoryResponse(
+            action="retrieve_context",
+            success=True,
+            memories=[]
+        )
+    client.retrieve_context.side_effect = mock_retrieve_context
     
-    # Mock stream_memory to return an iterable
-    def mock_stream_memory(*args, **kwargs):
-        return iter(["Test summary chunk 1", "Test summary chunk 2"])
+    # Mock stream_memory to return an async iterable
+    async def mock_stream_memory(*args, **kwargs):
+        yield "Test summary chunk 1"
+        yield "Test summary chunk 2"
     client.stream_memory.side_effect = mock_stream_memory
+    
+    # Mock get_embedding response
+    async def mock_get_embedding(*args, **kwargs):
+        return MemoryResponse(
+            action="get_embedding",
+            success=True,
+            embedding=[0.1] * 1536
+        )
+    client.get_embedding.side_effect = mock_get_embedding
+    
+    # Mock generate_summary response
+    async def mock_generate_summary(*args, **kwargs):
+        return MemoryResponse(
+            action="generate_summary",
+            success=True,
+            summary="Mock summary"
+        )
+    client.generate_summary.side_effect = mock_generate_summary
     
     return client
 
