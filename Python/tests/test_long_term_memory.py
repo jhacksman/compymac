@@ -55,7 +55,6 @@ def mock_venice_client():
     return client
 
 
-@pytest.fixture(scope="function")
 @pytest_asyncio.fixture(scope="function")
 async def long_term_memory(mock_venice_client, mock_memory_db):
     """Create long-term memory fixture."""
@@ -132,7 +131,7 @@ async def test_retrieve_context_with_time_range(long_term_memory):
     await long_term_memory.store_memory(new_content, new_metadata)
     
     # Retrieve with 1 day time range
-    memories = long_term_memory.retrieve_context(
+    memories = await long_term_memory.retrieve_memories(
         "test",
         time_range=timedelta(days=1)
     )
