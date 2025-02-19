@@ -172,8 +172,8 @@ def mock_llm():
     """Provide mock LLM."""
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
-        from pydantic import Field
-        _response: str = Field(default=None)  # Make response a private field for Pydantic
+        from pydantic import Field, PrivateAttr
+        _response: str = PrivateAttr(default=None)  # Make response a private field for Pydantic
         
         def __init__(self):
             super().__init__()
@@ -227,6 +227,14 @@ def mock_llm():
         async def atransform(self, input: Any) -> Any:
             """Transform input asynchronously."""
             return await self._acall(input)
+            
+        def batch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
+            """Process a batch of inputs."""
+            return [self._call(input) for input in inputs]
+            
+        async def abatch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
+            """Process a batch of inputs asynchronously."""
+            return [await self._acall(input) for input in inputs]
             
         @property
         def _llm_type(self) -> str:
