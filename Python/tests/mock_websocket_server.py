@@ -177,7 +177,7 @@ class MockWebSocketServer:
                 "message": f"Failed to store memory: {str(e)}"
             }
     
-    def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_retrieve_context(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle retrieve_context action.
         
         Args:
@@ -223,7 +223,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_update_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle update_memory action.
         
         Args:
@@ -258,7 +258,7 @@ class MockWebSocketServer:
                 "message": str(e)
             }
     
-    def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_delete_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle delete_memory action.
         
         Args:
