@@ -63,20 +63,27 @@ class MockWebSocketServer:
                 self.connected = False
                 self.server = None
                 
-        self.server_task = asyncio.create_task(run_server())
-        # Wait for server to be ready with retries
-        for _ in range(3):  # Try 3 times
+        # Start server with retries
+        for attempt in range(3):  # Try 3 times
             try:
-                await asyncio.wait_for(self._ready_event.wait(), timeout=1.0)
+                # Clean up any existing server
+                if hasattr(self, 'server_task') and self.server_task:
+                    self.server_task.cancel()
+                    try:
+                        await self.server_task
+                    except asyncio.CancelledError:
+                        pass
+                    
+                self.server_task = asyncio.create_task(run_server())
+                await asyncio.sleep(1.0)  # Give server more time to start
+                await asyncio.wait_for(self._ready_event.wait(), timeout=5.0)  # Longer timeout
                 if self.connected:
+                    await asyncio.sleep(0.5)  # Additional wait to ensure stability
                     return  # Server started successfully
-                await asyncio.sleep(0.5)  # Wait before retry
-            except asyncio.TimeoutError:
-                continue
+            except (asyncio.TimeoutError, Exception) as e:
+                print(f"Server start attempt {attempt + 1} failed: {str(e)}")
+                await asyncio.sleep(2.0)  # Longer wait between retries
                 
-        # If we get here, server failed to start
-        if self.server_task and not self.server_task.done():
-            self.server_task.cancel()
         raise Exception("Failed to start WebSocket server after retries")
     
     async def stop(self):

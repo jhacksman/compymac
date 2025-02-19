@@ -173,36 +173,36 @@ def mock_llm():
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
         from pydantic import Field, PrivateAttr
-        _response: str = PrivateAttr(default=None)  # Make response a private field for Pydantic
+        response: str = Field(default_factory=lambda: json.dumps({
+            "execution_plan": [{
+                "step": "Test step",
+                "verification": "Step complete"
+            }],
+            "success_criteria": {
+                "step_criteria": ["complete"],
+                "overall_criteria": "success"
+            }
+        }))
         
-        def __init__(self):
-            super().__init__()
-            self._response = json.dumps({
-                "execution_plan": [{
-                    "step": "Test step",
-                    "verification": "Step complete"
-                }],
-                "success_criteria": {
-                    "step_criteria": ["complete"],
-                    "overall_criteria": "success"
-                }
-            })
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._lc_kwargs = kwargs
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            return self._response
+            return self.response
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            return self._response
+            return self.response
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            return LLMResult(generations=[[Generation(text=self._response)]])
+            return LLMResult(generations=[[Generation(text=self.response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            return LLMResult(generations=[[Generation(text=self._response)]])
+            return LLMResult(generations=[[Generation(text=self.response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
