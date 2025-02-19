@@ -209,9 +209,9 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            if isinstance(self.mock_response, Exception):
-                raise self.mock_response
-            return self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
+            if isinstance(self._mock_response, Exception):
+                raise self._mock_response
+            return self._mock_response if isinstance(self._mock_response, str) else json.dumps(self._mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
@@ -241,17 +241,14 @@ def mock_llm():
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            if isinstance(self.mock_response, Exception):
-                raise self.mock_response
-            response = self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
+            if isinstance(self._mock_response, Exception):
+                raise self._mock_response
+            response = self._mock_response if isinstance(self._mock_response, str) else json.dumps(self._mock_response)
             return LLMResult(generations=[[Generation(text=response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            if isinstance(self.mock_response, Exception):
-                raise self.mock_response
-            response = self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
-            return LLMResult(generations=[[Generation(text=response)]])
+            return self._generate(prompts, stop, run_manager, **kwargs)
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
