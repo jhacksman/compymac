@@ -18,13 +18,20 @@ from ...agents.manager import ManagerAgent
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
 
 @pytest.fixture
-def memory_manager():
+def venice_api():
+    """Create mock Venice API client."""
+    from tests.mock_venice_api import MockVeniceAPI
+    return MockVeniceAPI()
+
+@pytest.fixture
+def memory_manager(venice_api):
     """Create mock memory manager."""
     manager = MagicMock(spec=MemoryManager)
     manager.store_memory = AsyncMock()
     manager.retrieve_context = AsyncMock(return_value=[])
     manager.store_memory.return_value = None
     manager.retrieve_context.return_value = []
+    manager.venice_api = venice_api
     return manager
 
 @pytest.fixture
