@@ -172,11 +172,12 @@ def mock_llm():
     """Provide mock LLM."""
     class MockLLM(BaseLLM):
         """Mock LLM for testing."""
-        response: str = None  # Make response a class field for Pydantic
+        from pydantic import Field
+        _response: str = Field(default=None)  # Make response a private field for Pydantic
         
         def __init__(self):
             super().__init__()
-            self.response = json.dumps({
+            self._response = json.dumps({
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -189,11 +190,11 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            return self.response
+            return self._response
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            return self.response
+            return self._response
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
