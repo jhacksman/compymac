@@ -173,7 +173,7 @@ def mock_llm():
     class MockLLM(BaseLLM):
         def __init__(self):
             super().__init__()
-            self.response = json.dumps({
+            self._response = json.dumps({
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -184,20 +184,24 @@ def mock_llm():
                 }
             })
             
-        def pipe(self, other):
+        def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            """Call the LLM."""
+            return self._response
+            
+        async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            """Call the LLM asynchronously."""
+            return self._response
+            
+        def __or__(self, other):
             """Support for | operator."""
             from langchain.schema.runnable import RunnableParallel
             if isinstance(other, (BaseLLM, RunnableParallel)):
                 return RunnableParallel(llm=self, chain=other)
             return self
             
-        def lc_kwargs(self):
-            """Get kwargs for langchain."""
-            return {"llm": self}
-            
-        def lc_serializable(self):
-            """Get serializable representation."""
-            return True
+        def lc_namespace(self):
+            """Get namespace for langchain."""
+            return ["llm"]
             
         @property
         def _llm_type(self) -> str:
