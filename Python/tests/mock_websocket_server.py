@@ -44,9 +44,9 @@ class MockWebSocketServer:
                     self.handle_connection,
                     self.host,
                     self.port,
-                    ping_interval=None,  # Disable ping/pong
-                    ping_timeout=None,
-                    close_timeout=None
+                    ping_interval=20,  # Enable ping/pong
+                    ping_timeout=60,
+                    close_timeout=30
                 )
                 self.server = server
                 self.connected = True

@@ -22,6 +22,14 @@ class MemoryMetadata:
         if self.tags is None:
             self.tags = []
             
+    def __iter__(self):
+        """Make metadata iterable."""
+        yield from self.asdict().items()
+        
+    def __getitem__(self, key):
+        """Make metadata subscriptable."""
+        return getattr(self, key)
+            
     def asdict(self) -> Dict:
         """Convert to dictionary for JSON serialization."""
         return {

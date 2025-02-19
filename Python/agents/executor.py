@@ -110,25 +110,28 @@ Response:""",
             if not criteria:
                 return True
                 
-            # Parse execution result
-            if "artifacts" not in result:
+            # Check for artifacts
+            if not result or "artifacts" not in result:
                 return False
                 
-            execution_result = json.loads(result["artifacts"].get("execution_plan", "{}"))
-            if not execution_result:
+            artifacts = result["artifacts"]
+            if not isinstance(artifacts, dict):
+                return False
+                
+            # Check for output in artifacts
+            output = artifacts.get("output", "").lower()
+            if not output:
                 return False
                 
             # Check step criteria
-            result_criteria = execution_result.get("success_criteria", {})
-            if not result_criteria:
-                return False
-                
-            # Verify step criteria match if specified
-            if criteria.get("step_criteria") and result_criteria.get("step_criteria") != criteria.get("step_criteria"):
-                return False
-                
-            # Verify overall criteria match if specified
-            if criteria.get("overall_criteria") and result_criteria.get("overall_criteria") != criteria.get("overall_criteria"):
+            step_criteria = criteria.get("step_criteria", [])
+            if step_criteria:
+                if not all(criterion.lower() in output for criterion in step_criteria):
+                    return False
+                    
+            # Check overall criteria
+            overall_criteria = criteria.get("overall_criteria", "").lower()
+            if overall_criteria and overall_criteria not in output:
                 return False
                 
             return True
