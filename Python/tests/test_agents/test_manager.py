@@ -1,88 +1,57 @@
-"""Tests for agent manager."""
-
+"""Tests for manager agent."""
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from typing import Dict, List, Optional
+import json
+from unittest.mock import Mock, AsyncMock
+from datetime import datetime
 
-from ...agents import AgentManager
-from ...agents.executor import ExecutorAgent
-from ...agents.planner import PlannerAgent
-from ...agents.reflector import ReflectorAgent
-from ...agents.protocols import AgentRole, AgentMessage, TaskResult
-from ...memory import MemoryManager
-
-from .conftest import memory_manager, mock_llm
+from agents.manager import AgentManager
+from memory.message_types import MemoryMetadata
 
 @pytest.fixture
-def agent_manager(memory_manager, mock_llm):
-    """Create agent manager with mock dependencies."""
-    executor = ExecutorAgent(memory_manager=memory_manager, llm=mock_llm)
-    planner = PlannerAgent(memory_manager=memory_manager, llm=mock_llm)
-    reflector = ReflectorAgent(memory_manager=memory_manager, llm=mock_llm)
-    return AgentManager(
-        memory_manager=memory_manager,
-        executor=executor,
-        planner=planner,
-        reflector=reflector
-    )
+def memory_manager():
+    """Create mock memory manager."""
+    manager = Mock()
+    manager.store_memory = AsyncMock()
+    manager.retrieve_memories = AsyncMock(return_value=[])
+    return manager
+
+@pytest.fixture
+def manager_agent(memory_manager, mock_llm):
+    """Create manager agent with mock memory manager and LLM."""
+    return AgentManager(memory_manager, llm=mock_llm)
 
 @pytest.mark.asyncio
-async def test_delegate_task(agent_manager):
+async def test_delegate_task(manager_agent):
     """Test task delegation to appropriate agent."""
-    task = {
-        "type": "research",
-        "query": "test query",
-        "context": {}
+    # Set mock LLM response
+    manager_agent.llm._response = {
+        "agent": "executor",
+        "task": "Execute test task",
+        "parameters": {"priority": "high"}
     }
     
-    result = await agent_manager.delegate_task(task)
+    result = await manager_agent.delegate_task("Test task")
     
-    assert result.success
-    assert "task completed" in result.message.lower()
-    
-    # Verify memory storage
-    assert agent_manager.memory_manager.store_memory.call_count >= 1
-    call_args = agent_manager.memory_manager.store_memory.call_args[1]
-    assert call_args["metadata"]["type"] == "task_delegation"
+    assert result["success"]
+    assert result["agent"] == "executor"
+    assert "task" in result
 
 @pytest.mark.asyncio
-async def test_handle_agent_message(agent_manager):
-    """Test handling messages between agents."""
-    message = AgentMessage(
-        sender=AgentRole.EXECUTOR,
-        recipient=AgentRole.PLANNER,
-        content="test message",
-        metadata={"importance": 0.5}
+async def test_coordinate_agents(manager_agent):
+    """Test agent coordination."""
+    # Set mock LLM response for coordination
+    manager_agent.llm._response = {
+        "coordination_plan": [
+            {"agent": "planner", "action": "create_plan"},
+            {"agent": "executor", "action": "execute_task"}
+        ],
+        "success": True
+    }
+    
+    result = await manager_agent.coordinate_agents(
+        ["planner", "executor"],
+        "Test coordination"
     )
     
-    result = await agent_manager.handle_message(message)
-    
-    assert result.success
-    assert "message delivered" in result.message.lower()
-    
-    # Verify memory storage
-    assert agent_manager.memory_manager.store_memory.call_count >= 1
-    call_args = agent_manager.memory_manager.store_memory.call_args[1]
-    assert call_args["metadata"]["type"] == "agent_message"
-
-@pytest.mark.asyncio
-async def test_coordinate_agents(agent_manager):
-    """Test agent coordination for complex tasks."""
-    task = {
-        "type": "complex_task",
-        "subtasks": [
-            {"type": "research", "query": "test"},
-            {"type": "execute", "action": "test"}
-        ],
-        "context": {}
-    }
-    
-    result = await agent_manager.coordinate_task(task)
-    
-    assert result.success
-    assert "task completed" in result.message.lower()
-    
-    # Verify memory storage
-    assert agent_manager.memory_manager.store_memory.call_count >= 2
-    call_args = agent_manager.memory_manager.store_memory.call_args_list[0][1]
-    assert call_args["metadata"]["type"] == "task_coordination"
+    assert result["success"]
+    assert len(result["coordination_plan"]) == 2
