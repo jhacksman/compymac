@@ -24,6 +24,7 @@ class MockWebSocketServer:
         self.server = None
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
+        self.connected = True  # Simulate successful connection
         
     def start(self):
         """Start the WebSocket server."""
@@ -53,11 +54,16 @@ class MockWebSocketServer:
     
     def stop(self):
         """Stop the WebSocket server."""
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
-        if self.server_thread:
-            self.server_thread.join(timeout=1.0)
+        try:
+            if self.server:
+                self.server.shutdown()
+                self.server.server_close()
+            if self.server_thread and self.server_thread.is_alive():
+                self.server_thread.join(timeout=1.0)
+        except Exception as e:
+            print(f"Error stopping server: {str(e)}")
+        finally:
+            self.connected = False
     
     def handle_connection(self, websocket):
         """Handle WebSocket connection.

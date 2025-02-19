@@ -157,8 +157,9 @@ async def venice_client():
 def mock_llm():
     """Provide mock LLM."""
     from langchain.schema.runnable import RunnableConfig, Runnable
+    from typing import Any, List, Optional, Iterator, AsyncIterator
     
-    class MockLLM(BaseLLM, Runnable):
+    class MockLLM(BaseLLM):
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             return "Mock LLM Response"
             
@@ -169,23 +170,35 @@ def mock_llm():
         def _llm_type(self) -> str:
             return "mock"
             
-        def invoke(self, input, config: RunnableConfig = None):
+        def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> Any:
+            return {"generations": [[{"text": "Mock LLM Response"}]]}
+            
+        async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> Any:
+            return {"generations": [[{"text": "Mock LLM Response"}]]}
+            
+        def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             return self._call(input)
             
-        async def ainvoke(self, input, config: RunnableConfig = None):
+        async def ainvoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             return await self._acall(input)
             
-        def stream(self, input, config: RunnableConfig = None):
+        def stream(self, input: Any, config: Optional[RunnableConfig] = None) -> Iterator[Any]:
             yield self._call(input)
             
-        async def astream(self, input, config: RunnableConfig = None):
+        async def astream(self, input: Any, config: Optional[RunnableConfig] = None) -> AsyncIterator[Any]:
             yield await self._acall(input)
             
-        def transform(self, input):
+        def transform(self, input: Any) -> Any:
             return self._call(input)
             
-        async def atransform(self, input):
+        async def atransform(self, input: Any) -> Any:
             return await self._acall(input)
+            
+        def batch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
+            return [self._call(input) for input in inputs]
+            
+        async def abatch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
+            return [await self._acall(input) for input in inputs]
     
     return MockLLM()
 
