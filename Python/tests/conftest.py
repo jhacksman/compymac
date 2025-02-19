@@ -83,8 +83,11 @@ async def venice_client():
             action="store_memory",
             success=True,
             memory_id=memory_id,
-            content=content,
-            metadata=metadata_dict
+            memories=[{
+                "id": memory_id,
+                "content": content,
+                "metadata": metadata_dict
+            }]
         )
         
         return response
