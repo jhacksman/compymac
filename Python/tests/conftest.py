@@ -237,15 +237,10 @@ def mock_llm():
                 return getattr(self, name)
             return super().__getattr__(name)
             
-        def run(self, **kwargs) -> str:
-            """Sync run method."""
-            if isinstance(self._response, str):
-                return self._response
-            return json.dumps(self._response)
-            
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            return LLMResult(generations=[[Generation(text=self._response)]])
+            response = self._format_response(self._response)
+            return LLMResult(generations=[[Generation(text=response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
