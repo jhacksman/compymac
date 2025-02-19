@@ -40,16 +40,16 @@ def mock_venice_client():
 @pytest_asyncio.fixture(scope="function")
 async def executive_agent(mock_venice_client, mock_memory_db):
     """Create executive agent fixture."""
-    agent = LibrarianAgent(mock_venice_client, mock_memory_db)
-    agent.agent_id = "executive"
+    agent = LibrarianAgent(mock_venice_client)
+    agent.role = "executive"  # Use role instead of agent_id
     return agent
 
 
 @pytest_asyncio.fixture(scope="function")
 async def worker_agent(mock_venice_client, mock_memory_db):
     """Create worker agent fixture."""
-    agent = LibrarianAgent(mock_venice_client, mock_memory_db)
-    agent.agent_id = "worker"
+    agent = LibrarianAgent(mock_venice_client)
+    agent.role = "worker"  # Use role instead of agent_id
     return agent
 
 

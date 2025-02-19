@@ -41,11 +41,12 @@ def mock_venice_client():
 @pytest_asyncio.fixture(scope="function")
 async def librarian(mock_venice_client, mock_memory_db):
     """Create librarian fixture."""
-    agent = LibrarianAgent(mock_venice_client, mock_memory_db)
+    agent = LibrarianAgent(mock_venice_client)
     return agent
 
 
-def test_invalid_metadata_handling(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_invalid_metadata_handling(librarian, mock_venice_client):
     """Test handling of invalid metadata."""
     # Test missing required fields
     with pytest.raises(MemoryError) as exc_info:
@@ -81,7 +82,8 @@ def test_invalid_metadata_handling(librarian, mock_venice_client):
     assert len(memories) == 0  # Invalid memories filtered out
 
 
-def test_corrupted_content_recovery(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_corrupted_content_recovery(librarian, mock_venice_client):
     """Test recovery from corrupted content."""
     # Test handling of corrupted JSON content
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -126,7 +128,8 @@ def test_corrupted_content_recovery(librarian, mock_venice_client):
     assert memories[0]["id"] == "valid_id"
 
 
-def test_index_rebuilding(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_index_rebuilding(librarian, mock_venice_client):
     """Test index rebuilding after corruption."""
     # Simulate index corruption by returning invalid index data
     mock_venice_client.retrieve_context.return_value = MemoryResponse(
@@ -157,7 +160,8 @@ def test_index_rebuilding(librarian, mock_venice_client):
     assert memories[0]["content"] == "recovered content"
 
 
-def test_metadata_sanitization(librarian):
+@pytest.mark.asyncio
+async def test_metadata_sanitization(librarian):
     """Test metadata sanitization and validation."""
     # Test sanitization of malicious metadata
     metadata = MemoryMetadata(
@@ -176,7 +180,8 @@ def test_metadata_sanitization(librarian):
     assert "<script>" not in stored["metadata"].tags[0]
 
 
-def test_memory_repair(librarian, mock_venice_client):
+@pytest.mark.asyncio
+async def test_memory_repair(librarian, mock_venice_client):
     """Test memory repair mechanisms."""
     # Store initial valid memory
     initial_metadata = MemoryMetadata(
