@@ -186,7 +186,7 @@ def mock_llm():
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self._lc_kwargs = kwargs
-            self._mock_response = {
+            self._mock_response = json.dumps({
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -195,7 +195,7 @@ def mock_llm():
                     "step_criteria": ["complete"],
                     "overall_criteria": "success"
                 }
-            }
+            })
             
         @property
         def mock_response(self) -> Any:
