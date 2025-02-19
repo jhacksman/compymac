@@ -20,6 +20,13 @@ class MemoryDB:
         if not self.conn_string:
             raise ValueError("Database connection string not provided")
         
+        # Configure connection pool for efficient resource usage
+        self.pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=self.conn_string
+        )
+        
         # Test connection and create tables if needed
         self.test_connection()
     
@@ -44,8 +51,17 @@ class MemoryDB:
             raise ConnectionError(f"Database connection failed: {str(e)}")
     
     def get_connection(self):
-        """Get a database connection."""
-        return psycopg2.connect(self.conn_string)
+        """Get a database connection from the pool."""
+        return self.pool.getconn()
+        
+    def put_connection(self, conn):
+        """Return a connection to the pool."""
+        self.pool.putconn(conn)
+        
+    def close(self):
+        """Close all pool connections."""
+        if hasattr(self, 'pool'):
+            self.pool.closeall()
     
     def store_memory(
         self,
