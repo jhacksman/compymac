@@ -259,13 +259,19 @@ def mock_llm():
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            response = self._call(prompts[0] if prompts else "", stop, run_manager, **kwargs)
+            if isinstance(self._mock_response, Exception):
+                raise self._mock_response
+            if isinstance(self._mock_response, dict):
+                response = json.dumps(self._mock_response)
+            elif isinstance(self._mock_response, str):
+                response = self._mock_response
+            else:
+                response = str(self._mock_response)
             return LLMResult(generations=[[Generation(text=response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            response = await self._acall(prompts[0] if prompts else "", stop, run_manager, **kwargs)
-            return LLMResult(generations=[[Generation(text=response)]])
+            return self._generate(prompts, stop, run_manager, **kwargs)
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
