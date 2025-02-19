@@ -234,8 +234,11 @@ class VeniceClient:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/memories/store",
-                    json=request_data,
+                    f"{self.base_url}/api/memories/create",
+                    json={
+                        "action": "store_memory",
+                        **request_data
+                    },
                     headers=self.headers,
                     timeout=timeout
                 ) as response:
@@ -346,8 +349,11 @@ class VeniceClient:
                 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/memories/retrieve",
-                    json=params,
+                    f"{self.base_url}/api/memories/search",
+                    json={
+                        "action": "retrieve_context",
+                        **params
+                    },
                     headers=self.headers,
                     timeout=timeout
                 ) as response:
@@ -409,10 +415,11 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/embeddings",
+                    f"{self.base_url}/api/embeddings/generate",
                     json={
                         "model": self.model,
-                        "input": text
+                        "input": text,
+                        "action": "generate_embedding"
                     },
                     headers=self.headers,
                     timeout=timeout
@@ -459,9 +466,10 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/completions",
+                    f"{self.base_url}/api/completions/generate",
                     json={
                         "model": self.model,
+                        "action": "generate_summary",
                         "messages": [
                             {
                                 "role": "system",
