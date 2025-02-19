@@ -269,7 +269,7 @@ class VeniceClient:
             memory_id = None
             
             # Process streaming response
-            for chunk in self.stream_memory(content, metadata, timeout):
+            async for chunk in self.stream_memory(content, metadata, timeout):
                 if chunk:
                     # Accumulate the content
                     full_response += chunk
@@ -383,6 +383,117 @@ class VeniceClient:
                     
         except Exception as e:
             raise VeniceAPIError(f"Failed to retrieve memories: {str(e)}")
+            
+    async def get_embedding(
+        self,
+        text: str,
+        timeout: float = 10.0,
+        retry_count: int = 0
+    ) -> MemoryResponse:
+        """Get embedding from Venice.ai API.
+        
+        Args:
+            text: Text to get embedding for
+            timeout: Request timeout in seconds
+            retry_count: Current retry attempt
+            
+        Returns:
+            MemoryResponse with embedding
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/embeddings",
+                    json={
+                        "model": self.model,
+                        "input": text
+                    },
+                    headers=self.headers,
+                    timeout=timeout
+                ) as response:
+                    if response.status == 429 and retry_count < self.max_retries:
+                        await self._handle_rate_limit(retry_count)
+                        return await self.get_embedding(text, timeout, retry_count + 1)
+                        
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise VeniceAPIError(
+                            f"Failed to get embedding: {response.status} - {error_text}"
+                        )
+                        
+                    data = await response.json()
+                    if "data" in data and len(data["data"]) > 0:
+                        embedding = data["data"][0]["embedding"]
+                        return MemoryResponse(
+                            action="get_embedding",
+                            success=True,
+                            embedding=embedding
+                        )
+                    raise VeniceAPIError("No embedding in response")
+                    
+        except Exception as e:
+            raise VeniceAPIError(f"Failed to get embedding: {str(e)}")
+            
+    async def generate_summary(
+        self,
+        text: str,
+        timeout: float = 10.0,
+        retry_count: int = 0
+    ) -> MemoryResponse:
+        """Generate summary using Venice.ai API.
+        
+        Args:
+            text: Text to summarize
+            timeout: Request timeout in seconds
+            retry_count: Current retry attempt
+            
+        Returns:
+            MemoryResponse with summary
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/completions",
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are a summarization assistant. Provide a concise summary of the given text."
+                            },
+                            {
+                                "role": "user",
+                                "content": f"Please summarize this text:\n\n{text}"
+                            }
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 200
+                    },
+                    headers=self.headers,
+                    timeout=timeout
+                ) as response:
+                    if response.status == 429 and retry_count < self.max_retries:
+                        await self._handle_rate_limit(retry_count)
+                        return await self.generate_summary(text, timeout, retry_count + 1)
+                        
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise VeniceAPIError(
+                            f"Failed to generate summary: {response.status} - {error_text}"
+                        )
+                        
+                    data = await response.json()
+                    if "choices" in data and len(data["choices"]) > 0:
+                        summary = data["choices"][0]["message"]["content"]
+                        return MemoryResponse(
+                            action="generate_summary",
+                            success=True,
+                            summary=summary
+                        )
+                    raise VeniceAPIError("No summary in response")
+                    
+        except Exception as e:
+            raise VeniceAPIError(f"Failed to generate summary: {str(e)}")
             
     async def update_memory(
         self,

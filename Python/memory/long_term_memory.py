@@ -5,23 +5,20 @@ context window using Venice.ai API with dynamic encoding and surprise-based
 filtering through the librarian agent.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import time
-import math
 from datetime import datetime, timedelta
-
-import torch
-import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer
+import asyncio
 
 from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
 from .exceptions import MemoryError
 from .venice_client import VeniceClient
 from .librarian import LibrarianAgent
+from .db import MemoryDB
 
 # Type alias for memory entries
-Memory = Dict[str, any]
+Memory = Dict[str, Any]
 
 @dataclass
 class LongTermMemoryConfig:
@@ -30,55 +27,34 @@ class LongTermMemoryConfig:
     summary_threshold: int = 100  # Messages before summarization
     context_window_size: int = 10  # Recent messages to keep in full
     surprise_threshold: float = 0.5  # Threshold for surprise-based filtering
-    model_name: str = "sentence-transformers/all-mpnet-base-v2"  # Base transformer model
-    hidden_size: int = 768  # Hidden size for transformer
-    num_attention_heads: int = 12  # Number of attention heads
+    min_similarity: float = 0.7  # Minimum similarity threshold for retrieval
 
 
-class LongTermMemory(nn.Module):
+class LongTermMemory:
     """Long-term memory module for storing historical information."""
     
     def __init__(
         self,
         config: LongTermMemoryConfig,
-        venice_client: VeniceClient
+        venice_client: VeniceClient,
+        memory_db: MemoryDB
     ):
         """Initialize long-term memory module.
         
         Args:
             config: Configuration for the module
             venice_client: Client for Venice.ai API
+            memory_db: Database connection for memory storage
         """
-        super().__init__()
         self.config = config
         self.librarian = LibrarianAgent(venice_client)
-        self.venice_client = venice_client  # Store venice_client for direct use
-        
-        # Initialize transformer components
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-        self.transformer = AutoModel.from_pretrained(config.model_name)
-        
-        # Memory components
-        self.query_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.key_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.value_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        
-        # Memory write gate
-        self.write_gate = nn.Sequential(
-            nn.Linear(config.hidden_size * 2, config.hidden_size),
-            nn.ReLU(),
-            nn.Linear(config.hidden_size, 1),
-            nn.Sigmoid()
-        )
+        self.venice_client = venice_client
+        self.memory_db = memory_db
         
         # Recent context
         self.recent_context: List[Dict] = []
         
-        # Move to GPU if available
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
-        
-    def store_memory(
+    async def store_memory(
         self,
         content: str,
         metadata: MemoryMetadata,
@@ -99,13 +75,21 @@ class LongTermMemory(nn.Module):
         """
         try:
             # Store in Venice.ai
-            response = self.venice_client.store_memory(content, metadata)
-            if not response.success:
-                raise MemoryError(f"Failed to store memory: {response.error}")
-                
-            memory_id = response.memory_id
+            # Get embedding from Venice.ai
+            embedding_response = await self.venice_client.get_embedding(content)
+            if not embedding_response.success:
+                raise MemoryError(f"Failed to get embedding: {embedding_response.error}")
+            
+            # Store in database
+            memory_id = self.memory_db.store_memory(
+                content=content,
+                embedding=embedding_response.embedding,
+                metadata=metadata,
+                memory_type='ltm',
+                context_ids=context_ids
+            )
             if not memory_id:
-                raise MemoryError("No memory ID returned from Venice.ai")
+                raise MemoryError("Failed to store memory in database")
                 
             # Add to recent context
             self.recent_context.append({
@@ -118,14 +102,14 @@ class LongTermMemory(nn.Module):
             # Maintain context window size
             if len(self.recent_context) > self.config.context_window_size:
                 # Summarize and store older context
-                self._summarize_context()
+                await self._summarize_context()
                 
             return memory_id
             
         except Exception as e:
             raise MemoryError(f"Failed to store memory: {str(e)}")
             
-    def retrieve_context(
+    async def retrieve_context(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -147,20 +131,21 @@ class LongTermMemory(nn.Module):
             MemoryError: If retrieval fails
         """
         try:
-            # Get memories from Venice.ai
-            response = self.venice_client.retrieve_context(
-                query=query,
-                context_id=context_id,
-                time_range=time_range.total_seconds() if time_range else None,
-                limit=limit
+            # Get embedding for query
+            query_response = await self.venice_client.get_embedding(query)
+            if not query_response.success:
+                raise MemoryError(f"Failed to get query embedding: {query_response.error}")
+            
+            # Get similar memories from database
+            similar_memories = self.memory_db.retrieve_similar(
+                embedding=query_response.embedding,
+                limit=limit or 10,
+                min_similarity=self.config.min_similarity
             )
             
-            if not response.success:
-                raise MemoryError(f"Failed to retrieve memories: {response.error}")
-                
-            # Get filtered recent context
-            recent_memories = [
-                memory for memory in self.recent_context
+            # Filter by context and time if needed
+            filtered_memories = [
+                memory for memory in similar_memories
                 if self._matches_filters(
                     memory,
                     context_id=context_id,
@@ -168,28 +153,11 @@ class LongTermMemory(nn.Module):
                 )
             ]
             
-            # Combine with retrieved memories
-            all_memories = []
-            seen_ids = set()
-            
-            # Add recent context first (deduplicated)
-            for memory in recent_memories:
-                if memory["id"] not in seen_ids:
-                    all_memories.append(memory)
-                    seen_ids.add(memory["id"])
-                    
-            # Add retrieved memories (deduplicated)
-            if response.memories:
-                for memory in response.memories:
-                    if memory["id"] not in seen_ids:
-                        all_memories.append(memory)
-                        seen_ids.add(memory["id"])
-                        
             # Apply limit
             if limit is not None:
-                all_memories = all_memories[:limit]
+                filtered_memories = filtered_memories[:limit]
                 
-            return all_memories
+            return filtered_memories
             
         except Exception as e:
             raise MemoryError(f"Failed to retrieve memories: {str(e)}")
@@ -222,7 +190,7 @@ class LongTermMemory(nn.Module):
                 
         return True
         
-    def _summarize_context(self) -> None:
+    async def _summarize_context(self) -> None:
         """Summarize and store older context items."""
         if len(self.recent_context) <= self.config.context_window_size:
             return
@@ -235,11 +203,15 @@ class LongTermMemory(nn.Module):
             memory["content"] for memory in to_summarize
         )
         
+        # Generate summary using Venice.ai
+        summary_response = await self.venice_client.generate_summary(summary_content)
+        if not summary_response.success:
+            raise MemoryError(f"Failed to generate summary: {summary_response.error}")
+            
         # Store summary with metadata
         summary_metadata = MemoryMetadata(
             timestamp=datetime.now().timestamp(),
             importance=1.0,  # High importance for summaries
-            context_ids=[],  # Don't propagate context IDs to avoid cycles
             tags=["summary"],
             source="summarization"
         )
@@ -247,9 +219,8 @@ class LongTermMemory(nn.Module):
         # Update recent context first to prevent recursion
         self.recent_context = self.recent_context[-self.config.context_window_size:]
         
-        # Store summary via librarian
-        self.librarian.store_memory(
-            content=summary_content,
-            metadata=summary_metadata,
-            surprise_score=1.0  # High surprise score for summaries
+        # Store summary in database
+        await self.store_memory(
+            content=summary_response.summary or "",
+            metadata=summary_metadata
         )

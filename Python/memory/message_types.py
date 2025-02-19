@@ -1,7 +1,7 @@
 """Message types for memory operations."""
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Union
 from datetime import datetime
 
 
@@ -10,8 +10,8 @@ class MemoryMetadata:
     """Metadata for memory entries."""
     timestamp: float
     importance: Optional[float] = None
-    context_ids: List[str] = None
-    tags: List[str] = None
+    context_ids: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
     source: Optional[str] = None
     task_id: Optional[int] = None  # Added for task-based filtering
     
@@ -53,3 +53,5 @@ class MemoryResponse:
     memory_id: Optional[str] = None
     memories: Optional[List[Dict]] = None
     error: Optional[str] = None
+    embedding: Optional[List[float]] = None
+    summary: Optional[str] = None
