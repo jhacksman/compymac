@@ -42,13 +42,13 @@ class MockWebSocketServer:
                     ping_timeout=None,
                     close_timeout=None
                 )
-                await self.server.wait_closed()
+                await asyncio.Future()  # Keep server running
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 
         self.server_task = asyncio.create_task(run_server())
         # Give server time to start
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)  # Reduced wait time
     
     async def stop(self):
         """Stop the WebSocket server."""
@@ -56,7 +56,7 @@ class MockWebSocketServer:
             if self.server:
                 self.server.close()
                 await self.server.wait_closed()
-            if self.server_task:
+            if self.server_task and not self.server_task.done():
                 self.server_task.cancel()
                 try:
                     await self.server_task
@@ -66,6 +66,8 @@ class MockWebSocketServer:
             print(f"Error stopping server: {str(e)}")
         finally:
             self.connected = False
+            self.server = None
+            self.server_task = None
     
     def handle_connection(self, websocket):
         """Handle WebSocket connection.

@@ -4,11 +4,15 @@ import os
 import uuid
 import time
 import asyncio
+import json
 import pytest
 import pytest_asyncio
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, MagicMock
 from langchain.llms.base import BaseLLM
+from langchain_core.outputs import LLMResult, Generation
+from langchain_core.runnables import Runnable, RunnableConfig
+from typing import Any, List, Optional, Iterator, AsyncIterator
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
@@ -156,10 +160,7 @@ async def venice_client():
 @pytest.fixture
 def mock_llm():
     """Provide mock LLM."""
-    from langchain.schema.runnable import RunnableConfig, Runnable
-    from typing import Any, List, Optional, Iterator, AsyncIterator
-    
-    class MockLLM(BaseLLM):
+    class MockLLM(BaseLLM, Runnable):
         def __init__(self):
             super().__init__()
             self.response = json.dumps({
