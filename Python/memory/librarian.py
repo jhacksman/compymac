@@ -172,7 +172,7 @@ class LibrarianAgent:
                 if isinstance(metadata, dict):
                     importance = metadata.get("importance", 0.0)
                 else:
-                    importance = metadata.importance or 0.0
+                    importance = getattr(metadata, 'importance', 0.0) or 0.0
                 if importance >= 0.8:
                     break
                 self.recent_memories.pop(0)
@@ -183,7 +183,7 @@ class LibrarianAgent:
                 if isinstance(metadata, dict):
                     importance = metadata.get("importance", 0.0)
                 else:
-                    importance = metadata.importance or 0.0
+                    importance = getattr(metadata, 'importance', 0.0) or 0.0
                 if importance >= 0.8:
                     break
                 LibrarianAgent._shared_memories.pop(0)

@@ -41,7 +41,8 @@ def mock_venice_client():
 async def executive_agent(mock_venice_client, mock_memory_db):
     """Create executive agent fixture."""
     agent = LibrarianAgent(mock_venice_client)
-    agent.role = "executive"  # Use role instead of agent_id
+    # No need to set role, use context_ids instead
+    agent._shared_memories = []  # Reset shared memories
     return agent
 
 
@@ -49,11 +50,13 @@ async def executive_agent(mock_venice_client, mock_memory_db):
 async def worker_agent(mock_venice_client, mock_memory_db):
     """Create worker agent fixture."""
     agent = LibrarianAgent(mock_venice_client)
-    agent.role = "worker"  # Use role instead of agent_id
+    # No need to set role, use context_ids instead
+    agent._shared_memories = []  # Reset shared memories
     return agent
 
 
-def test_memory_sharing_between_agents(executive_agent, worker_agent):
+@pytest.mark.asyncio
+async def test_memory_sharing_between_agents(executive_agent, worker_agent):
     """Test memory sharing between agents."""
     # Executive stores task information
     task_metadata = MemoryMetadata(
@@ -62,13 +65,13 @@ def test_memory_sharing_between_agents(executive_agent, worker_agent):
         context_ids=["shared_task_1"]
     )
     
-    executive_agent.store_memory(
+    await executive_agent.store_memory(
         "Complete research on memory systems",
         task_metadata
     )
     
     # Worker accesses shared task
-    worker_memories = worker_agent.retrieve_memories(
+    worker_memories = await worker_agent.retrieve_memories(
         "research task",
         context_id="shared_task_1"
     )
@@ -77,7 +80,8 @@ def test_memory_sharing_between_agents(executive_agent, worker_agent):
     assert "research on memory systems" in worker_memories[0]["content"]
 
 
-def test_hierarchical_memory_access(executive_agent, worker_agent, mock_venice_client):
+@pytest.mark.asyncio
+async def test_hierarchical_memory_access(executive_agent, worker_agent, mock_venice_client):
     """Test hierarchical memory access patterns."""
     # Worker stores progress information
     progress_metadata = MemoryMetadata(
@@ -86,7 +90,7 @@ def test_hierarchical_memory_access(executive_agent, worker_agent, mock_venice_c
         context_ids=["task_progress"]
     )
     
-    worker_agent.store_memory(
+    await worker_agent.store_memory(
         "Research progress: 50% complete",
         progress_metadata
     )
@@ -106,7 +110,7 @@ def test_hierarchical_memory_access(executive_agent, worker_agent, mock_venice_c
         }]
     )
     
-    executive_view = executive_agent.retrieve_memories(
+    executive_view = await executive_agent.retrieve_memories(
         "progress updates",
         context_id="task_progress"
     )
@@ -115,7 +119,8 @@ def test_hierarchical_memory_access(executive_agent, worker_agent, mock_venice_c
     assert "50% complete" in executive_view[0]["content"]
 
 
-def test_context_synchronization(executive_agent, worker_agent):
+@pytest.mark.asyncio
+async def test_context_synchronization(executive_agent, worker_agent):
     """Test context synchronization between agents."""
     shared_context = "project_alpha"
     
@@ -126,7 +131,7 @@ def test_context_synchronization(executive_agent, worker_agent):
         context_ids=[shared_context]
     )
     
-    executive_agent.store_memory(
+    await executive_agent.store_memory(
         "Project Alpha objectives defined",
         exec_metadata
     )
@@ -138,17 +143,17 @@ def test_context_synchronization(executive_agent, worker_agent):
         context_ids=[shared_context]
     )
     
-    worker_agent.store_memory(
+    await worker_agent.store_memory(
         "Project Alpha implementation started",
         worker_metadata
     )
     
     # Both agents should see synchronized context
-    exec_view = executive_agent.retrieve_memories(
+    exec_view = await executive_agent.retrieve_memories(
         "Project Alpha",
         context_id=shared_context
     )
-    worker_view = worker_agent.retrieve_memories(
+    worker_view = await worker_agent.retrieve_memories(
         "Project Alpha",
         context_id=shared_context
     )
@@ -156,7 +161,8 @@ def test_context_synchronization(executive_agent, worker_agent):
     assert len(exec_view) == len(worker_view)
 
 
-def test_memory_access_control(executive_agent, worker_agent, mock_venice_client):
+@pytest.mark.asyncio
+async def test_memory_access_control(executive_agent, worker_agent, mock_venice_client):
     """Test memory access control between agents."""
     # Executive stores private memory
     private_metadata = MemoryMetadata(
@@ -165,7 +171,7 @@ def test_memory_access_control(executive_agent, worker_agent, mock_venice_client
         context_ids=["executive_only"]
     )
     
-    executive_agent.store_memory(
+    await executive_agent.store_memory(
         "Confidential executive decision",
         private_metadata
     )
@@ -177,7 +183,7 @@ def test_memory_access_control(executive_agent, worker_agent, mock_venice_client
         memories=[]  # Empty for worker
     )
     
-    worker_view = worker_agent.retrieve_memories(
+    worker_view = await worker_agent.retrieve_memories(
         "executive decisions",
         context_id="executive_only"
     )
@@ -185,7 +191,8 @@ def test_memory_access_control(executive_agent, worker_agent, mock_venice_client
     assert len(worker_view) == 0
 
 
-def test_collaborative_memory_building(executive_agent, worker_agent):
+@pytest.mark.asyncio
+async def test_collaborative_memory_building(executive_agent, worker_agent):
     """Test collaborative building of shared memory."""
     project_id = "collaborative_project"
     
@@ -198,7 +205,7 @@ def test_collaborative_memory_building(executive_agent, worker_agent):
     ]
     
     for agent, content in contributions:
-        agent.store_memory(
+        await agent.store_memory(
             content,
             MemoryMetadata(
                 timestamp=datetime.now().timestamp(),
