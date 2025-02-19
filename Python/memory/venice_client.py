@@ -509,7 +509,7 @@ class VeniceClient:
         """Update memory in Venice.ai."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.patch(
+                async with session.put(
                     f"{self.base_url}/memories/{memory_id}",
                     json={
                         "action": "update_memory",

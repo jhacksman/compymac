@@ -18,9 +18,9 @@ def memory_manager():
     return manager
 
 @pytest.fixture
-def manager_agent(memory_manager):
-    """Create manager agent with mock memory manager."""
-    return AgentManager(memory_manager)
+def manager_agent(memory_manager, mock_llm):
+    """Create manager agent with mock memory manager and LLM."""
+    return AgentManager(memory_manager, llm=mock_llm)
 
 @pytest.mark.asyncio
 async def test_execute_task_success(manager_agent):

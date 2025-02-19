@@ -8,30 +8,29 @@ from datetime import datetime, timezone
 from ..memory.protocol import MemoryMessage
 from ..memory.exceptions import VeniceAPIError
 
-@pytest.fixture(scope="module")
-def server():
+@pytest_asyncio.fixture(scope="module")
+async def server():
     """Create and start mock WebSocket server."""
     from .mock_websocket_server import MockWebSocketServer
     server = MockWebSocketServer()
-    server.start()  # Synchronous start
-    # Wait for server to be ready
-    import time
-    time.sleep(1)
+    await server.start()  # Async start
     try:
         yield server
     finally:
-        server.stop()  # Synchronous stop
+        await server.stop()  # Async stop
 
-@pytest.fixture
-def websocket(server):
+@pytest_asyncio.fixture
+async def websocket(server):
+    """Create WebSocket connection."""
     try:
-        with websockets.connect('ws://localhost:8765') as websocket:
+        async with websockets.connect('ws://localhost:8765') as websocket:
             yield websocket
     except Exception as e:
         pytest.fail(f"Failed to connect to WebSocket server: {str(e)}")
 
 
-def test_store_memory_roundtrip(websocket):
+@pytest.mark.asyncio
+async def test_store_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for store_memory."""
     store_request = MemoryMessage.create(
         role="assistant",
@@ -49,7 +48,8 @@ def test_store_memory_roundtrip(websocket):
     assert response["content"] == "test memory"
     assert response["metadata"]["importance"] == "high"
 
-def test_retrieve_context_roundtrip(websocket):
+@pytest.mark.asyncio
+async def test_retrieve_context_roundtrip(websocket):
     """Test complete WebSocket round-trip for retrieve_context."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -80,7 +80,8 @@ def test_retrieve_context_roundtrip(websocket):
     assert len(response["memories"]) > 0
     assert response["memories"][0]["content"] == "test memory"
 
-def test_update_memory_roundtrip(websocket):
+@pytest.mark.asyncio
+async def test_update_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for update_memory."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -113,7 +114,8 @@ def test_update_memory_roundtrip(websocket):
     assert response["content"] == "updated memory"
     assert response["metadata"]["importance"] == "medium"
 
-def test_delete_memory_roundtrip(websocket):
+@pytest.mark.asyncio
+async def test_delete_memory_roundtrip(websocket):
     """Test complete WebSocket round-trip for delete_memory."""
     # First store a memory
     store_request = MemoryMessage.create(
@@ -152,7 +154,8 @@ def test_delete_memory_roundtrip(websocket):
     assert response["status"] == "success"
     assert len(response["memories"]) == 0
 
-def test_error_handling(websocket):
+@pytest.mark.asyncio
+async def test_error_handling(websocket):
     """Test error handling in WebSocket communication."""
     # Try to update non-existent memory
     update_request = {
