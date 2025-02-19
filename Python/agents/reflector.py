@@ -10,7 +10,7 @@ from langchain.memory import ConversationBufferMemory
 from langchain_core.language_models.llms import BaseLLM
 
 from .protocols import AgentRole, AgentMessage, TaskResult
-from ..memory import MemoryManager
+from memory import MemoryManager
 
 class ReflectorAgent:
     """Reflection agent for monitoring and improving system performance."""

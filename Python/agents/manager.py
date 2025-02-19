@@ -12,7 +12,7 @@ from langchain.tools import Tool
 from langchain.chains import LLMChain
 from langchain_core.language_models.llms import BaseLLM
 
-from ..memory import MemoryManager
+from memory import MemoryManager
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
 from .planner import PlannerAgent

@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableSequence
 
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
-from ..memory import MemoryManager
+from memory import MemoryManager
 
 class PlannerAgent:
     """Planning agent for task decomposition."""
