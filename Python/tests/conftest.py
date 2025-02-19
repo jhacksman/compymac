@@ -23,13 +23,19 @@ from .mock_websocket_server import MockWebSocketServer
 # Global memory store for tests
 _test_memories = []
 
-# Set test environment variables if not already set
+# Validate required environment variables
 if not os.getenv("VENICE_API_KEY"):
     raise ValueError("VENICE_API_KEY environment variable is required for tests")
-if not os.getenv("VENICE_BASE_URL"):
-    os.environ["VENICE_BASE_URL"] = "https://api.venice.ai"  # Use production API
-if not os.getenv("VENICE_MODEL"):
-    os.environ["VENICE_MODEL"] = "llama-3.3-70b"  # Use default model
+if not os.getenv("DATABASE_URL"):
+    raise ValueError("DATABASE_URL environment variable is required for tests")
+
+# Set default values for optional environment variables
+VENICE_BASE_URL = os.getenv("VENICE_BASE_URL", "https://api.venice.ai")
+VENICE_MODEL = os.getenv("VENICE_MODEL", "llama-3.3-70b")
+
+# Export for use in tests
+os.environ["VENICE_BASE_URL"] = VENICE_BASE_URL
+os.environ["VENICE_MODEL"] = VENICE_MODEL
 
 # Get environment variables
 VENICE_API_KEY = os.getenv("VENICE_API_KEY")
