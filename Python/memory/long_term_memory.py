@@ -100,8 +100,8 @@ class LongTermMemory:
             })
             
             # Maintain context window size
-            if len(self.recent_context) > self.config.context_window_size:
-                # Summarize and store older context
+            if len(self.recent_context) > self.config.context_window_size and not metadata.source == 'summarization':
+                # Summarize and store older context, but only if this isn't already a summary
                 await self._summarize_context()
                 
             return memory_id
