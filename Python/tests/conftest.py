@@ -8,10 +8,13 @@ import pytest
 import pytest_asyncio
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, MagicMock
+from langchain.llms.base import BaseLLM
 
 from memory.message_types import MemoryMetadata, MemoryResponse
 from memory.venice_client import VeniceClient
 from memory.librarian import LibrarianAgent
+from .mock_memory_db import MockMemoryDB
+from .mock_websocket_server import MockWebSocketServer
 
 # Global memory store for tests
 _test_memories = []
@@ -156,6 +159,32 @@ async def venice_client():
     client.delete_memory = AsyncMock(side_effect=mock_delete_memory)
     
     return client
+
+@pytest.fixture
+def mock_llm():
+    """Provide mock LLM."""
+    class MockLLM(BaseLLM):
+        def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            return "Mock LLM Response"
+            
+        async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+            return "Mock LLM Response"
+            
+        @property
+        def _llm_type(self) -> str:
+            return "mock"
+    
+    return MockLLM()
+
+@pytest.fixture
+def mock_memory_db():
+    """Provide mock memory database."""
+    return MockMemoryDB()
+
+@pytest.fixture
+def mock_websocket_server():
+    """Provide mock WebSocket server."""
+    return MockWebSocketServer()
 
 @pytest_asyncio.fixture(scope="function")
 async def librarian(venice_client):
