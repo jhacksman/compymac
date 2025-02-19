@@ -160,11 +160,9 @@ Response:""",
             task: Task specification with subtasks and criteria
             
         Returns:
-            Task execution result
-        
-        Raises:
-            Exception: If task execution fails
+            TaskResult: Task execution result with success status, message, and artifacts
         """
+        last_error = None
         for attempt in range(self.config.max_retries):
             try:
                 # Get relevant context if memory manager exists
@@ -215,9 +213,11 @@ Response:""",
                     )
                 
                 # Success criteria not met
-                raise Exception("Success criteria not met")
+                last_error = Exception("Success criteria not met")
+                raise last_error
                 
             except Exception as e:
+                last_error = e
                 error_msg = f"Attempt {attempt + 1} failed: {str(e)}"
                 
                 # Store error in memory if manager exists
@@ -236,14 +236,14 @@ Response:""",
                     delay = self._calculate_delay(attempt)
                     await asyncio.sleep(delay)
                     continue
-                
-                # All retries failed
-                return TaskResult(
-                    success=False,
-                    message=f"Task failed after {attempt + 1} attempts",
-                    artifacts={
-                        "last_error": str(e),
-                        "attempts": attempt + 1
-                    },
-                    error=str(e)
-                )
+        
+        # All retries failed
+        return TaskResult(
+            success=False,
+            message=f"Task failed after {self.config.max_retries} attempts",
+            artifacts={
+                "last_error": str(last_error),
+                "attempts": self.config.max_retries
+            },
+            error=str(last_error)
+        )
