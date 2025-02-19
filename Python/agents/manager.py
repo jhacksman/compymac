@@ -147,7 +147,7 @@ Action Input: The input for the tool
             result = await self.executor.execute_task(plan.artifacts)
             
             # Store delegation in memory
-            self.memory_manager.store_memory(
+            await self.memory_manager.store_memory(
                 content=json.dumps({
                     "task": task,
                     "plan": plan.artifacts,
