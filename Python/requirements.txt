@@ -6,3 +6,6 @@ aiohttp==3.9.3
 requests==2.31.0
 langchain-core==0.1.27
 langchain==0.1.9
+pydantic>=2.0.0
+PyYAML>=6.0
+tenacity>=8.1.0
