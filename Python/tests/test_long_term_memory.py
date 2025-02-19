@@ -169,6 +169,6 @@ async def test_retrieve_context_with_limit(long_term_memory):
         await long_term_memory.store_memory(content, metadata)
     
     # Retrieve with limit
-    memories = await long_term_memory.retrieve_context("test", limit=3)
+    memories = await long_term_memory.retrieve_memories("test", limit=3)
     
     assert len(memories) <= 3
