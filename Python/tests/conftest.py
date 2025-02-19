@@ -178,8 +178,10 @@ def mock_llm():
             arbitrary_types_allowed = True
             extra = "allow"
             underscore_attrs_are_private = True
+            validate_assignment = True
+            allow_inf_nan = True
         
-        _response: str = PrivateAttr(default=None)
+        _response: str = PrivateAttr(default="", exclude=True) # Initialize with empty string
         
         def __init__(self, **kwargs):
             super().__init__(**kwargs)

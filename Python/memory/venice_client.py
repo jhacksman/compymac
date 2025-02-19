@@ -32,14 +32,17 @@ class VeniceClient:
             async with aiohttp.ClientSession() as session:
                 async with session.delete(
                     f"{self.base_url}/memories/{memory_id}",
-                    headers=self.headers
+                    headers=self.headers,
+                    json={"action": "delete_memory"}
                 ) as response:
                     await response.read()
                     if response.status != 200:
-                        raise VeniceAPIError(f"Failed to delete memory: {response.status}")
+                        error_text = await response.text()
+                        raise VeniceAPIError(f"Failed to delete memory: {error_text}")
                     return MemoryResponse(
                         action="delete_memory",
-                        success=True
+                        success=True,
+                        memory_id=memory_id
                     )
         except Exception as e:
             raise VeniceAPIError(f"Failed to delete memory: {str(e)}")
@@ -507,12 +510,11 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.patch(
-                    f"{self.base_url}/memories/update/{memory_id}",
+                    f"{self.base_url}/memories/{memory_id}",
                     json={
-                        "model": self.model,
+                        "action": "update_memory",
                         "content": content,
-                        "metadata": metadata.__dict__ if metadata else None,
-                        "stream": True
+                        "metadata": metadata.__dict__ if metadata else None
                     },
                     headers=self.headers,
                     timeout=timeout
