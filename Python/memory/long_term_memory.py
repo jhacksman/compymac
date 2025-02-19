@@ -100,16 +100,20 @@ class LongTermMemory:
             })
             
             # Maintain context window size
-            if len(self.recent_context) > self.config.context_window_size and not metadata.source == 'summarization':
-                # Summarize and store older context, but only if this isn't already a summary
-                await self._summarize_context()
+            if len(self.recent_context) > self.config.context_window_size:
+                # Only summarize if this isn't already a summary
+                if not metadata.source == 'summarization':
+                    await self._summarize_context()
+                else:
+                    # Just trim the window without summarizing
+                    self.recent_context = self.recent_context[-self.config.context_window_size:]
                 
             return memory_id
             
         except Exception as e:
             raise MemoryError(f"Failed to store memory: {str(e)}")
             
-    async def retrieve_context(
+    async def retrieve_memories(
         self,
         query: str,
         context_id: Optional[str] = None,
@@ -161,6 +165,10 @@ class LongTermMemory:
             
         except Exception as e:
             raise MemoryError(f"Failed to retrieve memories: {str(e)}")
+            
+    async def retrieve_context(self, *args, **kwargs) -> List[Dict]:
+        """Alias for retrieve_memories for backward compatibility."""
+        return await self.retrieve_memories(*args, **kwargs)
             
     def _matches_filters(
         self,

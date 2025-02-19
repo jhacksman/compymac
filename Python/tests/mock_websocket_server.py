@@ -50,12 +50,6 @@ class MockWebSocketServer:
                 last_error = None
                 for attempt in range(3):
                     try:
-                        # Clean up any existing connections
-                        if hasattr(self, 'server') and self.server:
-                            self.server.close()
-                            await self.server.wait_closed()
-                            await asyncio.sleep(1)  # Wait for port to be freed
-                            
                         # Try to start server
                         server = await websockets.serve(
                             self.handle_connection,
@@ -86,10 +80,6 @@ class MockWebSocketServer:
                 self.connected = False
                 self._ready_event.set()  # Signal server failed
                 raise last_error or Exception("Failed to start server after retries")
-                self.server = server
-                self.connected = True
-                self._ready_event.set()  # Signal server is ready
-                await self._stop_event.wait()  # Wait until stop is called
             except Exception as e:
                 print(f"Server error: {str(e)}")
                 self.connected = False
