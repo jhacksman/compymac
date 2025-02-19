@@ -5,6 +5,7 @@ from datetime import datetime
 import asyncio
 import json
 
+from datetime import datetime
 from langchain.agents import AgentExecutor, LLMSingleActionAgent
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
@@ -13,6 +14,7 @@ from langchain.chains import LLMChain
 from langchain_core.language_models.llms import BaseLLM
 
 from ..memory import MemoryManager
+from .retry_handler import RetryHandler
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
 from .planner import PlannerAgent
@@ -49,6 +51,7 @@ class ManagerAgent:
             memory_key="chat_history",
             return_messages=True
         )
+        self.retry_handler = RetryHandler()
         self.tools = self._setup_tools()
         if self._llm:
             self.agent_executor = self._setup_agent_executor()
@@ -311,55 +314,62 @@ Action Input: The input for the tool
         Returns:
             Task execution result
         """
-        max_retries = 3
-        last_error = None
-        
         try:
             # Create plan
-            plan = await self.planner.create_plan(json.dumps(task))
+            plan = await self.retry_handler.execute_with_retry(
+                self.planner.create_plan,
+                json.dumps(task)
+            )
             if not plan.success:
                 return plan
-                
-            # Execute plan with retry
-            for attempt in range(max_retries):
+
+            async def execute_with_analysis():
+                # Execute plan
                 result = await self.executor.execute_task(plan.artifacts)
-                if result.success:
-                    # Analyze success
-                    analysis = await self.reflector.analyze_execution(result)
-                    
-                    # Store success in memory
-                    self.memory_manager.store_memory(
-                        content=json.dumps({
-                            "task": task,
-                            "plan": plan.artifacts,
-                            "execution": result.artifacts,
-                            "analysis": analysis.artifacts
-                        }),
-                        metadata={
-                            "type": "task_result",
-                            "success": True,
-                            "timestamp": datetime.now().isoformat()
-                        }
-                    )
-                    
-                    return TaskResult(
-                        success=True,
-                        message=result.message,  # Use the original success message
-                        artifacts={
-                            "plan": plan.artifacts,
-                            "execution": result.artifacts,
-                            "analysis": analysis.artifacts,
-                            "result": result.artifacts.get("result", "success")
-                        }
-                    )
-                    
+                if not result.success:
+                    raise Exception(result.error or "Task execution failed")
+
+                # Analyze success
+                analysis = await self.reflector.analyze_execution(result)
+                
+                # Store success in memory
+                await self.memory_manager.store_memory(
+                    content=json.dumps({
+                        "task": task,
+                        "plan": plan.artifacts,
+                        "execution": result.artifacts,
+                        "analysis": analysis.artifacts
+                    }),
+                    metadata={
+                        "type": "task_result",
+                        "success": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                
+                return TaskResult(
+                    success=True,
+                    message=result.message,
+                    artifacts={
+                        "plan": plan.artifacts,
+                        "execution": result.artifacts,
+                        "analysis": analysis.artifacts,
+                        "result": result.artifacts.get("result", "success")
+                    }
+                )
+
+            try:
+                return await self.retry_handler.execute_with_retry(
+                    execute_with_analysis
+                )
+            except Exception as e:
                 # Analyze failure
-                analysis = await self.reflector.analyze_failure(result.artifacts)
+                analysis = await self.reflector.analyze_failure({"error": str(e)})
                 if analysis.success:
                     # Get improvements
                     improvements = await self.reflector.suggest_improvements(analysis.artifacts)
                     if improvements.success:
-                        # Update plan
+                        # Update plan with improvements
                         message = AgentMessage(
                             sender=AgentRole.REFLECTOR,
                             recipient=AgentRole.PLANNER,
@@ -368,46 +378,36 @@ Action Input: The input for the tool
                         )
                         await self.planner.handle_feedback(message)
                         
-                        # Get updated plan
-                        plan = await self.planner.create_plan(json.dumps(task))
-                        if not plan.success:
-                            return plan
-                            
-                last_error = result.error
+                        # Retry with updated plan
+                        return await self.execute_task(task)
                 
-            # All attempts failed
-            error_msg = f"Task failed after {max_retries} attempts: {last_error}"
-            
-            # Store error in memory
-            self.memory_manager.store_memory(
-                content=json.dumps({
-                    "task": task,
-                    "error": error_msg,
-                    "attempts": max_retries
-                }),
-                metadata={
-                    "type": "task_error",
-                    "success": False,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-            
-            return TaskResult(
-                success=False,
-                message=error_msg,
-                artifacts={"result": None},
-                error=last_error
-            )
-            
+                # Store error in memory
+                await self.memory_manager.store_memory(
+                    content=json.dumps({
+                        "task": task,
+                        "error": str(e),
+                        "analysis": analysis.artifacts if analysis.success else None
+                    }),
+                    metadata={
+                        "type": "task_error",
+                        "success": False,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                
+                return TaskResult(
+                    success=False,
+                    message=f"Task failed: {str(e)}",
+                    artifacts={"error": str(e)},
+                    error=str(e)
+                )
+                
         except Exception as e:
-            error_msg = f"Task failed after {max_retries} attempts: {str(e)}"
-            
             # Store error in memory
-            self.memory_manager.store_memory(
+            await self.memory_manager.store_memory(
                 content=json.dumps({
                     "task": task,
-                    "error": error_msg,
-                    "attempts": max_retries
+                    "error": str(e)
                 }),
                 metadata={
                     "type": "task_error",
@@ -418,8 +418,8 @@ Action Input: The input for the tool
             
             return TaskResult(
                 success=False,
-                message=error_msg,
-                artifacts={"result": None},
+                message=f"Task failed: {str(e)}",
+                artifacts={"error": str(e)},
                 error=str(e)
             )
         """Execute a task using the agent system.

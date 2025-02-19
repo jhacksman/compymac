@@ -1,15 +1,9 @@
 """Execution agent for carrying out tasks."""
 
-from typing import Dict, List, Optional
-from datetime import datetime
-import time
-import math
-import json
-import random
-import asyncio
-from datetime import datetime
-from unittest.mock import MagicMock
 from typing import Dict, List, Optional, Any
+from datetime import datetime
+import json
+import asyncio
 
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -18,7 +12,9 @@ from langchain_core.language_models.llms import BaseLLM
 
 from .protocols import AgentRole, AgentMessage, TaskResult
 from .config import AgentConfig
+from .retry_handler import RetryHandler
 from ..memory import MemoryManager
+from ..memory.error_logger import ErrorLogger
 
 class ExecutorAgent:
     """Execution agent for carrying out tasks."""
@@ -41,6 +37,8 @@ class ExecutorAgent:
             return_messages=True
         )
         self._llm = llm
+        self.retry_handler = RetryHandler()
+        self.error_logger = ErrorLogger(memory_manager) if memory_manager else None
         
         # Set up execution chain
         self.execution_chain = self._setup_execution_chain()
@@ -136,22 +134,15 @@ Response:""",
         except Exception:
             return False
             
-    def _calculate_delay(self, attempt: int) -> float:
-        """Calculate exponential backoff delay.
+    async def _log_error(self, error: Exception, context: Dict[str, Any]) -> None:
+        """Log error to memory system.
         
         Args:
-            attempt: Current attempt number (0-based)
-            
-        Returns:
-            Delay in seconds
+            error: Exception that occurred
+            context: Error context
         """
-        delay = min(
-            self.config.retry_delay * (2 ** attempt),
-            self.config.max_retry_delay
-        )
-        # Add jitter
-        jitter = delay * 0.1  # 10% jitter
-        return delay + (random.random() * jitter)
+        if self.error_logger:
+            await self.error_logger.log_error(error, context)
         
     async def execute_task(self, task: Dict) -> TaskResult:
         """Execute a task according to plan.
@@ -162,85 +153,69 @@ Response:""",
         Returns:
             Task execution result
         """
-        for attempt in range(self.config.max_retries):
-            try:
-                # Get relevant context if memory manager exists
-                context = ""
-                if self.memory_manager:
-                    memories = self.memory_manager.retrieve_context(
-                        query=str(task),
-                        time_range="1d"  # Last day
-                    )
-                    if memories:
-                        context = "\nRelevant context:\n" + "\n".join(
-                            f"- {m['content']}" for m in memories
-                        )
-                
-                # Generate execution plan
-                result = await self.execution_chain.apredict(
-                    task=str(task["subtasks"]) + context,
-                    criteria=str(task["criteria"])
+        async def execute_with_context():
+            # Get relevant context if memory manager exists
+            context = ""
+            if self.memory_manager:
+                memories = await self.memory_manager.retrieve_context(
+                    query=str(task),
+                    time_range="1d"  # Last day
                 )
-                
-                # Execute plan
-                execution_result = {
-                    "success": True,
-                    "message": "Task executed successfully",
-                    "artifacts": {
-                        "execution_plan": result,
-                        "attempt": attempt + 1
-                    }
-                }
-                
-                # Verify success
-                if self._verify_success(execution_result, task["criteria"]):
-                    # Store success in memory if manager exists
-                    if self.memory_manager:
-                        self.memory_manager.store_memory(
-                            content=str(execution_result),
-                            metadata={
-                                "type": "task_execution",
-                                "success": True,
-                                "timestamp": datetime.now().isoformat()
-                            }
-                        )
-                    
-                    return TaskResult(
-                        success=True,
-                        message="Task completed successfully",
-                        artifacts=execution_result["artifacts"]
+                if memories:
+                    context = "\nRelevant context:\n" + "\n".join(
+                        f"- {m['content']}" for m in memories
                     )
-                
-                # Success criteria not met
+            
+            # Generate execution plan
+            result = await self.execution_chain.apredict(
+                task=str(task["subtasks"]) + context,
+                criteria=str(task["criteria"])
+            )
+            
+            # Execute plan
+            execution_result = {
+                "success": True,
+                "message": "Task executed successfully",
+                "artifacts": {
+                    "execution_plan": result
+                }
+            }
+            
+            # Verify success
+            if not self._verify_success(execution_result, task["criteria"]):
                 raise Exception("Success criteria not met")
                 
-            except Exception as e:
-                error_msg = f"Attempt {attempt + 1} failed: {str(e)}"
-                
-                # Store error in memory if manager exists
-                if self.memory_manager:
-                    self.memory_manager.store_memory(
-                        content=error_msg,
-                        metadata={
-                            "type": "task_error",
-                            "attempt": attempt + 1,
-                            "timestamp": datetime.now().isoformat()
-                        }
-                    )
-                
-                if attempt < self.config.max_retries - 1:
-                    # Calculate and apply backoff delay
-                    delay = self._calculate_delay(attempt)
-                    await asyncio.sleep(delay)
-                    continue
-                
-                # All retries failed
-                return TaskResult(
-                    success=False,
-                    message=f"Task failed after {attempt + 1} attempts",
-                    artifacts={
-                        "last_error": str(e),
-                        "attempts": attempt + 1
-                    },
-                    error=str(e)
+            # Store success in memory if manager exists
+            if self.memory_manager:
+                await self.memory_manager.store_memory(
+                    content=str(execution_result),
+                    metadata={
+                        "type": "task_execution",
+                        "success": True,
+                        "timestamp": datetime.now().isoformat()
+                    }
                 )
+            
+            return TaskResult(
+                success=True,
+                message="Task completed successfully",
+                artifacts=execution_result["artifacts"]
+            )
+            
+        try:
+            return await self.retry_handler.execute_with_retry(execute_with_context)
+        except Exception as e:
+            # Log error
+            await self._log_error(e, {
+                "task": task,
+                "type": "task_execution_error"
+            })
+            
+            return TaskResult(
+                success=False,
+                message=f"Task failed: {str(e)}",
+                artifacts={
+                    "error": str(e)
+                },
+                error=str(e)
+            )
