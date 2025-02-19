@@ -24,12 +24,14 @@ class BrowserAutomationServer:
 
     def start(self):
         """Start the automation server."""
-        self.desktop.start()
+        if not self.mock_mode:
+            self.desktop.start()
         self._setup_browser()
 
     def stop(self):
         """Stop the automation server."""
-        self.desktop.stop()
+        if not self.mock_mode:
+            self.desktop.stop()
         self._cleanup_browser()
         self.memory_db.close()  # Clean up database connection
         
@@ -91,11 +93,15 @@ class BrowserAutomationServer:
                 if mem_info.rss > 12 * 1024 * 1024 * 1024:  # 12GB threshold
                     print("Memory usage warning: {}GB".format(mem_info.rss / 1024**3))
             
+            if self.mock_mode:
+                # In mock mode, just return immediately
+                print("Mock WebSocket server started")
+                return
+                
             with serve(
                 self.handle_client_message,
                 "localhost",
-                8765,
-                reuse_address=True
+                8765
             ) as server:
                 print("Browser automation server listening on ws://localhost:8765")
                 while True:  # run forever

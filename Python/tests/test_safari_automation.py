@@ -1,9 +1,11 @@
 import pytest
-from ..browser_automation_server import BrowserAutomationServer
+from ..desktop.browser_automation_server import BrowserAutomationServer
 
 @pytest.fixture(scope="function")
-def server():
+def server(monkeypatch):
     """Create server fixture."""
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/test_db')
+    monkeypatch.setenv('TESTING', 'true')
     server = BrowserAutomationServer(mock_mode=True)
     server.start()  # Synchronous start
     try:
