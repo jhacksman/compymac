@@ -65,11 +65,17 @@ async def venice_client():
         else:
             metadata_dict = dict(metadata)
             
-        # Create memory entry
+        # Mock embedding and summary generation
+        embedding = [0.1] * 1536
+        summary = "Mock summary"
+        
+        # Create memory entry with embedding and summary
         memory = {
             "id": memory_id,
             "content": content,
             "metadata": metadata_dict,
+            "embedding": embedding,
+            "summary": summary,
             "timestamp": datetime.now().timestamp()
         }
         
@@ -79,53 +85,24 @@ async def venice_client():
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
-        # Mock embedding and summary generation
-        embedding = [0.1] * 1536
-        summary = "Mock summary for: " + content[:50]
-        
-        response = MemoryResponse(
+        return MemoryResponse(
             action="store_memory",
             success=True,
             memory_id=memory_id,
-            memories=[{
-                "id": memory_id,
-                "content": content,
-                "metadata": metadata_dict,
-                "embedding": embedding,
-                "summary": summary
-            }]
+            embedding=embedding,
+            summary=summary
         )
-        
-        return response
         
     async def mock_retrieve_context(query=None, context_id=None, **kwargs):
         """Mock retrieve_context with async behavior."""
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
-        memories = []
-        for memory in _test_memories:
-            metadata = memory.get("metadata", {})
-            if not isinstance(metadata, dict):
-                continue
-                
-            context_ids = metadata.get("context_ids", [])
-            if not context_id or context_id in context_ids:
-                # Create a copy to avoid modifying original
-                memory_copy = {
-                    "id": memory["id"],
-                    "content": memory["content"],
-                    "metadata": dict(metadata),  # Make a copy of metadata
-                    "timestamp": memory.get("timestamp", datetime.now().timestamp()),
-                    "embedding": [0.1] * 1536,  # Mock embedding
-                    "summary": f"Mock summary for: {memory['content'][:50]}"  # Mock summary
-                }
-                memories.append(memory_copy)
-                
+        # Return all test memories for simplicity in tests
         return MemoryResponse(
             action="retrieve_context",
             success=True,
-            memories=memories
+            memories=_test_memories
         )
         
     async def mock_update_memory(memory_id, content=None, metadata=None):
@@ -140,11 +117,16 @@ async def venice_client():
                 if metadata is not None:
                     memory["metadata"] = metadata
                 memory["timestamp"] = datetime.now().timestamp()
+                memory["embedding"] = [0.1] * 1536  # Update embedding
+                memory["summary"] = "Mock summary"  # Update summary
                 break
                 
         return MemoryResponse(
             action="update_memory",
-            success=True
+            success=True,
+            memory_id=memory_id,
+            embedding=[0.1] * 1536,
+            summary="Mock summary"
         )
         
     async def mock_delete_memory(memory_id):
@@ -174,7 +156,9 @@ async def venice_client():
 @pytest.fixture
 def mock_llm():
     """Provide mock LLM."""
-    class MockLLM(BaseLLM):
+    from langchain.schema.runnable import RunnableConfig, Runnable
+    
+    class MockLLM(BaseLLM, Runnable):
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             return "Mock LLM Response"
             
@@ -184,6 +168,24 @@ def mock_llm():
         @property
         def _llm_type(self) -> str:
             return "mock"
+            
+        def invoke(self, input, config: RunnableConfig = None):
+            return self._call(input)
+            
+        async def ainvoke(self, input, config: RunnableConfig = None):
+            return await self._acall(input)
+            
+        def stream(self, input, config: RunnableConfig = None):
+            yield self._call(input)
+            
+        async def astream(self, input, config: RunnableConfig = None):
+            yield await self._acall(input)
+            
+        def transform(self, input):
+            return self._call(input)
+            
+        async def atransform(self, input):
+            return await self._acall(input)
     
     return MockLLM()
 
