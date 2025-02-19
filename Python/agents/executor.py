@@ -126,8 +126,8 @@ Response:""",
                 except json.JSONDecodeError:
                     return False
                     
-            if not isinstance(execution_plan, dict):
-                return False
+                if not isinstance(execution_plan, dict):
+                    return False
                 
             # Check success criteria
             success_criteria = execution_plan.get("success_criteria", {})
