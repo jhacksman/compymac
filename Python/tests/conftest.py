@@ -199,7 +199,9 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            return self._response
+            if isinstance(self._response, str):
+                return self._response
+            return json.dumps(self._response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
