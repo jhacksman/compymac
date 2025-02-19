@@ -221,17 +221,9 @@ def mock_llm():
                 return response
             return json.dumps(response)
             
-        def predict(self, **kwargs) -> str:
-            """Sync predict method."""
-            return self._call("", **kwargs)
-            
         async def apredict(self, **kwargs) -> str:
             """Async predict method."""
             return await self._acall("", **kwargs)
-            
-        def run(self, **kwargs) -> str:
-            """Sync run method."""
-            return self._call("", **kwargs)
             
         async def arun(self, **kwargs) -> str:
             """Async run method."""
