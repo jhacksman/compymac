@@ -211,15 +211,17 @@ def mock_llm():
             """Call the LLM."""
             if isinstance(self._mock_response, Exception):
                 raise self._mock_response
+            if isinstance(self._mock_response, dict):
+                return json.dumps(self._mock_response)
             if isinstance(self._mock_response, str):
                 try:
-                    # Try to parse as JSON to validate
+                    # If it's already a JSON string, return as is
                     json.loads(self._mock_response)
                     return self._mock_response
                 except json.JSONDecodeError:
+                    # If it's not JSON, return as plain string
                     return self._mock_response
-            if isinstance(self._mock_response, dict):
-                return json.dumps(self._mock_response)
+            # For any other type, convert to string
             return str(self._mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
