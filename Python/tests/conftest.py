@@ -184,19 +184,20 @@ def mock_llm():
                 }
             })
             
-        def __or__(self, other):
+        def pipe(self, other):
             """Support for | operator."""
             from langchain.schema.runnable import RunnableParallel
             if isinstance(other, (BaseLLM, RunnableParallel)):
                 return RunnableParallel(llm=self, chain=other)
             return self
             
-        def __rrshift__(self, other):
-            """Support for >> operator."""
-            from langchain.schema.runnable import RunnableSequence
-            if isinstance(other, (BaseLLM, RunnableSequence)):
-                return RunnableSequence(first=other, second=self)
-            return self
+        def lc_kwargs(self):
+            """Get kwargs for langchain."""
+            return {"llm": self}
+            
+        def lc_serializable(self):
+            """Get serializable representation."""
+            return True
             
         @property
         def _llm_type(self) -> str:
