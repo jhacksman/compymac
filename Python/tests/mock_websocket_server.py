@@ -69,28 +69,27 @@ class MockWebSocketServer:
             self.server = None
             self.server_task = None
     
-    def handle_connection(self, websocket):
+    async def handle_connection(self, websocket):
         """Handle WebSocket connection.
         
         Args:
             websocket: WebSocket connection
         """
         try:
-            while True:
+            async for message in websocket:
                 try:
-                    message = websocket.recv()
                     print(f"Received message: {message}")  # Debug logging
                     request = json.loads(message)
                     action = request.get("action")
                     
                     if action == "store_memory":
-                        response = self._handle_store_memory(request)
+                        response = await self._handle_store_memory(request)
                     elif action == "retrieve_context":
-                        response = self._handle_retrieve_context(request)
+                        response = await self._handle_retrieve_context(request)
                     elif action == "update_memory":
-                        response = self._handle_update_memory(request)
+                        response = await self._handle_update_memory(request)
                     elif action == "delete_memory":
-                        response = self._handle_delete_memory(request)
+                        response = await self._handle_delete_memory(request)
                     elif action == "desktop_create_folder":
                         path = request.get("path")
                         try:
@@ -118,25 +117,25 @@ class MockWebSocketServer:
                         response["action"] = action
                         
                     print(f"Sending response: {json.dumps(response)}")  # Debug logging
-                    websocket.send(json.dumps(response))
+                    await websocket.send(json.dumps(response))
                     
                 except json.JSONDecodeError as e:
                     error_response = {
                         "status": "error",
                         "message": f"Invalid JSON format: {str(e)}"
                     }
-                    websocket.send(json.dumps(error_response))
+                    await websocket.send(json.dumps(error_response))
                 except Exception as e:
                     error_response = {
                         "status": "error",
                         "message": f"Internal server error: {str(e)}"
                     }
-                    websocket.send(json.dumps(error_response))
+                    await websocket.send(json.dumps(error_response))
                     
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")  # Debug logging
     
-    def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_store_memory(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle store_memory action.
         
         Args:
