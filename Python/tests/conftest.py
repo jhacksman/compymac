@@ -212,7 +212,12 @@ def mock_llm():
             if isinstance(self._mock_response, Exception):
                 raise self._mock_response
             if isinstance(self._mock_response, str):
-                return self._mock_response
+                try:
+                    # Try to parse as JSON to validate
+                    json.loads(self._mock_response)
+                    return self._mock_response
+                except json.JSONDecodeError:
+                    return self._mock_response
             if isinstance(self._mock_response, dict):
                 return json.dumps(self._mock_response)
             return str(self._mock_response)
