@@ -199,37 +199,43 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
+            if isinstance(self._response, Exception):
+                raise self._response
             if isinstance(self._response, str):
                 return self._response
             return json.dumps(self._response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
+            if isinstance(self._response, Exception):
+                raise self._response
             if isinstance(self._response, str):
                 return self._response
             return json.dumps(self._response)
             
-        def _format_response(self, response: str) -> str:
+        def _format_response(self, response: Any) -> str:
             """Format response consistently."""
+            if isinstance(response, Exception):
+                raise response
             if isinstance(response, str):
                 return response
             return json.dumps(response)
             
         def predict(self, **kwargs) -> str:
             """Sync predict method."""
-            return self._format_response(self._response)
+            return self._call("", **kwargs)
             
         async def apredict(self, **kwargs) -> str:
             """Async predict method."""
-            return self._format_response(self._response)
+            return await self._acall("", **kwargs)
             
         def run(self, **kwargs) -> str:
             """Sync run method."""
-            return self._format_response(self._response)
+            return self._call("", **kwargs)
             
         async def arun(self, **kwargs) -> str:
             """Async run method."""
-            return self._format_response(self._response)
+            return await self._acall("", **kwargs)
             
         def __getattr__(self, name):
             """Handle dynamic attribute access."""
