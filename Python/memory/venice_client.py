@@ -234,10 +234,12 @@ class VeniceClient:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/memories/create",
+                    f"{self.base_url}/api/memories",
                     json={
-                        "action": "store_memory",
-                        **request_data
+                        "action": "store",
+                        **request_data,
+                        "metadata": metadata_dict,
+                        "content": content
                     },
                     headers=self.headers,
                     timeout=timeout
@@ -351,8 +353,12 @@ class VeniceClient:
                 async with session.post(
                     f"{self.base_url}/api/memories/search",
                     json={
-                        "action": "retrieve_context",
-                        **params
+                        "action": "search",
+                        "query": query,
+                        "context_id": context_id,
+                        "time_range": time_range.total_seconds() if time_range else None,
+                        "limit": limit,
+                        "model": self.model
                     },
                     headers=self.headers,
                     timeout=timeout
