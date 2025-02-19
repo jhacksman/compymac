@@ -114,8 +114,10 @@ async def venice_client():
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
+        found = False
         for memory in _test_memories:
             if memory["id"] == memory_id:
+                found = True
                 if content is not None:
                     memory["content"] = content
                 if metadata is not None:
@@ -123,31 +125,35 @@ async def venice_client():
                 memory["timestamp"] = datetime.now().timestamp()
                 memory["embedding"] = [0.1] * 1536  # Update embedding
                 memory["summary"] = "Mock summary"  # Update summary
-                break
+                return MemoryResponse(
+                    action="update_memory",
+                    success=True,
+                    memory_id=memory_id,
+                    embedding=[0.1] * 1536,
+                    summary="Mock summary"
+                )
                 
-        return MemoryResponse(
-            action="update_memory",
-            success=True,
-            memory_id=memory_id,
-            embedding=[0.1] * 1536,
-            summary="Mock summary"
-        )
+        if not found:
+            raise Exception(f"Memory {memory_id} not found")
         
     async def mock_delete_memory(memory_id):
         """Mock delete_memory with async behavior."""
         # Add small delay to simulate network latency
         await asyncio.sleep(0.1)
         
-        # Remove memory if it exists
+        found = False
         for i, memory in enumerate(_test_memories):
             if memory["id"] == memory_id:
+                found = True
                 _test_memories.pop(i)
-                break
+                return MemoryResponse(
+                    action="delete_memory",
+                    success=True,
+                    memory_id=memory_id
+                )
                 
-        return MemoryResponse(
-            action="delete_memory",
-            success=True
-        )
+        if not found:
+            raise Exception(f"Memory {memory_id} not found")
         
     # Set up async mock methods
     client.store_memory = AsyncMock(side_effect=mock_store_memory)
