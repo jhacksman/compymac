@@ -31,11 +31,10 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/memories/delete",
+                    f"{self.base_url}/api/memories/{memory_id}",
                     headers=self.headers,
                     json={
                         "action": "delete",
-                        "memory_id": memory_id,
                         "model": self.model
                     }
                 ) as response:
@@ -528,11 +527,10 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/memories/update",
+                    f"{self.base_url}/api/memories/{memory_id}",
                     headers=self.headers,
                     json={
                         "action": "update",
-                        "memory_id": memory_id,
                         "content": content,
                         "metadata": metadata.__dict__ if metadata else None,
                         "model": self.model
