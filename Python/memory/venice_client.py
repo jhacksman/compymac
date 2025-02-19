@@ -34,8 +34,9 @@ class VeniceClient:
                     f"{self.base_url}/api/memories/delete",
                     headers=self.headers,
                     json={
-                        "action": "delete_memory",
-                        "memory_id": memory_id
+                        "action": "delete",
+                        "memory_id": memory_id,
+                        "model": self.model
                     }
                 ) as response:
                     await response.read()
@@ -421,11 +422,11 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/embeddings/generate",
+                    f"{self.base_url}/api/embeddings",
                     json={
                         "model": self.model,
                         "input": text,
-                        "action": "generate_embedding"
+                        "action": "embed"
                     },
                     headers=self.headers,
                     timeout=timeout
@@ -472,10 +473,10 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/api/completions/generate",
+                    f"{self.base_url}/api/completions",
                     json={
                         "model": self.model,
-                        "action": "generate_summary",
+                        "action": "complete",
                         "messages": [
                             {
                                 "role": "system",
@@ -530,10 +531,11 @@ class VeniceClient:
                     f"{self.base_url}/api/memories/update",
                     headers=self.headers,
                     json={
-                        "action": "update_memory",
+                        "action": "update",
                         "memory_id": memory_id,
                         "content": content,
-                        "metadata": metadata.__dict__ if metadata else None
+                        "metadata": metadata.__dict__ if metadata else None,
+                        "model": self.model
                     },
                     timeout=timeout
                 ) as response:
