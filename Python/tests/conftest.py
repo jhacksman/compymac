@@ -181,12 +181,12 @@ def mock_llm():
             validate_assignment = True
             allow_inf_nan = True
         
-        mock_response: Any = None
+        _mock_response: Any = None
         
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self._lc_kwargs = kwargs
-            self.mock_response = {
+            self._mock_response = {
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -196,6 +196,16 @@ def mock_llm():
                     "overall_criteria": "success"
                 }
             }
+            
+        @property
+        def mock_response(self) -> Any:
+            """Get mock response."""
+            return self._mock_response
+            
+        @mock_response.setter
+        def mock_response(self, value: Any) -> None:
+            """Set mock response."""
+            self._mock_response = value
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
@@ -226,7 +236,7 @@ def mock_llm():
         def __getattr__(self, name):
             """Handle dynamic attribute access."""
             if name == '_response':  # For backward compatibility
-                return self.mock_response
+                return self._mock_response
             return super().__getattr__(name)
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
