@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta
 import asyncio
 
-from .message_types import MemoryMetadata, MemoryRequest, MemoryResponse
+from .message_types import MemoryMetadata, MemoryResponse
 from .exceptions import MemoryError
 from .venice_client import VeniceClient
 from .librarian import LibrarianAgent
