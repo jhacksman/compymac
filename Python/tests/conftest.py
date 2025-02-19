@@ -171,9 +171,12 @@ async def venice_client():
 def mock_llm():
     """Provide mock LLM."""
     class MockLLM(BaseLLM):
+        """Mock LLM for testing."""
+        response: str = None  # Make response a class field for Pydantic
+        
         def __init__(self):
             super().__init__()
-            self._response = json.dumps({
+            self.response = json.dumps({
                 "execution_plan": [{
                     "step": "Test step",
                     "verification": "Step complete"
@@ -186,29 +189,48 @@ def mock_llm():
             
         def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM."""
-            return self._response
+            return self.response
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            return self._response
+            return self.response
             
-        def __or__(self, other):
-            """Support for | operator."""
-            from langchain.schema.runnable import RunnableParallel
-            if isinstance(other, (BaseLLM, RunnableParallel)):
-                return RunnableParallel(llm=self, chain=other)
-            return self
+        def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
+            """Generate completions."""
+            return LLMResult(generations=[[Generation(text=self.response)]])
             
-        def lc_namespace(self):
-            """Get namespace for langchain."""
-            return ["llm"]
+        async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
+            """Generate completions asynchronously."""
+            return LLMResult(generations=[[Generation(text=self.response)]])
+            
+        def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
+            """Invoke the LLM."""
+            return self._call(input)
+            
+        async def ainvoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
+            """Invoke the LLM asynchronously."""
+            return await self._acall(input)
+            
+        def stream(self, input: Any, config: Optional[RunnableConfig] = None) -> Iterator[Any]:
+            """Stream output."""
+            yield self._call(input)
+            
+        async def astream(self, input: Any, config: Optional[RunnableConfig] = None) -> AsyncIterator[Any]:
+            """Stream output asynchronously."""
+            yield await self._acall(input)
+            
+        def transform(self, input: Any) -> Any:
+            """Transform input."""
+            return self._call(input)
+            
+        async def atransform(self, input: Any) -> Any:
+            """Transform input asynchronously."""
+            return await self._acall(input)
             
         @property
         def _llm_type(self) -> str:
+            """Get LLM type."""
             return "mock"
-            
-        def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
-            return self.response
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             return self.response
