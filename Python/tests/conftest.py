@@ -201,17 +201,11 @@ def mock_llm():
             """Call the LLM."""
             if isinstance(self.mock_response, Exception):
                 raise self.mock_response
-            if isinstance(self.mock_response, str):
-                return self.mock_response
-            return json.dumps(self.mock_response)
+            return self.mock_response if isinstance(self.mock_response, str) else json.dumps(self.mock_response)
             
         async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
             """Call the LLM asynchronously."""
-            if isinstance(self.mock_response, Exception):
-                raise self.mock_response
-            if isinstance(self.mock_response, str):
-                return self.mock_response
-            return json.dumps(self.mock_response)
+            return self._call(prompt, stop, run_manager, **kwargs)
             
         def _format_response(self, response: Any) -> str:
             """Format response consistently."""
@@ -231,8 +225,6 @@ def mock_llm():
             
         def __getattr__(self, name):
             """Handle dynamic attribute access."""
-            if name in ['predict', 'apredict', 'run', 'arun']:
-                return getattr(self, name)
             if name == '_response':  # For backward compatibility
                 return self.mock_response
             return super().__getattr__(name)
