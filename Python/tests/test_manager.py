@@ -27,10 +27,10 @@ def manager_agent(memory_manager, mock_llm):
 async def test_execute_task_success(manager_agent):
     """Test successful task execution."""
     # Set mock LLM response
-    manager_agent.llm._response = json.dumps({
+    manager_agent.llm._response = {
         "output": "Task completed",
         "intermediate_steps": []
-    })
+    }
     
     result = await manager_agent.execute_task("Test task")
     
@@ -82,13 +82,13 @@ async def test_tool_integration(manager_agent):
     })
     
     # Set mock LLM response
-    manager_agent.llm._response = json.dumps({
+    manager_agent.llm._response = {
         "output": "Task completed",
         "intermediate_steps": [
             ("plan_task", {"subtasks": ["step1"]}),
             ("execute_task", {"success": True})
         ]
-    })
+    }
     
     result = await manager_agent.execute_task("Test task")
     
