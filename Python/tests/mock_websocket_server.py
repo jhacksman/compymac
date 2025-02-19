@@ -12,12 +12,12 @@ from ..memory.protocol import MemoryMessage
 class MockWebSocketServer:
     """Mock WebSocket server for testing memory operations."""
     
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "localhost", port: int = 0):  # Use port 0 to let OS assign port
         """Initialize mock server.
         
         Args:
             host: Server host (default: localhost)
-            port: Server port (default: 8765)
+            port: Server port (0 for auto-assign)
         """
         self.host = host
         self.port = port
@@ -26,6 +26,7 @@ class MockWebSocketServer:
         self.memories = {}  # In-memory storage for testing
         self.next_id = 1
         self.connected = True  # Simulate successful connection
+        self.actual_port = None  # Will be set after server starts
         
     async def start(self):
         """Start the WebSocket server."""
@@ -62,6 +63,8 @@ class MockWebSocketServer:
                         )
                         self.server = server
                         self.connected = True
+                        # Get actual port assigned by OS
+                        self.actual_port = server.sockets[0].getsockname()[1]
                         self._ready_event.set()  # Signal server is ready
                         await asyncio.sleep(0.1)  # Give server time to fully start
                         return  # Success
