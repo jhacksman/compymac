@@ -14,7 +14,7 @@ from langchain_core.runnables.base import RunnableSerializable
 
 from ...memory import MemoryManager
 from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent
-from ...agents.manager import ManagerAgent
+from agents.manager import AgentManager
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
 
 @pytest.fixture
@@ -83,13 +83,32 @@ def mock_agents(memory_manager, mock_llm):
         artifacts={"metrics": {"success_rate": 0.8}}
     ))
 
-    return ManagerAgent(
+    # Create mock agents with proper async behavior
+    executor.execute_task = AsyncMock(return_value=TaskResult(
+        success=True,
+        message="Task completed",
+        artifacts={"result": "test", "status": "success"}
+    ))
+    planner.create_plan = AsyncMock(return_value=TaskResult(
+        success=True,
+        message="Plan created",
+        artifacts={"steps": [{"id": 1, "action": "test"}]}
+    ))
+    reflector.analyze_execution = AsyncMock(return_value=TaskResult(
+        success=True,
+        message="Analysis complete",
+        artifacts={"insights": ["test"]}
+    ))
+
+    # Create manager with mocked dependencies
+    manager = AgentManager(
         memory_manager=memory_manager,
         executor=executor,
         planner=planner,
         reflector=reflector,
         llm=mock_llm
     )
+    return manager
 
 from langchain_core.language_models.llms import BaseLLM
 
