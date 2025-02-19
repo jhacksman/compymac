@@ -177,6 +177,7 @@ def mock_llm():
         class Config:
             arbitrary_types_allowed = True
             extra = "allow"
+            underscore_attrs_are_private = True
         
         _response: str = PrivateAttr(default=None)
         
