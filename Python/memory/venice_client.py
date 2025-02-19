@@ -409,7 +409,7 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/embeddings",
+                    f"{self.base_url}/api/embeddings",
                     json={
                         "model": self.model,
                         "input": text
@@ -459,7 +459,7 @@ class VeniceClient:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/completions",
+                    f"{self.base_url}/api/completions",
                     json={
                         "model": self.model,
                         "messages": [
