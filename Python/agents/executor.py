@@ -142,8 +142,8 @@ Response:""",
             # Check overall criteria
             if criteria.get("overall_criteria"):
                 if success_criteria.get("overall_criteria") != criteria.get("overall_criteria"):
-                return False
-                
+                    return False
+                    
             return True
             
         except Exception:

@@ -18,9 +18,9 @@ def memory_manager():
     return manager
 
 @pytest.fixture
-def reflector_agent(memory_manager):
-    """Create reflector agent with mock memory manager."""
-    return ReflectorAgent(memory_manager)
+def reflector_agent(memory_manager, mock_llm):
+    """Create reflector agent with mock memory manager and LLM."""
+    return ReflectorAgent(memory_manager, llm=mock_llm)
 
 def test_analyze_execution_success(reflector_agent):
     """Test successful execution analysis."""
@@ -117,9 +117,9 @@ def test_analyze_execution_error_handling(reflector_agent):
     assert len(analysis["recommendations"]) == 1
     assert analysis["recommendations"][0]["priority"] == 5
 
-def test_analyze_execution_without_memory_manager():
+def test_analyze_execution_without_memory_manager(mock_llm):
     """Test execution analysis without memory manager."""
-    reflector = ReflectorAgent()  # No memory manager
+    reflector = ReflectorAgent(llm=mock_llm)  # No memory manager
     
     # Mock reflection chain
     reflector.reflection_chain.predict = Mock(return_value=json.dumps({

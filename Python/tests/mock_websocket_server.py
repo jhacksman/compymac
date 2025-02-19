@@ -69,10 +69,12 @@ class MockWebSocketServer:
                         self.server = server
                         self.connected = True
                         self._ready_event.set()  # Signal server is ready
+                        await asyncio.sleep(0.1)  # Give server time to fully start
                         return  # Success
                     except OSError as e:
                         last_error = e
-                        await asyncio.sleep(1)  # Wait before retry
+                        if attempt < 2:  # Only sleep if we're going to retry
+                            await asyncio.sleep(1)  # Wait before retry
                         continue
                     except Exception as e:
                         print(f"Failed to start server: {e}")

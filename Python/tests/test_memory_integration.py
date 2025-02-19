@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from ..memory.protocol import MemoryMessage
 from ..memory.exceptions import VeniceAPIError
 
+@pytest.mark.asyncio
 @pytest.fixture(scope="module")
 async def server():
     """Create and start mock WebSocket server."""
@@ -21,6 +22,7 @@ async def server():
     finally:
         await server.stop()  # Async stop
 
+@pytest.mark.asyncio
 @pytest.fixture
 async def websocket(server):
     """Create WebSocket connection."""
