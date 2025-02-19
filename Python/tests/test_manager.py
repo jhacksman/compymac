@@ -27,7 +27,7 @@ def manager_agent(memory_manager, mock_llm):
 async def test_execute_task_success(manager_agent):
     """Test successful task execution."""
     # Set mock LLM response
-    manager_agent.llm._response = {
+    manager_agent.llm.mock_response = {
         "output": "Task completed",
         "intermediate_steps": []
     }
@@ -49,7 +49,7 @@ async def test_execute_task_failure(manager_agent):
     """Test task execution failure."""
     # Set mock LLM to raise exception
     error_msg = "Test error"
-    manager_agent.llm._response = Exception(error_msg)
+    manager_agent.llm.mock_response = Exception(error_msg)
     
     result = await manager_agent.execute_task("Test task")
     
@@ -82,7 +82,7 @@ async def test_tool_integration(manager_agent):
     })
     
     # Set mock LLM response
-    manager_agent.llm._response = {
+    manager_agent.llm.mock_response = {
         "output": "Task completed",
         "intermediate_steps": [
             ("plan_task", {"subtasks": ["step1"]}),
