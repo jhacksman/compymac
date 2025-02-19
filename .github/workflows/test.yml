@@ -47,4 +47,4 @@ jobs:
         DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
       run: |
         cd Python
-        pytest tests/ -v
+        pytest tests/ -v -m "not desktop"
