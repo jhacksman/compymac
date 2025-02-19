@@ -13,8 +13,10 @@ async def server():
     """Create and start WebSocket server."""
     server = MockWebSocketServer()
     await server.start()
-    yield server
-    await server.stop()
+    try:
+        yield server
+    finally:
+        await server.stop()
 
 @pytest.mark.asyncio
 async def test_websocket_command_roundtrip(server):

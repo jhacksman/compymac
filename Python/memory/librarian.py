@@ -26,6 +26,7 @@ class LibrarianAgent:
         self.venice_client = venice_client
         self.importance_threshold = importance_threshold
         self.max_context_size = max_context_size
+        self.recent_memories = []  # Cache of recent memories
         
     async def store_memory(
         self,
@@ -96,10 +97,28 @@ class LibrarianAgent:
                     if isinstance(response, dict):
                         if response.get("success") and response.get("memory_id"):
                             memory_id = response["memory_id"]
+                            # Cache the memory
+                            self.recent_memories.append({
+                                "id": memory_id,
+                                "content": content,
+                                "metadata": metadata.to_dict() if metadata else {}
+                            })
+                            # Trim cache if needed
+                            if len(self.recent_memories) > self.max_context_size:
+                                self.recent_memories.pop(0)
                             break
                     else:
                         if response.success and response.memory_id:
                             memory_id = response.memory_id
+                            # Cache the memory
+                            self.recent_memories.append({
+                                "id": memory_id,
+                                "content": content,
+                                "metadata": metadata.to_dict() if metadata else {}
+                            })
+                            # Trim cache if needed
+                            if len(self.recent_memories) > self.max_context_size:
+                                self.recent_memories.pop(0)
                             break
                             
                 except (TimeoutError, ConnectionError) as e:
@@ -124,7 +143,8 @@ class LibrarianAgent:
         query: str,
         context_id: Optional[str] = None,
         time_range: Optional[float] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        min_importance: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant memories based on query and filters.
         
@@ -133,6 +153,7 @@ class LibrarianAgent:
             context_id: Optional context to filter by
             time_range: Optional time range in seconds
             limit: Maximum number of memories to return
+            min_importance: Minimum importance score filter
             
         Returns:
             List of matching memories
@@ -146,14 +167,22 @@ class LibrarianAgent:
             )
             
             # Handle dict response
+            memories = []
             if isinstance(response, dict):
                 if response.get("success"):
-                    return response.get("memories", [])
+                    memories = response.get("memories", [])
             else:
                 if response.success:
-                    return response.memories
+                    memories = response.memories
                     
-            return []
+            # Apply importance filter if specified
+            if min_importance is not None:
+                memories = [
+                    m for m in memories 
+                    if m.get("metadata", {}).get("importance", 0) >= min_importance
+                ]
+                    
+            return memories
             
         except Exception as e:
             raise MemoryError(f"Memory retrieval error: {str(e)}")
