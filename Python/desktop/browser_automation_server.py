@@ -1,3 +1,4 @@
+from memory.db import MemoryDB
 import json
 import os
 import time
@@ -17,8 +18,7 @@ class BrowserAutomationServer:
         self.browser = None
         self.page = None
         self.desktop = DesktopAutomation()
-        self.memories = {}  # Memory storage
-        self.next_id = 1
+        self.memory_db = MemoryDB()  # Initialize local DB
         self.mock_mode = mock_mode
         print("Desktop Automation initialized in mock mode" if mock_mode else "Desktop Automation initialized")
 
@@ -31,6 +31,7 @@ class BrowserAutomationServer:
         """Stop the automation server."""
         self.desktop.stop()
         self._cleanup_browser()
+        self.memory_db.close()  # Clean up database connection
         
     def __enter__(self):
         """Context manager entry."""
