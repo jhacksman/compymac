@@ -198,11 +198,11 @@ def mock_llm():
             
         def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions."""
-            return LLMResult(generations=[[Generation(text=self.response)]])
+            return LLMResult(generations=[[Generation(text=self._response)]])
             
         async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
             """Generate completions asynchronously."""
-            return LLMResult(generations=[[Generation(text=self.response)]])
+            return LLMResult(generations=[[Generation(text=self._response)]])
             
         def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
             """Invoke the LLM."""
@@ -232,39 +232,6 @@ def mock_llm():
         def _llm_type(self) -> str:
             """Get LLM type."""
             return "mock"
-            
-        async def _acall(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
-            return self.response
-            
-        def _generate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
-            return LLMResult(generations=[[Generation(text=self.response)]])
-            
-        async def _agenerate(self, prompts: List[str], stop=None, run_manager=None, **kwargs) -> LLMResult:
-            return LLMResult(generations=[[Generation(text=self.response)]])
-            
-        def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
-            return self._call(input)
-            
-        async def ainvoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
-            return await self._acall(input)
-            
-        def stream(self, input: Any, config: Optional[RunnableConfig] = None) -> Iterator[Any]:
-            yield self._call(input)
-            
-        async def astream(self, input: Any, config: Optional[RunnableConfig] = None) -> AsyncIterator[Any]:
-            yield await self._acall(input)
-            
-        def transform(self, input: Any) -> Any:
-            return self._call(input)
-            
-        async def atransform(self, input: Any) -> Any:
-            return await self._acall(input)
-            
-        def batch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
-            return [self._call(input) for input in inputs]
-            
-        async def abatch(self, inputs: List[Any], config: Optional[RunnableConfig] = None) -> List[Any]:
-            return [await self._acall(input) for input in inputs]
     
     return MockLLM()
 
