@@ -27,7 +27,10 @@ async def server():
 async def websocket(server):
     """Create WebSocket connection."""
     try:
-        async with websockets.connect('ws://localhost:8765') as websocket:
+        # Wait for server to be ready and get actual port
+        await asyncio.sleep(0.1)
+        port = server.actual_port
+        async with websockets.connect(f'ws://localhost:{port}') as websocket:
             yield websocket
     except Exception as e:
         pytest.fail(f"Failed to connect to WebSocket server: {str(e)}")

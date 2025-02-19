@@ -25,8 +25,8 @@ def manager_agent(memory_manager, mock_llm):
 @pytest.mark.asyncio
 async def test_execute_task_success(manager_agent):
     """Test successful task execution."""
-    # Mock agent executor
-    manager_agent.agent_executor.arun = AsyncMock(return_value={
+    # Set mock LLM response
+    manager_agent.llm._response = json.dumps({
         "output": "Task completed",
         "intermediate_steps": []
     })
