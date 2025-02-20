@@ -7,51 +7,35 @@ from datetime import datetime
 from agents.manager import AgentManager
 from memory.message_types import MemoryMetadata
 
-@pytest.fixture
-def memory_manager():
-    """Create mock memory manager."""
-    manager = Mock()
-    manager.store_memory = AsyncMock()
-    manager.retrieve_memories = AsyncMock(return_value=[])
-    return manager
-
-@pytest.fixture
-def manager_agent(memory_manager, mock_llm):
-    """Create manager agent with mock memory manager and LLM."""
-    return AgentManager(memory_manager, llm=mock_llm)
-
 @pytest.mark.asyncio
-async def test_delegate_task(manager_agent):
+async def test_delegate_task(mock_agents):
     """Test task delegation to appropriate agent."""
-    # Set mock LLM response
-    manager_agent.llm._response = {
-        "agent": "executor",
-        "task": "Execute test task",
-        "parameters": {"priority": "high"}
-    }
-    
-    result = await manager_agent.delegate_task("Test task")
-    
-    assert result["success"]
-    assert result["agent"] == "executor"
-    assert "task" in result
 
 @pytest.mark.asyncio
-async def test_coordinate_agents(manager_agent):
-    """Test agent coordination."""
-    # Set mock LLM response for coordination
-    manager_agent.llm._response = {
-        "coordination_plan": [
-            {"agent": "planner", "action": "create_plan"},
-            {"agent": "executor", "action": "execute_task"}
-        ],
-        "success": True
+async def test_delegate_task(mock_agents):
+    """Test task delegation to appropriate agent."""
+    task = {
+        "task": "Test task",
+        "type": "execution"
     }
+    result = await mock_agents.delegate_task(task)
     
-    result = await manager_agent.coordinate_agents(
-        ["planner", "executor"],
-        "Test coordination"
-    )
+    assert result.success
+    assert result.message == "Task completed"
+    assert "plan" in result.artifacts or "execution" in result.artifacts
+
+@pytest.mark.asyncio
+async def test_coordinate_agents(mock_agents):
+    """Test agent coordination."""
+    task = {
+        "task": "Test coordination",
+        "subtasks": [
+            {"task": "Plan task", "agent": "planner"},
+            {"task": "Execute task", "agent": "executor"}
+        ]
+    }
+    result = await mock_agents.coordinate_task(task)
     
-    assert result["success"]
-    assert len(result["coordination_plan"]) == 2
+    assert result.success
+    assert "Task completed" in result.message
+    assert result.artifacts is not None

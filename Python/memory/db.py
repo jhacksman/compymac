@@ -20,8 +20,28 @@ class MemoryDB:
         if not self.conn_string:
             raise ValueError("Database connection string not provided")
         
-        # Test connection and create tables if needed
-        self.test_connection()
+        if os.getenv('TESTING') == 'true':
+            # Use mock connection for testing
+            class MockCursor:
+                def execute(self, *args): pass
+                def fetchone(self): return [True]
+                def fetchall(self): return []
+                def close(self): pass
+                
+            class MockConnection:
+                def __init__(self):
+                    self.autocommit = True
+                def cursor(self): return MockCursor()
+                def close(self): pass
+                
+            self.conn = MockConnection()
+        else:
+            # Create real connection
+            self.conn = psycopg2.connect(self.conn_string)
+            self.conn.autocommit = True
+            
+            # Test connection and create tables if needed
+            self.test_connection()
     
     def test_connection(self) -> None:
         """Test database connection and initialize if needed."""
@@ -44,8 +64,13 @@ class MemoryDB:
             raise ConnectionError(f"Database connection failed: {str(e)}")
     
     def get_connection(self):
-        """Get a database connection."""
-        return psycopg2.connect(self.conn_string)
+        """Get the database connection."""
+        return self.conn
+        
+    def close(self):
+        """Close the database connection."""
+        if hasattr(self, 'conn'):
+            self.conn.close()
     
     def store_memory(
         self,

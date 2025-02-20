@@ -22,11 +22,12 @@ class MockVeniceAPI:
             memories=[{
                 "id": "test_id",
                 "content": "test content",
-                "metadata": MemoryMetadata(
-                    timestamp=1708300208,
-                    importance=0.8,
-                    tags=["test"]
-                ).asdict()
+                "metadata": {
+                    "timestamp": 1708300208,
+                    "importance": 0.8,
+                    "tags": ["test"],
+                    "source": "test"
+                }
             }]
         ))
         self.update_memory = AsyncMock(return_value=MemoryResponse(
@@ -50,10 +51,11 @@ class MockVeniceAPI:
             memories=[{
                 "id": "test_id",
                 "content": "test content",
-                "metadata": MemoryMetadata(
-                    timestamp=1708300208,
-                    importance=0.8,
-                    tags=["test"]
-                ).asdict()
+                "metadata": {
+                    "timestamp": 1708300208,
+                    "importance": 0.8,
+                    "tags": ["test"],
+                    "source": "test"
+                }
             }]
         ))

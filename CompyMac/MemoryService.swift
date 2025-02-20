@@ -30,6 +30,11 @@ public class MemoryService {
         _ content: String,
         metadata: [String: Any]
     ) async throws -> Result<[String: Any], Error> {
+        // Stream large content to avoid memory pressure
+        if content.count > 1024 * 1024 {  // 1MB threshold
+            return try await storeMemoryStreamed(content, metadata: metadata)
+        }
+        
         let payload: [String: Any] = [
             "action": "store_memory",
             "content": content,
@@ -139,6 +144,71 @@ public class MemoryService {
 }
 
 /// Memory-related errors.
+    /// Store a memory by streaming its content in chunks.
+    ///
+    /// - Parameters:
+    ///   - content: Raw memory content to stream
+    ///   - metadata: Additional memory metadata
+    ///   - completion: Completion handler with Result type
+    private func storeMemoryStreamed(
+        _ content: String,
+        metadata: [String: Any]
+    ) async throws -> Result<[String: Any], Error> {
+        let chunkSize = 512 * 1024  // 512KB chunks
+        var offset = content.startIndex
+        
+        // Start streaming session
+        let startPayload: [String: Any] = [
+            "action": "start_memory_stream",
+            "metadata": metadata,
+            "total_size": content.count,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+        
+        let startResult = try await pythonService.sendCommand("start_memory_stream", payload: startPayload)
+        guard case .success(let response) = startResult,
+              let streamId = (response as? [String: Any])?["stream_id"] as? String else {
+            return .failure(MemoryError.invalidResponse)
+        }
+        
+        // Stream content chunks
+        while offset < content.endIndex {
+            let endIndex = content.index(offset, offsetBy: min(chunkSize, content.distance(from: offset, to: content.endIndex)))
+            let chunk = String(content[offset..<endIndex])
+            
+            let chunkPayload: [String: Any] = [
+                "action": "stream_memory_chunk",
+                "stream_id": streamId,
+                "chunk": chunk
+            ]
+            
+            let chunkResult = try await pythonService.sendCommand("stream_memory_chunk", payload: chunkPayload)
+            if case .failure(let error) = chunkResult {
+                return .failure(error)
+            }
+            
+            offset = endIndex
+        }
+        
+        // End streaming session
+        let endPayload: [String: Any] = [
+            "action": "end_memory_stream",
+            "stream_id": streamId
+        ]
+        
+        let endResult = try await pythonService.sendCommand("end_memory_stream", payload: endPayload)
+        switch endResult {
+        case .success(let response):
+            guard let memoryData = response as? [String: Any] else {
+                return .failure(MemoryError.invalidResponse)
+            }
+            return .success(memoryData)
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+
 public enum MemoryError: Error {
     /// Invalid response format from server.
     case invalidResponse

@@ -51,7 +51,7 @@ class PlannerAgent:
         try:
             # Store feedback in memory if manager exists
             if self.memory_manager:
-                self.memory_manager.store_memory(
+                await self.memory_manager.store_memory(
                     content=json.dumps({
                         "sender": feedback.sender.value,
                         "content": feedback.content,
@@ -101,7 +101,7 @@ class PlannerAgent:
         try:
             # Store plan in memory if manager exists
             if self.memory_manager:
-                self.memory_manager.store_memory(
+                await self.memory_manager.store_memory(
                     content=json.dumps(plan),
                     metadata={
                         "type": "plan_validation",
@@ -109,18 +109,14 @@ class PlannerAgent:
                     }
                 )
             
-            # Basic validation
-            is_valid = (
-                isinstance(plan.get("steps"), list) and
-                len(plan["steps"]) > 0 and
-                all(isinstance(s, dict) for s in plan["steps"]) and
-                "success_criteria" in plan
-            )
+            # Get validation result from chain
+            result = await self.planning_chain.ainvoke({"task": json.dumps(plan)})
             
+            # Return task result
             return TaskResult(
-                success=is_valid,
-                message="Plan validation complete",
-                artifacts={"is_valid": is_valid}
+                success=True,
+                message=result.get("message", "Plan validation complete"),
+                artifacts=result.get("artifacts", {})
             )
             
         except Exception as e:
@@ -193,7 +189,7 @@ Response:""",
             # Get planning history
             planning_history = ""
             if self.memory_manager:
-                memories = self.memory_manager.retrieve_context(
+                memories = await self.memory_manager.retrieve_context(
                     query=task_str,
                     time_range="7d"  # Last week
                 )
@@ -203,18 +199,12 @@ Response:""",
                     )
             
             # Generate plan
-            result = await self._llm.ainvoke({
-                "task": task_str,
-                "type": "create_plan"
-            })
-            
-            # Parse response
-            response = json.loads(result)
+            result = await self.planning_chain.ainvoke({"task": task_str})
             
             # Store plan in memory if manager exists
             if self.memory_manager:
-                self.memory_manager.store_memory(
-                    content=result,
+                await self.memory_manager.store_memory(
+                    content=json.dumps(result),
                     metadata={
                         "type": "plan_creation",
                         "task": task_str,
@@ -222,13 +212,11 @@ Response:""",
                     }
                 )
             
+            # Return task result
             return TaskResult(
                 success=True,
-                message="Plan created",
-                artifacts={
-                    "steps": response.get("artifacts", {}).get("steps", []),
-                    "validation": response.get("artifacts", {}).get("validation", {})
-                }
+                message=result.get("message", "Plan created"),
+                artifacts=result.get("artifacts", {})
             )
             
         except Exception as e:

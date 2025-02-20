@@ -49,6 +49,21 @@ public class PythonBrowserService {
         return .success([:]) // Actual response handled via message listener
     }
     
+    public func sendStreamedCommand(
+        _ action: String,
+        chunks: AsyncStream<Data>
+    ) async throws -> Result<[String: Any], Error> {
+        if !isConnected {
+            connect()
+        }
+        
+        for try await chunk in chunks {
+            try await socketTask?.send(.data(chunk))
+        }
+        
+        return .success([:])
+    }
+    
     // MARK: - CLI Operations
     
     public func executeCommand(_ command: String) async throws -> Result<CommandResult, Error> {
