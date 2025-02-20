@@ -14,7 +14,7 @@ from langchain_core.runnables.base import RunnableSerializable
 
 from ...memory import MemoryManager
 from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent
-from agents.manager import AgentManager
+from ...agents.manager import ManagerAgent
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
 
 @pytest.fixture
@@ -101,7 +101,7 @@ def mock_agents(memory_manager, mock_llm):
     ))
 
     # Create manager with mocked dependencies
-    manager = AgentManager(
+    manager = ManagerAgent(
         memory_manager=memory_manager,
         executor=executor,
         planner=planner,
