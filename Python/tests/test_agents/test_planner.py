@@ -5,7 +5,9 @@ from unittest.mock import Mock, AsyncMock
 from datetime import datetime
 
 from agents.planner import PlannerAgent
+from agents.protocols import TaskResult
 from memory.message_types import MemoryMetadata
+from tests.conftest import MockResponse
 
 @pytest.fixture
 def memory_manager():
@@ -13,6 +15,8 @@ def memory_manager():
     manager = Mock()
     manager.store_memory = AsyncMock()
     manager.retrieve_memories = AsyncMock(return_value=[])
+    manager.retrieve_context = AsyncMock(return_value=[])
+    manager.cleanup = AsyncMock()
     return manager
 
 @pytest.fixture
@@ -23,21 +27,34 @@ def planner_agent(memory_manager, mock_llm):
 @pytest.mark.asyncio
 async def test_create_plan(planner_agent):
     """Test plan creation."""
-    # Set mock LLM response
-    planner_agent.llm._response = {
-        "plan": {
+    # Set mock chain response
+    planner_agent.planning_chain = AsyncMock()
+    planner_agent.planning_chain.ainvoke = AsyncMock(return_value={
+        "success": True,
+        "message": "Plan created successfully",
+        "artifacts": {
             "steps": [
-                {"description": "Step 1", "agent": "executor"},
-                {"description": "Step 2", "agent": "reflector"}
+                {"id": 1, "action": "Step 1", "success_criteria": "Step 1 complete"},
+                {"id": 2, "action": "Step 2", "success_criteria": "Step 2 complete"}
             ],
-            "success_criteria": ["All steps completed"]
+            "validation": {"is_valid": True}
         }
-    }
+    })
+    planner_agent.memory_manager.store_memory = AsyncMock()
+    planner_agent.memory_manager.retrieve_context = AsyncMock(return_value=[])
     
     plan = await planner_agent.create_plan("Test task")
     
-    assert len(plan["steps"]) == 2
-    assert plan["success_criteria"]
+    assert plan is not None
+    assert isinstance(plan, TaskResult)
+    assert plan.success
+    assert plan.artifacts is not None
+    assert "steps" in plan.artifacts
+    assert len(plan.artifacts["steps"]) == 2
+    assert plan.artifacts["validation"]["is_valid"]
+
+    # Clean up
+    await planner_agent.memory_manager.cleanup()
 
 @pytest.mark.asyncio
 async def test_validate_plan(planner_agent):
@@ -50,13 +67,23 @@ async def test_validate_plan(planner_agent):
         "success_criteria": ["All steps completed"]
     }
     
-    # Set mock LLM response
-    planner_agent.llm._response = {
-        "valid": True,
-        "feedback": "Plan looks good"
-    }
+    # Set mock chain response
+    planner_agent.planning_chain = AsyncMock()
+    planner_agent.planning_chain.ainvoke = AsyncMock(return_value={
+        "success": True,
+        "message": "Plan validation complete",
+        "artifacts": {
+            "is_valid": True,
+            "feedback": "Plan looks good"
+        }
+    })
+    planner_agent.memory_manager.store_memory = AsyncMock()
+    planner_agent.memory_manager.retrieve_context = AsyncMock(return_value=[])
     
     result = await planner_agent.validate_plan(plan)
     
-    assert result["valid"]
-    assert "feedback" in result
+    assert isinstance(result, TaskResult)
+    assert result.success
+    assert result.artifacts is not None
+    assert result.artifacts["is_valid"]
+    assert "feedback" in result.artifacts
