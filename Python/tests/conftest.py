@@ -1,3 +1,4 @@
+from langchain_core.runnables import Runnable
 """Test configuration and fixtures."""
 import os
 import pytest
@@ -13,7 +14,7 @@ from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
 
 # Mock LLM for testing
-class MockLLM:
+class MockLLM(Runnable):
     """Mock LLM for testing."""
     def __init__(self, response=None):
         self._response = response or {}
