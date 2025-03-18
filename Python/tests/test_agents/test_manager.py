@@ -4,7 +4,7 @@ import json
 from unittest.mock import Mock, AsyncMock
 from datetime import datetime
 
-from agents.manager import AgentManager
+from agents.manager import ManagerAgent
 from memory.message_types import MemoryMetadata
 
 @pytest.mark.asyncio

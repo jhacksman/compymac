@@ -99,3 +99,21 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "desktop" in item.keywords:
                 item.add_marker(skip_desktop)
+
+class MockResponse:
+    """Mock HTTP response for testing."""
+    def __init__(self, json_data, status_code=200):
+        self.json_data = json_data
+        self.status_code = status_code
+        
+    async def json(self):
+        """Return mock JSON data."""
+        return self.json_data
+        
+    async def __aenter__(self):
+        """Async context manager enter."""
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        pass
