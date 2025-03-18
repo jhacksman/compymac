@@ -29,6 +29,23 @@ class MockLLM:
         if isinstance(self._response, Exception):
             raise self._response
         return json.dumps(self._response)
+        
+    # Implement Runnable interface
+    def invoke(self, *args, **kwargs):
+        """Implement Runnable.invoke."""
+        return self.predict(*args, **kwargs)
+        
+    async def ainvoke(self, *args, **kwargs):
+        """Implement Runnable.ainvoke."""
+        return await self.apredict(*args, **kwargs)
+        
+    async def astream(self, *args, **kwargs):
+        """Implement Runnable.astream."""
+        yield await self.apredict(*args, **kwargs)
+        
+    def stream(self, *args, **kwargs):
+        """Implement Runnable.stream."""
+        yield self.predict(*args, **kwargs)
 
 @pytest.fixture
 def mock_llm():
