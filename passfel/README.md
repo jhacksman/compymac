@@ -6,31 +6,49 @@ An AI-powered personal assistant that integrates seamlessly into daily life, pro
 
 PASSFEL aims to be the comprehensive personal assistant that technology enthusiasts have dreamed about for years - a single, intelligent interface that handles all aspects of daily life through natural language interaction.
 
+**Planning Document**: See [Planning-an-AI-Powered-Personal-Assistant.pdf](docs/Planning-an-AI-Powered-Personal-Assistant.pdf) for the complete project vision and requirements.
+
 ## Core Features
 
-### 1. Information Services
-- **Real-time News Updates**: Personalized news briefings from trusted sources
-- **Weather Forecasts**: Location-specific weather information and alerts
-- **Financial Information**: Stock prices, market updates, and currency exchange rates
-- **General Q&A**: On-demand research and question answering powered by AI
+The following features are numbered 1-6 for tracking and implementation purposes:
 
-### 2. Productivity & Organization
-- **Calendar Management**: View, create, and manage calendar events
+### 1. Real-time News and Weather Updates
+- **News Aggregation**: Personalized news briefings from trusted sources (RSS feeds, Ground.news)
+- **Weather Forecasts**: Location-specific weather information and alerts (NOAA, Open-Meteo)
+- **Research Documentation**: [DATA_SOURCES_RESEARCH.md](docs/DATA_SOURCES_RESEARCH.md)
+
+### 2. Calendar Management, Reminders, and Tasks
+- **Calendar Integration**: Google Calendar, Apple Calendar (CalDAV), or open-source solutions
+- **Task Management**: Joplin, Notion, Obsidian integration
 - **Reminders**: Set and receive timely reminders for important tasks
-- **Task Management**: Maintain and organize to-do lists
-- **Smart Scheduling**: Intelligent scheduling assistance
+- **Research Documentation**: [CALENDAR_TASK_RESEARCH.md](docs/CALENDAR_TASK_RESEARCH.md)
 
-### 3. Smart Home Integration
-- **Camera Access**: View security camera feeds on command
-- **Device Control**: Control lights, thermostats, smart plugs, and other IoT devices
-- **Proactive Monitoring**: Optional alerts for motion detection and other events
-- **Multi-room Display**: Stream content to TVs and displays throughout the home
+### 3. On-the-fly Q&A and Research Capabilities
+- **Knowledge Base**: Wikipedia API, arXiv API, Wikidata integration
+- **RAG System**: Vector-based retrieval with pgvector
+- **LLM Integration**: Venice.ai API for natural language understanding
+- **Research Documentation**: [QA_RESEARCH.md](docs/QA_RESEARCH.md)
 
-### 4. Multi-Device Access
-- **Mobile Interface**: Dedicated mobile app or web interface
-- **Voice Control**: Natural language voice commands
-- **Desktop Integration**: Seamless desktop experience
-- **TV Display**: Large screen viewing for cameras, dashboards, and information
+### 4. Financial Information (Stocks and Currency)
+- **Stock Market Data**: yfinance (Yahoo Finance) for real-time stock prices
+- **Cryptocurrency**: CoinGecko API for crypto prices and market data
+- **Currency Exchange**: Frankfurter API for FX rates
+- **Research Documentation**: [FINANCIAL_DATA_RESEARCH.md](docs/FINANCIAL_DATA_RESEARCH.md)
+
+### 5. Smart Home Integration (Cameras, IoT Devices, Displays)
+- **Home Automation**: Home Assistant, Apple HomeKit integration
+- **Camera Access**: RTSP/ONVIF protocol support for security cameras
+- **Device Control**: MQTT, Zigbee, Z-Wave protocol support
+- **Casting**: Chromecast and AirPlay for multi-room display
+- **Research Documentation**: [SMART_HOME_RESEARCH.md](docs/SMART_HOME_RESEARCH.md)
+
+### 6. Multi-Device Access (Mobile, Desktop, TV)
+- **Progressive Web App**: Primary access method for all devices
+- **Voice Interface**: Push-to-talk and wake-word detection for hands-free operation
+- **Mobile Apps**: Optional Capacitor wrapper for app store presence
+- **Desktop Apps**: Electron or Tauri for native desktop experience
+- **TV Display**: Chromecast/AirPlay casting integration, remote desktop fallback (Jump Desktop/VNC)
+- **Research Documentation**: [MULTI_DEVICE_ACCESS_RESEARCH.md](docs/MULTI_DEVICE_ACCESS_RESEARCH.md)
 
 ## Architecture
 
