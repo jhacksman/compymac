@@ -147,15 +147,72 @@ INT4: 73B × 0.5 bytes = 36.5 GB + ~20GB KV cache = ~56.5GB (FITS comfortably)
 
 ---
 
-### 4. Meta Llama 3.1/3.2 70B+ (RESEARCH PENDING)
+### 4. Meta Llama 3.1 70B Instruct ✅ COMPATIBLE
 
-**Status:** Research pending
+**Source:** https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct
 
-**Expected Parameters:** 70B-405B range
+**Parameters:** 70.6B (dense decoder-only Transformer)
 
-**Preliminary Assessment:** 
-- Llama 3.1 70B: Likely compatible with FP8/INT4 on GX10
-- Llama 3.1 405B: NOT compatible (too large)
+**Official Training Hardware:**
+- H100-80GB GPUs (7.0M GPU hours)
+
+**Memory Calculation:**
+```
+BF16: 71B × 2 bytes = 142 GB (DOES NOT FIT)
+FP8:  71B × 1 byte  = 71 GB + ~12GB KV cache = ~83GB (FITS comfortably)
+INT4: 71B × 0.5 bytes = 35.5 GB + ~6GB KV cache = ~41.5GB (FITS easily)
+```
+
+**Verdict:** ✅ **COMPATIBLE** with GX10 using FP8 or INT4 quantization
+
+**Training Date:** Pretraining cutoff December 2023, Released July 23, 2024
+
+**Key Features:**
+- 128K context length
+- Multilingual support (8 languages: English, German, French, Italian, Portuguese, Hindi, Spanish, Thai)
+- Tool calling support (multiple formats)
+- Optimized for dialogue use cases
+- Supervised fine-tuning (SFT) + RLHF
+- Grouped-Query Attention (GQA)
+
+**Benchmarks (Llama 3.1 70B Instruct):**
+
+**General:**
+- MMLU: 83.6
+- MMLU (CoT): 86.0
+- MMLU-Pro (CoT): 66.4
+- IFEval: 87.5
+
+**Reasoning:**
+- ARC-C: 94.8
+- GPQA: 46.7
+
+**Code:**
+- HumanEval: 80.5
+- MBPP++: 86.0
+- Multipl-E HumanEval: 65.5
+- Multipl-E MBPP: 62.0
+
+**Math:**
+- GSM-8K (CoT): 95.1
+- MATH (CoT): 68.0
+
+**Tool Use (CRITICAL FOR PASSFEL):**
+- API-Bank: 90.0
+- BFCL: 84.8
+- Gorilla Benchmark API Bench: 29.7
+- Nexus (0-shot): 56.7
+
+**Multilingual:**
+- Multilingual MGSM (CoT): 86.9
+
+**Deployment:**
+- Transformers >= 4.43.0
+- vLLM support (OpenAI-compatible API)
+- Tool calling via chat templates (Hermes-inspired format)
+- Quantization: bitsandbytes (8-bit/4-bit), GPTQ, AWQ
+
+**Note:** A newer version exists (Llama 3.3 70B Instruct) which may have improved performance
 
 ---
 
