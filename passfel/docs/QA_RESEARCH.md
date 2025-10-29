@@ -687,54 +687,114 @@ def chunk_text(text, chunk_size=500, overlap=50):
 
 ### VRAM Constraint Considerations
 
-**Global VRAM Limit:** 64GB across all models
+**Hardware Platform:** ASUS Ascent GX10 (NVIDIA GB10 Grace Blackwell, 128GB unified memory)
 
-**Current Usage (from CompyMac):**
-- Venice.ai API for LLM hosting (external service)
-- Omniparser v2 for image classification (external service)
+**PASSFEL Architecture:**
+- Self-hosted LLM orchestrator (Qwen3-Next-80B-A3B-Thinking @ FP8, ~95GB)
+- Remaining ~33GB available for KV cache expansion and other services
+- All user interactions and data sources route through the LLM orchestrator
 
 **Strategy for PASSFEL:**
-Since CompyMac uses external LLM services (Venice.ai), PASSFEL should follow the same pattern to avoid VRAM constraints.
+PASSFEL uses a self-hosted LLM as the central orchestrator for all user interactions and data sources. The LLM handles intent classification, tool selection, response generation, and reasoning with strong tool-calling capabilities (72.0% BFCL-v3).
 
-### Venice.ai Integration
+### Self-Hosted LLM Integration (Qwen3-Next-80B-A3B-Thinking)
 
 **Overview:**
-Venice.ai provides hosted LLM access with embeddings, completions, and chat capabilities.
+PASSFEL uses a self-hosted Qwen3-Next-80B-A3B-Thinking model deployed on the ASUS Ascent GX10 as the central orchestrator. The model is served via vLLM with an OpenAI-compatible API for easy integration.
+
+**Model Specifications:**
+- **Model**: Qwen3-Next-80B-A3B-Thinking
+- **Parameters**: 80B total, 3B activated per token (High-Sparsity MoE)
+- **Quantization**: FP8 (~95GB memory usage)
+- **Context**: 262K native, extensible to 1M with YaRN
+- **Tool-Calling**: 72.0% BFCL-v3 accuracy
+- **License**: Apache 2.0
+
+**Deployment Configuration:**
+```bash
+# vLLM deployment for GX10 with FP8 quantization
+vllm serve Qwen/Qwen3-Next-80B-A3B-Thinking \
+  --port 8000 \
+  --max-model-len 262144 \
+  --reasoning-parser deepseek_r1 \
+  --quantization fp8 \
+  --gpu-memory-utilization 0.90 \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+```
 
 **Integration Example:**
 ```python
 import requests
 
-class VeniceAIClient:
-    def __init__(self, api_key):
-        self.api_key = api_key
-        self.base_url = "https://api.venice.ai/v1"
+class QwenLLMClient:
+    def __init__(self, base_url="http://localhost:8000"):
+        self.base_url = base_url
         self.headers = {
-            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
     
-    def get_embedding(self, text, model="text-embedding-ada-002"):
-        """Get text embedding"""
+    def get_embedding(self, text, model="Qwen/Qwen3-Next-80B-A3B-Thinking"):
+        """Get text embedding from local model"""
         response = requests.post(
-            f"{self.base_url}/embeddings",
+            f"{self.base_url}/v1/embeddings",
             headers=self.headers,
             json={"input": text, "model": model}
         )
         return response.json()["data"][0]["embedding"]
     
-    def chat_completion(self, messages, model="gpt-3.5-turbo", temperature=0.7):
-        """Get chat completion"""
+    def chat_completion(self, messages, temperature=0.7, tools=None):
+        """Get chat completion with optional tool calling"""
+        payload = {
+            "model": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+            "messages": messages,
+            "temperature": temperature
+        }
+        
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        
         response = requests.post(
-            f"{self.base_url}/chat/completions",
+            f"{self.base_url}/v1/chat/completions",
             headers=self.headers,
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": temperature
-            }
+            json=payload
         )
-        return response.json()["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]
+    
+    def reasoning_completion(self, messages, temperature=0.7):
+        """Get completion with reasoning mode (thinking tags)"""
+        payload = {
+            "model": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+            "messages": messages,
+            "temperature": temperature,
+            "extra_body": {
+                "reasoning_mode": True
+            }
+        }
+        
+        response = requests.post(
+            f"{self.base_url}/v1/chat/completions",
+            headers=self.headers,
+            json=payload
+        )
+        result = response.json()["choices"][0]["message"]
+        
+        # Extract thinking and response
+        content = result["content"]
+        if "<think>" in content and "</think>" in content:
+            thinking = content.split("<think>")[1].split("</think>")[0]
+            response_text = content.split("</think>")[1].strip()
+            return {
+                "thinking": thinking,
+                "response": response_text,
+                "full_content": content
+            }
+        
+        return {
+            "thinking": None,
+            "response": content,
+            "full_content": content
+        }
 ```
 
 ### Q&A Pipeline
@@ -742,8 +802,8 @@ class VeniceAIClient:
 **Complete Q&A Flow:**
 ```python
 class QASystem:
-    def __init__(self, venice_client, knowledge_rag, wikipedia_client, arxiv_client):
-        self.venice = venice_client
+    def __init__(self, qwen_client, knowledge_rag, wikipedia_client, arxiv_client):
+        self.llm = qwen_client
         self.rag = knowledge_rag
         self.wikipedia = wikipedia_client
         self.arxiv = arxiv_client
@@ -751,8 +811,8 @@ class QASystem:
     def answer_question(self, question):
         """Answer a question using RAG + external sources"""
         
-        # 1. Get question embedding
-        question_embedding = self.venice.get_embedding(question)
+        # 1. Get question embedding from self-hosted LLM
+        question_embedding = self.llm.get_embedding(question)
         
         # 2. Search local knowledge base
         local_results = self.rag.search_similar(question_embedding, limit=3)
@@ -795,7 +855,7 @@ class QASystem:
         
         context = "\n\n".join(context_parts)
         
-        # 5. Generate answer with LLM
+        # 5. Generate answer with self-hosted LLM
         messages = [
             {
                 "role": "system",
@@ -807,7 +867,15 @@ class QASystem:
             }
         ]
         
-        answer = self.venice.chat_completion(messages)
+        # Use reasoning mode for complex questions
+        if self._is_complex_question(question):
+            result = self.llm.reasoning_completion(messages)
+            answer = result["response"]
+            thinking = result["thinking"]
+        else:
+            result = self.llm.chat_completion(messages)
+            answer = result["content"]
+            thinking = None
         
         # 6. Return answer with sources
         sources = []
@@ -820,6 +888,7 @@ class QASystem:
         
         return {
             "answer": answer,
+            "thinking": thinking,
             "sources": sources,
             "local_matches": len(local_results),
             "external_matches": len(external_context)
@@ -834,6 +903,15 @@ class QASystem:
         ]
         question_lower = question.lower()
         return any(keyword in question_lower for keyword in technical_keywords)
+    
+    def _is_complex_question(self, question):
+        """Determine if question requires reasoning mode"""
+        complex_keywords = [
+            "why", "how", "explain", "compare", "analyze", "evaluate",
+            "what if", "pros and cons", "advantages and disadvantages"
+        ]
+        question_lower = question.lower()
+        return any(keyword in question_lower for keyword in complex_keywords)
 ```
 
 ---
@@ -842,23 +920,24 @@ class QASystem:
 
 ### Phase 1: Core Q&A System (Immediate Implementation)
 
-1. **Wikipedia Integration**
+1. **Self-Hosted LLM Deployment**
+   - Deploy Qwen3-Next-80B-A3B-Thinking on GX10 with vLLM
+   - Configure FP8 quantization and Multi-Token Prediction
+   - Set up OpenAI-compatible API endpoint
+   - Test tool-calling and reasoning capabilities
+   - **Rationale**: Central orchestrator for all PASSFEL interactions, 72.0% BFCL-v3 tool-calling performance
+
+2. **Wikipedia Integration**
    - Implement WikipediaClient for general knowledge
    - Set up basic search and summary retrieval
    - Add caching to reduce API calls
    - **Rationale**: Free, comprehensive, no API key required
 
-2. **RAG System Setup**
+3. **RAG System Setup**
    - Extend existing pgvector database for knowledge storage
-   - Implement chunking and embedding pipeline
+   - Implement chunking and embedding pipeline using self-hosted LLM embeddings
    - Set up similarity search
-   - **Rationale**: Leverages existing infrastructure
-
-3. **Venice.ai LLM Integration**
-   - Use existing Venice.ai client from CompyMac
-   - Implement Q&A prompt templates
-   - Add source citation logic
-   - **Rationale**: Avoids VRAM constraints, consistent with existing architecture
+   - **Rationale**: Leverages existing infrastructure, uses local embeddings from Qwen3-Next
 
 ### Phase 2: Academic Research (Short-term)
 
@@ -1170,9 +1249,11 @@ class TestQASystem(unittest.TestCase):
             }
         }
         
-        # Mock Venice.ai response
-        self.venice_client.get_embedding.return_value = [0.1] * 1536
-        self.venice_client.chat_completion.return_value = "Python is a high-level programming language..."
+        # Mock Qwen LLM response
+        self.qwen_client.get_embedding.return_value = [0.1] * 1536
+        self.qwen_client.chat_completion.return_value = {
+            "content": "Python is a high-level programming language..."
+        }
         
         # Mock RAG response
         self.knowledge_rag.search_similar.return_value = []
@@ -1275,11 +1356,11 @@ def query_sources_parallel(question, sources):
 | arXiv API | $0 | $0 | Free, 3s rate limit |
 | Wikidata | $0 | $0 | Free, unlimited |
 | DuckDuckGo API | $0 | $0 | Free, unlimited |
-| Venice.ai LLM | $0 (existing) | Variable | Existing CompyMac service |
+| Qwen3-Next-80B-A3B-Thinking | $0 (one-time hardware) | $0 | Self-hosted on GX10 |
 | PostgreSQL + pgvector | $0 (existing) | $0 | Existing infrastructure |
 | Brave Search API | $0 | $5/1000 queries (optional) | Optional enhancement |
 
-**Total Estimated Cost (Basic Setup):** $0
+**Total Estimated Cost (Basic Setup):** $0 (hardware already owned)
 **Total Estimated Cost (With Web Search):** $5-50/month (optional)
 
 ---
@@ -1525,7 +1606,7 @@ Provide a clear, actionable answer with specific recommendations."""
 
 # Usage Example: Complex laptop search
 agent = ResearchAgent(
-    venice_client=VeniceClient(),
+    qwen_client=QwenLLMClient(),
     search_client=BingSearchClient("API_KEY"),
     qa_system=QASystem(...)
 )
@@ -1599,67 +1680,89 @@ This implementation directly addresses the PDF's requirement for "multi-step sea
 
 ---
 
-## Hardware Constraints and External Services
+## Hardware Platform and Self-Hosted LLM Architecture
 
-**IMPORTANT: VRAM and Compute Constraints**
+**IMPORTANT: ASUS Ascent GX10 Platform**
 
-As specified in the CompyMac project requirements:
-- **Global VRAM Limit**: 64GB total across ALL models (image identification + LLMs)
-- **External Services**: Venice.ai API for LLM hosting, omniparser v2 for image classification
-- **Architecture**: Memory system should be a CLIENT to these services, not local PyTorch models
+PASSFEL runs on the ASUS Ascent GX10 with the following specifications:
+- **GPU**: NVIDIA GB10 Grace Blackwell (integrated ARM CPU + Blackwell GPU)
+- **Memory**: 128GB LPDDR5x unified memory (shared CPU+GPU)
+- **Capability**: Can run models up to ~200B parameters with quantization
 
-**Implementation Strategy:**
+**Self-Hosted LLM Architecture:**
+
+PASSFEL uses a self-hosted Qwen3-Next-80B-A3B-Thinking model as the central orchestrator for all user interactions and data sources. The LLM is deployed with vLLM and serves an OpenAI-compatible API.
 
 ```python
-class ExternalLLMClient:
-    """Client for Venice.ai API - no local model loading"""
+class QwenLLMClient:
+    """Client for self-hosted Qwen3-Next-80B-A3B-Thinking on GX10"""
     
-    def __init__(self, api_key, base_url="https://api.venice.ai"):
-        self.api_key = api_key
+    def __init__(self, base_url="http://localhost:8000"):
         self.base_url = base_url
-        # NO local model loading - all processing happens on Venice.ai servers
+        self.headers = {
+            "Content-Type": "application/json"
+        }
+        # Model is self-hosted on GX10 via vLLM
     
-    def chat_completion(self, messages, model="llama-3.1-405b"):
-        """Send chat completion request to Venice.ai"""
+    def chat_completion(self, messages, temperature=0.7, tools=None):
+        """Send chat completion request to self-hosted LLM"""
+        payload = {
+            "model": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+            "messages": messages,
+            "temperature": temperature
+        }
+        
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        
         response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": model, "messages": messages}
+            f"{self.base_url}/v1/chat/completions",
+            headers=self.headers,
+            json=payload
         )
-        return response.json()["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]
     
-    def get_embedding(self, text, model="text-embedding-ada-002"):
-        """Get text embedding from Venice.ai"""
+    def get_embedding(self, text):
+        """Get text embedding from self-hosted LLM"""
         response = requests.post(
-            f"{self.base_url}/embeddings",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": model, "input": text}
+            f"{self.base_url}/v1/embeddings",
+            headers=self.headers,
+            json={"input": text, "model": "Qwen/Qwen3-Next-80B-A3B-Thinking"}
         )
         return response.json()["data"][0]["embedding"]
 
-# NO local model initialization like this:
-# model = torch.load("model.pth")  # ❌ WRONG - violates VRAM constraint
-# tokenizer = AutoTokenizer.from_pretrained("...")  # ❌ WRONG
-
-# Instead, always use external API:
-venice_client = ExternalLLMClient(api_key=os.getenv("VENICE_API_KEY"))  # ✅ CORRECT
-answer = venice_client.chat_completion([{"role": "user", "content": "What is Python?"}])
+# Usage with self-hosted LLM:
+qwen_client = QwenLLMClient(base_url="http://localhost:8000")  # ✅ CORRECT
+answer = qwen_client.chat_completion([{"role": "user", "content": "What is Python?"}])
 ```
 
-**Why This Matters:**
-- Local LLMs (even quantized) can consume 10-40GB VRAM
-- Image models (omniparser v2) already use significant VRAM
-- 64GB limit must accommodate ALL models globally
-- External APIs eliminate VRAM concerns entirely
-- Venice.ai provides enterprise-grade LLM access without local compute
+**Memory Allocation:**
+- **Qwen3-Next-80B-A3B-Thinking (FP8)**: ~95GB (includes model + KV cache)
+- **Remaining Memory**: ~33GB available for KV cache expansion and other services
+- **Total**: 128GB unified memory on GX10
 
-**Cost Considerations:**
-- Venice.ai API costs are variable based on usage
-- Already part of existing CompyMac infrastructure
-- No additional hardware investment needed
-- Scales automatically with demand
+**Why Self-Hosted LLM:**
+- **Tool-Calling Excellence**: 72.0% BFCL-v3 accuracy (critical for PASSFEL's multi-domain integrations)
+- **Privacy**: All data stays on local hardware
+- **No API Costs**: One-time hardware investment, no recurring fees
+- **Low Latency**: Local inference, no network round-trips
+- **Apache 2.0 License**: Fully permissive, no restrictions
+- **Reasoning Mode**: Thinking tags for complex queries
 
-This approach ensures the Q&A system respects hardware constraints while providing powerful LLM capabilities through external services.
+**Deployment Configuration:**
+```bash
+# vLLM deployment for GX10 with FP8 quantization
+vllm serve Qwen/Qwen3-Next-80B-A3B-Thinking \
+  --port 8000 \
+  --max-model-len 262144 \
+  --reasoning-parser deepseek_r1 \
+  --quantization fp8 \
+  --gpu-memory-utilization 0.90 \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+```
+
+This self-hosted architecture ensures PASSFEL has a powerful LLM orchestrator with excellent tool-calling capabilities while maintaining full control over data privacy and eliminating recurring API costs.
 
 ---
 
@@ -1667,16 +1770,16 @@ This approach ensures the Q&A system respects hardware constraints while providi
 
 For PASSFEL's Q&A and research capabilities (#3), the recommended implementation approach is:
 
-1. **Start with Wikipedia API** for general knowledge queries (free, comprehensive, no API key)
-2. **Add arXiv API** for academic and technical questions (free, specialized)
-3. **Implement RAG system** using existing pgvector infrastructure for local knowledge storage
-4. **Use Venice.ai** (existing CompyMac service) for LLM processing to avoid VRAM constraints
+1. **Deploy self-hosted Qwen3-Next-80B-A3B-Thinking** on GX10 as central orchestrator (72.0% BFCL-v3 tool-calling, Apache 2.0 license)
+2. **Start with Wikipedia API** for general knowledge queries (free, comprehensive, no API key)
+3. **Add arXiv API** for academic and technical questions (free, specialized)
+4. **Implement RAG system** using existing pgvector infrastructure with self-hosted LLM embeddings
 5. **Add DuckDuckGo API** for quick facts and fallback (free, simple)
 6. **Consider Bing or Google Web Search API** (explicitly mentioned in PDF) for enhanced coverage
 7. **Implement multi-step research agent** for complex queries requiring task decomposition
 8. **Consider Wikidata** for structured queries (free, powerful but complex)
 
-This phased approach provides comprehensive Q&A capabilities while minimizing costs, respecting VRAM constraints (64GB global limit), leveraging existing infrastructure (Venice.ai, pgvector), and supporting both simple queries and complex multi-step research tasks. The system can answer general knowledge questions, technical queries, and research questions with proper source attribution and caching for efficiency.
+This phased approach provides comprehensive Q&A capabilities with a self-hosted LLM orchestrator that offers excellent tool-calling performance (72.0% BFCL-v3), privacy (all data stays local), no recurring API costs, and low latency. The system leverages existing infrastructure (pgvector), supports both simple queries and complex multi-step research tasks, and can answer general knowledge questions, technical queries, and research questions with proper source attribution, reasoning mode for complex queries, and caching for efficiency.
 
 ---
 
