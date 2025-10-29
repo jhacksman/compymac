@@ -258,6 +258,104 @@ for entry in feed.entries[:5]:
 
 ---
 
+#### 3. Ground.news (Web Scraping)
+**Complexity:** Moderate  
+**Cost:** Free (with permission for personal use)  
+**Coverage:** Global news aggregation  
+**Rate Limits:** None (polite scraping with delays)
+
+**Why Moderate:**
+- Requires web scraping (Selenium/headless Chrome)
+- No official API available
+- Need to implement proper scraping etiquette
+- User has permission for personal use only (not for resale)
+
+**Key Features:**
+- News story aggregation from 50,000+ sources
+- **Political bias analysis** - Shows Left/Center/Right coverage percentages
+- **Source diversity metrics** - Total sources covering each story
+- **Bias distribution visualization** - See which outlets cover which stories
+- **Blindspot detection** - Stories disproportionately covered by one side
+- Article listings with source names, bias labels, and timestamps
+- Topic categorization and tagging
+- Geographic source distribution
+
+**Data Available Without Login:**
+- Story titles, summaries, and URLs
+- Political bias distribution (Left/Center/Right percentages)
+- Total source count and breakdown by bias (e.g., "77 Left, 165 Center, 27 Right")
+- Individual article listings with:
+  - Source name and logo
+  - Source bias label (Left, Lean Left, Center, Lean Right, Right)
+  - Article headline and summary
+  - Publication timestamp and location
+  - Link to original article
+- Similar topics and related stories
+- Story metadata (publish date, update time, location)
+
+**Data Requiring Premium/Vantage Subscription:**
+- Factuality ratings for sources (requires Premium)
+- Ownership data for news organizations (requires Vantage)
+- Podcast mentions and timestamps (requires Vantage)
+- Full historical data access
+
+**Implementation Approach:**
+- Use Selenium with headless Chrome for scraping
+- Implement polite delays between requests (2-3 seconds minimum)
+- Cache results to minimize requests
+- Use realistic User-Agent headers
+- Focus on homepage and story detail pages
+- Parse HTML structure for bias metrics and source lists
+
+**Example Data Structure:**
+```python
+{
+    "story_id": "f2bf3034-bd03-4e59-adb6-1770ed4f7e0e",
+    "title": "States sue Trump administration to keep SNAP benefits...",
+    "summary": "A coalition of 25 states and DC sued to block...",
+    "url": "https://ground.news/article/f2bf3034-bd03-4e59-adb6-1770ed4f7e0e",
+    "published": "2025-10-28T...",
+    "updated": "2025-10-29T...",
+    "total_sources": 374,
+    "bias_distribution": {
+        "left": 77,
+        "center": 165,
+        "right": 27,
+        "left_percent": 21,
+        "center_percent": 61,
+        "right_percent": 7
+    },
+    "articles": [
+        {
+            "source": "Fox News",
+            "bias": "Right",
+            "headline": "States sue Trump admin over billions...",
+            "url": "https://www.foxnews.com/politics/...",
+            "published": "2025-10-29T...",
+            "location": "New York, United States"
+        },
+        ...
+    ],
+    "topics": ["SNAP", "Donald Trump", "Government Shutdown"]
+}
+```
+
+**Robots.txt Compliance:**
+- Checked: https://ground.news/robots.txt
+- Most paths allowed except `/mediaopoly`
+- Respectful scraping is permitted
+
+**Recommendation:** **EXCELLENT FOR BIAS ANALYSIS** - Unique value proposition with political bias metrics and source diversity data. Implement with Selenium for personal use. Provides context that RSS feeds alone cannot offer.
+
+**Use Cases:**
+- Identify media bias in news coverage
+- Detect "blindspot" stories (covered by only one side)
+- Track source diversity across political spectrum
+- Aggregate multiple perspectives on same story
+- Analyze geographic distribution of news sources
+
+---
+
 ### ⚠️ MODERATE - Consider for Future Enhancement
 
 #### 3. NewsAPI.org
@@ -418,10 +516,13 @@ for entry in feed.entries[:5]:
 |--------|-----------|------|---------|------------|----------|----------------|
 | RSS Feeds | Very Simple | Free | No | None | Varies | ✅ Start Here |
 | RSSHub | Simple | Free | No | Varies | Global | ✅ Great Addition |
+| Ground.news | Moderate | Free* | No | Polite scraping | Global | ✅ Excellent for Bias Analysis |
 | NewsAPI.org | Moderate | Free tier | Yes | 100/day | Global | ⚠️ Future (dev only) |
 | NewsData.io | Moderate | Free tier | Yes | 200/day | Global | ⚠️ Future |
 | GNews API | Moderate | Free tier | Yes | 100/day | Global | ⚠️ Future |
 | Bing News | Complex | Free tier | Yes | 1k/month | Global | ❌ Skip |
+
+*Ground.news: Web scraping with user permission for personal use only (not for resale)
 
 ---
 
@@ -429,7 +530,8 @@ for entry in feed.entries[:5]:
 
 1. **Immediate:** Implement NOAA API + RSS feeds (can be done today)
 2. **This Week:** Add Open-Meteo as global weather fallback
-3. **Future:** Evaluate paid tiers if free options prove insufficient
+3. **This Week:** Implement Ground.news scraper for bias analysis and story aggregation
+4. **Future:** Evaluate paid tiers if free options prove insufficient
 
 ---
 
