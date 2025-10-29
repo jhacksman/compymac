@@ -419,25 +419,174 @@ if answer:
 
 ### 5. Web Search APIs (Moderate to Complex)
 
-**Option A: Brave Search API (Moderate)**
+As mentioned in the PDF, the assistant should be able to use web search APIs (Bing or Google) to find relevant information and summarize it for the user.
+
+**Option A: Bing Web Search API (Moderate) ⭐ (Explicitly mentioned in PDF)**
+- **Provider**: Microsoft Azure Cognitive Services
+- **Pricing**: Free tier with 1,000 queries/month, then $3/1000 queries (S1 tier)
+- **Features**: Web search, news, images, videos, entity search, spell check
+- **API Key**: Required (Azure subscription)
+- **Rate Limits**: 3 queries/second (free tier), 10 queries/second (paid)
+- **Documentation**: https://docs.microsoft.com/en-us/azure/cognitive-services/bing-web-search/
+
+**Python Integration:**
+```python
+import requests
+
+class BingSearchClient:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "https://api.bing.microsoft.com/v7.0/search"
+    
+    def search(self, query, count=10):
+        """Search using Bing Web Search API"""
+        headers = {
+            "Ocp-Apim-Subscription-Key": self.api_key
+        }
+        params = {
+            "q": query,
+            "count": count,
+            "responseFilter": "Webpages",
+            "textDecorations": True,
+            "textFormat": "HTML"
+        }
+        
+        response = requests.get(self.base_url, headers=headers, params=params)
+        return response.json()
+    
+    def get_answer(self, query):
+        """Get direct answer if available"""
+        results = self.search(query, count=5)
+        
+        # Check for direct answer
+        if "computation" in results:
+            return results["computation"]["value"]
+        
+        # Extract top results
+        if "webPages" in results and "value" in results["webPages"]:
+            top_results = results["webPages"]["value"][:3]
+            return {
+                "results": [
+                    {
+                        "title": r["name"],
+                        "snippet": r["snippet"],
+                        "url": r["url"]
+                    }
+                    for r in top_results
+                ]
+            }
+        
+        return None
+
+# Usage
+bing_client = BingSearchClient("YOUR_AZURE_API_KEY")
+results = bing_client.search("How do I prune a rose bush?")
+print(results["webPages"]["value"][0]["snippet"])
+```
+
+**Recommendation:** Bing Web Search API is explicitly mentioned in the PDF and provides excellent coverage with a reasonable free tier. Good for production use with official Microsoft support.
+
+---
+
+**Option B: Google Programmable Search Engine (Moderate) ⭐ (Explicitly mentioned in PDF)**
+- **Provider**: Google Cloud
+- **Pricing**: Free tier with 100 queries/day, then $5/1000 queries
+- **Features**: Customizable web search, site-restricted search
+- **API Key**: Required (Google Cloud API key + Custom Search Engine ID)
+- **Rate Limits**: 100 queries/day (free), 10,000 queries/day (paid)
+- **Documentation**: https://developers.google.com/custom-search/v1/overview
+
+**Python Integration:**
+```python
+import requests
+
+class GoogleSearchClient:
+    def __init__(self, api_key, search_engine_id):
+        self.api_key = api_key
+        self.search_engine_id = search_engine_id
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+    
+    def search(self, query, num=10):
+        """Search using Google Custom Search API"""
+        params = {
+            "key": self.api_key,
+            "cx": self.search_engine_id,
+            "q": query,
+            "num": num
+        }
+        
+        response = requests.get(self.base_url, params=params)
+        return response.json()
+    
+    def get_answer(self, query):
+        """Get search results and extract relevant information"""
+        results = self.search(query, num=5)
+        
+        if "items" in results:
+            top_results = results["items"][:3]
+            return {
+                "results": [
+                    {
+                        "title": r["title"],
+                        "snippet": r["snippet"],
+                        "url": r["link"]
+                    }
+                    for r in top_results
+                ]
+            }
+        
+        return None
+
+# Usage
+google_client = GoogleSearchClient("YOUR_API_KEY", "YOUR_SEARCH_ENGINE_ID")
+results = google_client.search("What's the capital of Denmark?")
+print(results["items"][0]["snippet"])
+```
+
+**Setup Requirements:**
+1. Create Google Cloud project
+2. Enable Custom Search API
+3. Create Custom Search Engine at https://programmablesearchengine.google.com/
+4. Get API key and Search Engine ID
+
+**Recommendation:** Google Programmable Search is explicitly mentioned in the PDF and provides high-quality results. Free tier is limited (100/day) but sufficient for personal use.
+
+---
+
+**Option C: Brave Search API (Moderate)**
 - **Pricing**: Free tier with 2,000 queries/month, then $5/1000 queries
-- **Features**: Web search, news, images
+- **Features**: Web search, news, images, privacy-focused
 - **API Key**: Required
 - **Rate Limits**: Varies by plan
+- **Documentation**: https://brave.com/search/api/
 
-**Option B: SerpAPI (Moderate)**
+**Recommendation:** Good privacy-focused alternative with generous free tier.
+
+---
+
+**Option D: SerpAPI (Moderate)**
 - **Pricing**: Free tier with 100 searches/month, then $50/5000 searches
-- **Features**: Google search results, structured data
+- **Features**: Google search results proxy, structured data
 - **API Key**: Required
 - **Rate Limits**: Varies by plan
+- **Documentation**: https://serpapi.com/
 
-**Option C: Tavily AI (Moderate)**
+**Recommendation:** Provides Google results without Google API setup, but more expensive.
+
+---
+
+**Option E: Tavily AI (Moderate)**
 - **Pricing**: Free tier with 1,000 requests/month
-- **Features**: AI-optimized search for LLMs
+- **Features**: AI-optimized search for LLMs, structured output
 - **API Key**: Required
 - **Rate Limits**: Varies by plan
+- **Documentation**: https://tavily.com/
 
-**Implementation Note:** Web search APIs require API keys and have usage limits. For PASSFEL, these should be considered optional enhancements rather than core dependencies.
+**Recommendation:** Optimized for AI/LLM use cases, good for RAG systems.
+
+---
+
+**Implementation Note:** The PDF explicitly mentions using "web search APIs (for example, Bing or Google's search API)" for the Q&A system. While these require API keys and have usage limits, they provide high-quality search results that can be summarized by the LLM. For PASSFEL, Bing Web Search API is recommended as the primary option due to its reasonable pricing ($3/1000 queries after free tier) and official Microsoft support.
 
 ---
 
@@ -1135,6 +1284,385 @@ def query_sources_parallel(question, sources):
 
 ---
 
+## Multi-Step Research and Agent Capabilities
+
+As mentioned in the PDF, the assistant should be able to perform multi-step research for complex queries like "find me a good laptop under $1000 for programming" by breaking down the task into sub-tasks.
+
+### Agent Architecture
+
+```python
+class ResearchAgent:
+    def __init__(self, venice_client, search_client, qa_system):
+        self.venice = venice_client
+        self.search = search_client
+        self.qa = qa_system
+        self.task_history = []
+    
+    def research_complex_query(self, query):
+        """Handle complex multi-step research queries"""
+        
+        # Step 1: Decompose query into sub-tasks
+        sub_tasks = self._decompose_query(query)
+        
+        # Step 2: Execute each sub-task
+        results = {}
+        for task in sub_tasks:
+            task_result = self._execute_task(task)
+            results[task['id']] = task_result
+            self.task_history.append({
+                "task": task,
+                "result": task_result,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # Step 3: Synthesize results
+        final_answer = self._synthesize_results(query, results)
+        
+        return {
+            "answer": final_answer,
+            "sub_tasks": sub_tasks,
+            "task_results": results,
+            "sources": self._collect_sources(results)
+        }
+    
+    def _decompose_query(self, query):
+        """Break down complex query into sub-tasks using LLM"""
+        
+        prompt = f"""Break down this complex query into specific sub-tasks:
+Query: {query}
+
+Identify 3-5 specific sub-tasks needed to answer this query completely.
+Return as JSON array with format: [{{"id": 1, "task": "search for...", "type": "search|qa|compare"}}]
+"""
+        
+        response = self.venice.chat_completion([
+            {"role": "system", "content": "You are a task decomposition expert."},
+            {"role": "user", "content": prompt}
+        ])
+        
+        # Parse LLM response to extract sub-tasks
+        import json
+        try:
+            sub_tasks = json.loads(response)
+            return sub_tasks
+        except:
+            # Fallback: create basic sub-tasks
+            return [
+                {"id": 1, "task": f"Search for information about: {query}", "type": "search"}
+            ]
+    
+    def _execute_task(self, task):
+        """Execute a single sub-task"""
+        
+        task_type = task.get('type', 'search')
+        task_content = task.get('task', '')
+        
+        if task_type == 'search':
+            # Use web search for this sub-task
+            search_results = self.search.search(task_content, count=5)
+            return {
+                "type": "search_results",
+                "data": search_results,
+                "summary": self._summarize_search_results(search_results)
+            }
+        
+        elif task_type == 'qa':
+            # Use Q&A system for this sub-task
+            answer = self.qa.answer_question(task_content)
+            return {
+                "type": "qa_answer",
+                "data": answer,
+                "summary": answer.get('answer', '')
+            }
+        
+        elif task_type == 'compare':
+            # Extract items to compare from task
+            items = self._extract_comparison_items(task_content)
+            comparison = self._compare_items(items)
+            return {
+                "type": "comparison",
+                "data": comparison,
+                "summary": self._format_comparison(comparison)
+            }
+        
+        return {"type": "unknown", "data": None, "summary": ""}
+    
+    def _summarize_search_results(self, search_results):
+        """Summarize search results using LLM"""
+        
+        if not search_results or "webPages" not in search_results:
+            return "No results found."
+        
+        # Extract snippets from top results
+        snippets = []
+        for page in search_results["webPages"]["value"][:5]:
+            snippets.append(f"{page['name']}: {page['snippet']}")
+        
+        combined_text = "\n\n".join(snippets)
+        
+        # Ask LLM to summarize
+        prompt = f"Summarize these search results concisely:\n\n{combined_text}"
+        summary = self.venice.chat_completion([
+            {"role": "user", "content": prompt}
+        ])
+        
+        return summary
+    
+    def _extract_comparison_items(self, task_content):
+        """Extract items to compare from task description"""
+        # Use LLM to extract items
+        prompt = f"Extract the items to compare from this task: {task_content}\nReturn as JSON array."
+        response = self.venice.chat_completion([
+            {"role": "user", "content": prompt}
+        ])
+        
+        import json
+        try:
+            return json.loads(response)
+        except:
+            return []
+    
+    def _compare_items(self, items):
+        """Compare multiple items"""
+        comparisons = []
+        
+        for item in items:
+            # Search for information about each item
+            search_results = self.search.search(f"{item} specifications review", count=3)
+            
+            # Extract key information
+            info = self._extract_item_info(item, search_results)
+            comparisons.append({
+                "item": item,
+                "info": info
+            })
+        
+        return comparisons
+    
+    def _extract_item_info(self, item, search_results):
+        """Extract structured information about an item"""
+        if not search_results or "webPages" not in search_results:
+            return {}
+        
+        # Combine search result snippets
+        snippets = [
+            page['snippet']
+            for page in search_results["webPages"]["value"][:3]
+        ]
+        combined = " ".join(snippets)
+        
+        # Use LLM to extract structured info
+        prompt = f"""Extract key specifications and information about {item} from this text:
+{combined}
+
+Return as JSON with keys: price, specs, pros, cons, rating"""
+        
+        response = self.venice.chat_completion([
+            {"role": "user", "content": prompt}
+        ])
+        
+        import json
+        try:
+            return json.loads(response)
+        except:
+            return {"summary": combined[:200]}
+    
+    def _format_comparison(self, comparison):
+        """Format comparison results"""
+        lines = ["Comparison:"]
+        for item_data in comparison:
+            item = item_data['item']
+            info = item_data['info']
+            lines.append(f"\n{item}:")
+            for key, value in info.items():
+                lines.append(f"  - {key}: {value}")
+        
+        return "\n".join(lines)
+    
+    def _synthesize_results(self, original_query, results):
+        """Synthesize all sub-task results into final answer"""
+        
+        # Collect all summaries
+        summaries = []
+        for task_id, result in results.items():
+            summaries.append(f"Task {task_id}: {result.get('summary', '')}")
+        
+        combined_info = "\n\n".join(summaries)
+        
+        # Ask LLM to synthesize final answer
+        prompt = f"""Based on the following research results, provide a comprehensive answer to: {original_query}
+
+Research Results:
+{combined_info}
+
+Provide a clear, actionable answer with specific recommendations."""
+        
+        final_answer = self.venice.chat_completion([
+            {"role": "system", "content": "You are a helpful research assistant."},
+            {"role": "user", "content": prompt}
+        ])
+        
+        return final_answer
+    
+    def _collect_sources(self, results):
+        """Collect all sources from sub-task results"""
+        sources = []
+        
+        for result in results.values():
+            if result['type'] == 'search_results' and 'data' in result:
+                search_data = result['data']
+                if "webPages" in search_data:
+                    for page in search_data["webPages"]["value"][:3]:
+                        sources.append({
+                            "title": page['name'],
+                            "url": page['url']
+                        })
+            elif result['type'] == 'qa_answer' and 'data' in result:
+                qa_sources = result['data'].get('sources', [])
+                sources.extend(qa_sources)
+        
+        return sources
+
+# Usage Example: Complex laptop search
+agent = ResearchAgent(
+    venice_client=VeniceClient(),
+    search_client=BingSearchClient("API_KEY"),
+    qa_system=QASystem(...)
+)
+
+result = agent.research_complex_query("find me a good laptop under $1000 for programming")
+
+print(result['answer'])
+# Output: "Based on my research, I recommend the following laptops under $1000 for programming:
+# 1. Dell XPS 13 ($950) - Excellent build quality, 16GB RAM, Intel i7
+# 2. Lenovo ThinkPad E15 ($850) - Great keyboard, 16GB RAM, AMD Ryzen 7
+# 3. ASUS VivoBook ($750) - Budget option, 12GB RAM, Intel i5
+# 
+# The Dell XPS 13 offers the best overall value with premium build quality and performance..."
+
+print(f"\nSources consulted: {len(result['sources'])}")
+for source in result['sources'][:5]:
+    print(f"  - {source['title']}: {source['url']}")
+```
+
+### Task Decomposition Examples
+
+**Example 1: Product Research**
+```
+Query: "Find me a good laptop under $1000 for programming"
+
+Sub-tasks:
+1. Search for "best programming laptops 2025 under $1000"
+2. Search for "laptop specifications for software development"
+3. Compare top 3-5 laptop models (specs, reviews, prices)
+4. Synthesize recommendation with pros/cons
+
+Result: Specific laptop recommendations with reasoning
+```
+
+**Example 2: Trip Planning**
+```
+Query: "Plan a 3-day trip to San Francisco"
+
+Sub-tasks:
+1. Search for "top attractions in San Francisco"
+2. Search for "San Francisco weather forecast"
+3. Search for "San Francisco hotel recommendations"
+4. Search for "San Francisco restaurant recommendations"
+5. Create itinerary combining all information
+
+Result: Day-by-day itinerary with attractions, dining, and logistics
+```
+
+**Example 3: Technical Problem Solving**
+```
+Query: "How do I fix Python import error ModuleNotFoundError"
+
+Sub-tasks:
+1. Search for "Python ModuleNotFoundError causes"
+2. Search for "how to install Python packages pip"
+3. Search for "Python virtual environment setup"
+4. Synthesize step-by-step solution
+
+Result: Comprehensive troubleshooting guide with multiple solutions
+```
+
+### Key Features Aligned with PDF
+
+1. **Multi-Step Reasoning**: Breaks complex queries into manageable sub-tasks
+2. **Tool Use**: Combines search, Q&A, and comparison capabilities
+3. **Context Awareness**: Maintains task history and uses previous results
+4. **Synthesis**: Combines information from multiple sources into coherent answer
+5. **Source Attribution**: Tracks and cites all information sources
+
+This implementation directly addresses the PDF's requirement for "multi-step search and reasoning process" where "AI agents shine" by utilizing "personal context and perform many tasks across applications."
+
+---
+
+## Hardware Constraints and External Services
+
+**IMPORTANT: VRAM and Compute Constraints**
+
+As specified in the CompyMac project requirements:
+- **Global VRAM Limit**: 64GB total across ALL models (image identification + LLMs)
+- **External Services**: Venice.ai API for LLM hosting, omniparser v2 for image classification
+- **Architecture**: Memory system should be a CLIENT to these services, not local PyTorch models
+
+**Implementation Strategy:**
+
+```python
+class ExternalLLMClient:
+    """Client for Venice.ai API - no local model loading"""
+    
+    def __init__(self, api_key, base_url="https://api.venice.ai"):
+        self.api_key = api_key
+        self.base_url = base_url
+        # NO local model loading - all processing happens on Venice.ai servers
+    
+    def chat_completion(self, messages, model="llama-3.1-405b"):
+        """Send chat completion request to Venice.ai"""
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": model, "messages": messages}
+        )
+        return response.json()["choices"][0]["message"]["content"]
+    
+    def get_embedding(self, text, model="text-embedding-ada-002"):
+        """Get text embedding from Venice.ai"""
+        response = requests.post(
+            f"{self.base_url}/embeddings",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": model, "input": text}
+        )
+        return response.json()["data"][0]["embedding"]
+
+# NO local model initialization like this:
+# model = torch.load("model.pth")  # ❌ WRONG - violates VRAM constraint
+# tokenizer = AutoTokenizer.from_pretrained("...")  # ❌ WRONG
+
+# Instead, always use external API:
+venice_client = ExternalLLMClient(api_key=os.getenv("VENICE_API_KEY"))  # ✅ CORRECT
+answer = venice_client.chat_completion([{"role": "user", "content": "What is Python?"}])
+```
+
+**Why This Matters:**
+- Local LLMs (even quantized) can consume 10-40GB VRAM
+- Image models (omniparser v2) already use significant VRAM
+- 64GB limit must accommodate ALL models globally
+- External APIs eliminate VRAM concerns entirely
+- Venice.ai provides enterprise-grade LLM access without local compute
+
+**Cost Considerations:**
+- Venice.ai API costs are variable based on usage
+- Already part of existing CompyMac infrastructure
+- No additional hardware investment needed
+- Scales automatically with demand
+
+This approach ensures the Q&A system respects hardware constraints while providing powerful LLM capabilities through external services.
+
+---
+
 ## Conclusion
 
 For PASSFEL's Q&A and research capabilities (#3), the recommended implementation approach is:
@@ -1144,12 +1672,13 @@ For PASSFEL's Q&A and research capabilities (#3), the recommended implementation
 3. **Implement RAG system** using existing pgvector infrastructure for local knowledge storage
 4. **Use Venice.ai** (existing CompyMac service) for LLM processing to avoid VRAM constraints
 5. **Add DuckDuckGo API** for quick facts and fallback (free, simple)
-6. **Consider Wikidata** for structured queries (free, powerful but complex)
-7. **Optionally add web search API** for enhanced coverage (requires API key and costs)
+6. **Consider Bing or Google Web Search API** (explicitly mentioned in PDF) for enhanced coverage
+7. **Implement multi-step research agent** for complex queries requiring task decomposition
+8. **Consider Wikidata** for structured queries (free, powerful but complex)
 
-This phased approach provides comprehensive Q&A capabilities while minimizing costs, respecting VRAM constraints, and leveraging existing infrastructure. The system can answer general knowledge questions, technical queries, and research questions with proper source attribution and caching for efficiency.
+This phased approach provides comprehensive Q&A capabilities while minimizing costs, respecting VRAM constraints (64GB global limit), leveraging existing infrastructure (Venice.ai, pgvector), and supporting both simple queries and complex multi-step research tasks. The system can answer general knowledge questions, technical queries, and research questions with proper source attribution and caching for efficiency.
 
 ---
 
-*Last Updated: 2025-01-29*
+*Last Updated: 2025-10-29*
 *Research conducted for PASSFEL project feature #3 (Q&A and Research Capabilities) by Devin*

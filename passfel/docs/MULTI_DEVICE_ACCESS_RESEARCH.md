@@ -1558,19 +1558,846 @@ class SyncService {
 
 ---
 
+## Voice Interface Integration
+
+As mentioned in the PDF, the assistant should support voice interaction for hands-free operation. This includes both push-to-talk and wake-word activation modes.
+
+### Web Speech API (Browser-Based)
+
+**Overview:**
+The Web Speech API provides speech recognition and synthesis capabilities directly in modern browsers, enabling voice interaction without additional dependencies.
+
+**Browser Support:**
+- Chrome/Edge: Full support
+- Safari: Partial support (iOS requires user interaction)
+- Firefox: Limited support
+
+**Speech Recognition Implementation:**
+
+```javascript
+class VoiceInterface {
+  constructor(onResult, onError) {
+    this.recognition = null;
+    this.synthesis = window.speechSynthesis;
+    this.onResult = onResult;
+    this.onError = onError;
+    this.isListening = false;
+    
+    this.initRecognition();
+  }
+  
+  initRecognition() {
+    // Check browser support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      console.error('Speech recognition not supported');
+      return;
+    }
+    
+    this.recognition = new SpeechRecognition();
+    
+    // Configuration
+    this.recognition.continuous = false;  // Stop after one result
+    this.recognition.interimResults = false;  // Only final results
+    this.recognition.lang = 'en-US';
+    this.recognition.maxAlternatives = 1;
+    
+    // Event handlers
+    this.recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      const confidence = event.results[0][0].confidence;
+      
+      console.log(`Recognized: "${transcript}" (confidence: ${confidence})`);
+      
+      if (this.onResult) {
+        this.onResult(transcript, confidence);
+      }
+      
+      this.isListening = false;
+    };
+    
+    this.recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      
+      if (this.onError) {
+        this.onError(event.error);
+      }
+      
+      this.isListening = false;
+    };
+    
+    this.recognition.onend = () => {
+      this.isListening = false;
+    };
+  }
+  
+  startListening() {
+    if (!this.recognition) {
+      console.error('Speech recognition not initialized');
+      return;
+    }
+    
+    if (this.isListening) {
+      console.log('Already listening');
+      return;
+    }
+    
+    try {
+      this.recognition.start();
+      this.isListening = true;
+      console.log('Started listening...');
+    } catch (error) {
+      console.error('Failed to start recognition:', error);
+    }
+  }
+  
+  stopListening() {
+    if (this.recognition && this.isListening) {
+      this.recognition.stop();
+      this.isListening = false;
+      console.log('Stopped listening');
+    }
+  }
+  
+  speak(text, options = {}) {
+    if (!this.synthesis) {
+      console.error('Speech synthesis not supported');
+      return;
+    }
+    
+    // Cancel any ongoing speech
+    this.synthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Configuration
+    utterance.lang = options.lang || 'en-US';
+    utterance.pitch = options.pitch || 1.0;
+    utterance.rate = options.rate || 1.0;
+    utterance.volume = options.volume || 1.0;
+    
+    // Select voice
+    if (options.voice) {
+      const voices = this.synthesis.getVoices();
+      const selectedVoice = voices.find(v => v.name === options.voice);
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
+    }
+    
+    // Event handlers
+    utterance.onstart = () => console.log('Started speaking');
+    utterance.onend = () => console.log('Finished speaking');
+    utterance.onerror = (event) => console.error('Speech error:', event);
+    
+    this.synthesis.speak(utterance);
+  }
+  
+  getAvailableVoices() {
+    if (!this.synthesis) {
+      return [];
+    }
+    
+    return this.synthesis.getVoices();
+  }
+}
+
+// Usage Example: Push-to-Talk
+const voiceInterface = new VoiceInterface(
+  (transcript, confidence) => {
+    console.log(`User said: "${transcript}"`);
+    
+    // Process command
+    processVoiceCommand(transcript);
+  },
+  (error) => {
+    console.error('Voice error:', error);
+  }
+);
+
+// Push-to-talk button
+document.getElementById('voice-button').addEventListener('mousedown', () => {
+  voiceInterface.startListening();
+});
+
+document.getElementById('voice-button').addEventListener('mouseup', () => {
+  voiceInterface.stopListening();
+});
+
+// Process voice commands
+async function processVoiceCommand(command) {
+  const lowerCommand = command.toLowerCase();
+  
+  if (lowerCommand.includes('weather')) {
+    const response = await getWeather();
+    voiceInterface.speak(response);
+  } else if (lowerCommand.includes('news')) {
+    const response = await getNews();
+    voiceInterface.speak(response);
+  } else if (lowerCommand.includes('calendar')) {
+    const response = await getCalendar();
+    voiceInterface.speak(response);
+  } else {
+    // Send to Q&A system
+    const response = await askQuestion(command);
+    voiceInterface.speak(response);
+  }
+}
+```
+
+**Speech Synthesis (Text-to-Speech):**
+
+```javascript
+// Simple TTS
+voiceInterface.speak("Today's forecast is 75 degrees and sunny.");
+
+// Advanced TTS with options
+voiceInterface.speak("The stock market is up 2 percent today.", {
+  rate: 0.9,  // Slightly slower
+  pitch: 1.1,  // Slightly higher pitch
+  volume: 0.8  // Slightly quieter
+});
+
+// List available voices
+const voices = voiceInterface.getAvailableVoices();
+console.log('Available voices:');
+voices.forEach(voice => {
+  console.log(`- ${voice.name} (${voice.lang})`);
+});
+
+// Use specific voice
+voiceInterface.speak("Hello from Samantha", {
+  voice: "Samantha"
+});
+```
+
+### Wake-Word Detection (Advanced)
+
+For always-on wake-word detection (like "Hey PASSFEL"), browser-based solutions have limitations. Native implementations are recommended:
+
+**Option 1: Porcupine Wake Word (Recommended)**
+
+```javascript
+// Porcupine Web SDK
+import { PorcupineWorker } from '@picovoice/porcupine-web';
+
+class WakeWordDetector {
+  constructor(onWakeWord) {
+    this.porcupineWorker = null;
+    this.onWakeWord = onWakeWord;
+    this.isListening = false;
+  }
+  
+  async initialize(accessKey) {
+    try {
+      // Create Porcupine worker
+      this.porcupineWorker = await PorcupineWorker.create(
+        accessKey,
+        [{ builtin: "Hey Google" }],  // Use built-in wake word or custom
+        (keywordIndex) => {
+          console.log('Wake word detected!');
+          if (this.onWakeWord) {
+            this.onWakeWord();
+          }
+        }
+      );
+      
+      console.log('Porcupine initialized');
+    } catch (error) {
+      console.error('Failed to initialize Porcupine:', error);
+    }
+  }
+  
+  async start() {
+    if (!this.porcupineWorker) {
+      console.error('Porcupine not initialized');
+      return;
+    }
+    
+    try {
+      await this.porcupineWorker.start();
+      this.isListening = true;
+      console.log('Wake word detection started');
+    } catch (error) {
+      console.error('Failed to start wake word detection:', error);
+    }
+  }
+  
+  async stop() {
+    if (this.porcupineWorker && this.isListening) {
+      await this.porcupineWorker.stop();
+      this.isListening = false;
+      console.log('Wake word detection stopped');
+    }
+  }
+  
+  async release() {
+    if (this.porcupineWorker) {
+      await this.porcupineWorker.release();
+      this.porcupineWorker = null;
+    }
+  }
+}
+
+// Usage
+const wakeWordDetector = new WakeWordDetector(() => {
+  console.log('Wake word detected! Starting voice recognition...');
+  voiceInterface.startListening();
+});
+
+// Initialize with Picovoice access key
+await wakeWordDetector.initialize('YOUR_PICOVOICE_ACCESS_KEY');
+await wakeWordDetector.start();
+```
+
+**Option 2: Vosk (Open Source)**
+
+```javascript
+// Vosk for continuous speech recognition
+// Requires server-side WebSocket implementation
+
+class VoskWakeWordDetector {
+  constructor(onWakeWord) {
+    this.ws = null;
+    this.mediaRecorder = null;
+    this.onWakeWord = onWakeWord;
+    this.wakeWords = ['hey passfel', 'ok passfel', 'passfel'];
+  }
+  
+  async connect(serverUrl) {
+    this.ws = new WebSocket(serverUrl);
+    
+    this.ws.onopen = () => {
+      console.log('Connected to Vosk server');
+      this.startRecording();
+    };
+    
+    this.ws.onmessage = (event) => {
+      const result = JSON.parse(event.data);
+      
+      if (result.text) {
+        const text = result.text.toLowerCase();
+        console.log('Recognized:', text);
+        
+        // Check for wake word
+        for (const wakeWord of this.wakeWords) {
+          if (text.includes(wakeWord)) {
+            console.log('Wake word detected!');
+            if (this.onWakeWord) {
+              this.onWakeWord();
+            }
+            break;
+          }
+        }
+      }
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  }
+  
+  async startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      this.mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm'
+      });
+      
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(event.data);
+        }
+      };
+      
+      this.mediaRecorder.start(100);  // Send data every 100ms
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+    }
+  }
+  
+  stop() {
+    if (this.mediaRecorder) {
+      this.mediaRecorder.stop();
+      this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    if (this.ws) {
+      this.ws.close();
+    }
+  }
+}
+
+// Usage
+const voskDetector = new VoskWakeWordDetector(() => {
+  console.log('Wake word detected!');
+  // Trigger action
+});
+
+await voskDetector.connect('ws://localhost:2700');
+```
+
+**Option 3: Silero VAD (Voice Activity Detection)**
+
+```javascript
+// Silero VAD for detecting when user starts speaking
+// Useful for automatic recording start
+
+import { PvRecorder } from '@picovoice/pvrecorder-node';
+
+class VoiceActivityDetector {
+  constructor(onSpeechStart, onSpeechEnd) {
+    this.onSpeechStart = onSpeechStart;
+    this.onSpeechEnd = onSpeechEnd;
+    this.isSpeaking = false;
+    this.silenceThreshold = 0.5;  // Adjust based on environment
+  }
+  
+  async start() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      
+      const checkAudioLevel = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        
+        // Calculate RMS (root mean square) for volume
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const normalized = (dataArray[i] - 128) / 128;
+          sum += normalized * normalized;
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+        
+        // Detect speech start/end
+        if (rms > this.silenceThreshold && !this.isSpeaking) {
+          this.isSpeaking = true;
+          console.log('Speech started');
+          if (this.onSpeechStart) {
+            this.onSpeechStart();
+          }
+        } else if (rms <= this.silenceThreshold && this.isSpeaking) {
+          this.isSpeaking = false;
+          console.log('Speech ended');
+          if (this.onSpeechEnd) {
+            this.onSpeechEnd();
+          }
+        }
+        
+        requestAnimationFrame(checkAudioLevel);
+      };
+      
+      checkAudioLevel();
+    } catch (error) {
+      console.error('Failed to start VAD:', error);
+    }
+  }
+}
+
+// Usage
+const vad = new VoiceActivityDetector(
+  () => {
+    console.log('User started speaking');
+    voiceInterface.startListening();
+  },
+  () => {
+    console.log('User stopped speaking');
+    voiceInterface.stopListening();
+  }
+);
+
+await vad.start();
+```
+
+### Mobile Voice Integration
+
+**iOS (Swift):**
+
+```swift
+import Speech
+
+class VoiceRecognitionManager: NSObject, SFSpeechRecognizerDelegate {
+    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private let audioEngine = AVAudioEngine()
+    
+    func requestAuthorization(completion: @escaping (Bool) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { authStatus in
+            DispatchQueue.main.async {
+                completion(authStatus == .authorized)
+            }
+        }
+    }
+    
+    func startRecording() throws {
+        // Cancel previous task
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        
+        // Configure audio session
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        
+        // Create recognition request
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        
+        guard let recognitionRequest = recognitionRequest else {
+            throw NSError(domain: "VoiceRecognition", code: 1, userInfo: nil)
+        }
+        
+        recognitionRequest.shouldReportPartialResults = true
+        
+        // Start recognition task
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
+            if let result = result {
+                let transcript = result.bestTranscription.formattedString
+                print("Recognized: \(transcript)")
+                
+                // Process command
+                self.processVoiceCommand(transcript)
+            }
+            
+            if error != nil || result?.isFinal == true {
+                self.stopRecording()
+            }
+        }
+        
+        // Configure audio input
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            recognitionRequest.append(buffer)
+        }
+        
+        audioEngine.prepare()
+        try audioEngine.start()
+    }
+    
+    func stopRecording() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+    }
+    
+    func processVoiceCommand(_ command: String) {
+        // Send to backend for processing
+        // Or handle locally
+    }
+}
+```
+
+**Android (Kotlin):**
+
+```kotlin
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+
+class VoiceRecognitionManager(private val context: Context) {
+    private var speechRecognizer: SpeechRecognizer? = null
+    
+    fun initialize() {
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (matches != null && matches.isNotEmpty()) {
+                    val transcript = matches[0]
+                    Log.d("Voice", "Recognized: $transcript")
+                    processVoiceCommand(transcript)
+                }
+            }
+            
+            override fun onError(error: Int) {
+                Log.e("Voice", "Recognition error: $error")
+            }
+            
+            // Other callback methods...
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+    
+    fun startListening() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        
+        speechRecognizer?.startListening(intent)
+    }
+    
+    fun stopListening() {
+        speechRecognizer?.stopListening()
+    }
+    
+    fun destroy() {
+        speechRecognizer?.destroy()
+    }
+    
+    private fun processVoiceCommand(command: String) {
+        // Process command
+    }
+}
+```
+
+### Voice Interface UI Components
+
+```javascript
+// Voice button component (React example)
+function VoiceButton({ voiceInterface }) {
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  
+  const handleMouseDown = () => {
+    setIsListening(true);
+    voiceInterface.startListening();
+  };
+  
+  const handleMouseUp = () => {
+    setIsListening(false);
+    voiceInterface.stopListening();
+  };
+  
+  return (
+    <div className="voice-interface">
+      <button
+        className={`voice-button ${isListening ? 'listening' : ''}`}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onTouchStart={handleMouseDown}
+        onTouchEnd={handleMouseUp}
+      >
+        {isListening ? (
+          <>
+            <MicIcon className="pulsing" />
+            <span>Listening...</span>
+          </>
+        ) : (
+          <>
+            <MicIcon />
+            <span>Hold to speak</span>
+          </>
+        )}
+      </button>
+      
+      {transcript && (
+        <div className="transcript">
+          <p>{transcript}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### Implementation Recommendations
+
+**Phase 1: Push-to-Talk (Immediate)**
+- Implement Web Speech API for browser-based voice input
+- Add push-to-talk button to web interface
+- Integrate with Q&A system for voice queries
+- Add text-to-speech for responses
+
+**Phase 2: Mobile Voice (Short-term)**
+- Add native voice recognition to mobile apps
+- Implement voice shortcuts/commands
+- Add voice feedback for all major actions
+
+**Phase 3: Wake-Word Detection (Long-term)**
+- Evaluate Porcupine or Vosk for wake-word detection
+- Implement always-on listening mode (with privacy controls)
+- Add custom wake word training
+
+### Privacy Considerations
+
+- Always request microphone permissions explicitly
+- Provide visual indicator when listening
+- Allow users to disable voice features
+- Process voice locally when possible
+- Clear voice data after processing
+- Provide opt-out for cloud-based voice services
+
+### Cost Analysis
+
+| Solution | Setup Cost | Ongoing Cost | Notes |
+|----------|------------|--------------|-------|
+| Web Speech API | $0 | $0 | Browser-based, free |
+| Porcupine Wake Word | $0 | $0-55/month | Free tier: 3 devices, Paid: unlimited |
+| Vosk | $0 | $0 | Open source, self-hosted |
+| iOS Speech Recognition | $0 | $0 | Built into iOS |
+| Android Speech Recognition | $0 | $0 | Built into Android |
+
+**Total Estimated Cost (Basic Voice):** $0/month
+**Total Estimated Cost (Wake-Word Detection):** $0-55/month
+
+This voice interface implementation provides hands-free operation for PASSFEL across all devices, supporting both push-to-talk and wake-word activation modes as mentioned in the PDF.
+
+---
+
+## Remote Desktop Fallback for TV Display
+
+As mentioned in the PDF, for TV display scenarios where casting may not be suitable, remote desktop solutions like Jump Desktop or VNC can be used as a fallback.
+
+### Jump Desktop
+
+**Overview:**
+Jump Desktop is a commercial remote desktop solution that provides high-quality screen sharing to TVs and other displays.
+
+**Key Features:**
+- Low latency streaming
+- Cross-platform (Windows, macOS, Linux, iOS, Android, Apple TV)
+- Fluid Remote Desktop (FRD) protocol for smooth performance
+- Support for multiple monitors
+- Keyboard and mouse input
+
+**Implementation:**
+```javascript
+// Jump Desktop is primarily a client application
+// For PASSFEL, this would be used as:
+// 1. Install Jump Desktop on Apple TV or Android TV
+// 2. Run PASSFEL on desktop/server
+// 3. Connect to PASSFEL via Jump Desktop for TV display
+
+// Backend: Expose PASSFEL dashboard via RDP or VNC
+// No special code needed - Jump Desktop handles the connection
+```
+
+**Use Case:**
+- User wants to display PASSFEL dashboard on TV
+- Chromecast/AirPlay not available or unsuitable
+- Full desktop experience on TV needed
+
+**Pricing:**
+- Jump Desktop: $14.99 one-time purchase per platform
+- Jump Desktop Connect (server): Free
+
+### VNC (Virtual Network Computing)
+
+**Overview:**
+VNC is an open-source remote desktop protocol that can stream PASSFEL to TV displays.
+
+**Implementation:**
+
+```bash
+# Server setup (Linux/macOS)
+# Install TigerVNC server
+sudo apt-get install tigervnc-standalone-server  # Linux
+brew install tiger-vnc  # macOS
+
+# Start VNC server
+vncserver :1 -geometry 1920x1080 -depth 24
+
+# Set password
+vncpasswd
+```
+
+**Client Setup:**
+```javascript
+// For web-based VNC client (noVNC)
+import RFB from '@novnc/novnc/core/rfb';
+
+class VNCClient {
+  constructor(containerId) {
+    this.container = document.getElementById(containerId);
+    this.rfb = null;
+  }
+  
+  connect(host, port, password) {
+    const url = `ws://${host}:${port}`;
+    
+    this.rfb = new RFB(this.container, url, {
+      credentials: { password: password }
+    });
+    
+    this.rfb.addEventListener('connect', () => {
+      console.log('Connected to VNC server');
+    });
+    
+    this.rfb.addEventListener('disconnect', () => {
+      console.log('Disconnected from VNC server');
+    });
+    
+    this.rfb.scaleViewport = true;
+    this.rfb.resizeSession = true;
+  }
+  
+  disconnect() {
+    if (this.rfb) {
+      this.rfb.disconnect();
+    }
+  }
+}
+
+// Usage
+const vncClient = new VNCClient('vnc-container');
+vncClient.connect('192.168.1.100', 5901, 'password');
+```
+
+**Android TV VNC Client:**
+- Use bVNC or VNC Viewer app from Play Store
+- Connect to PASSFEL server running VNC
+- Display full PASSFEL interface on TV
+
+**Apple TV:**
+- Use Screens app (VNC client for Apple TV)
+- Connect to PASSFEL server
+- Control with Apple TV remote
+
+### Implementation Recommendations
+
+1. **Primary: Chromecast/AirPlay** - Use for simple dashboard casting
+2. **Fallback: Jump Desktop** - Use when full desktop experience needed on TV
+3. **Alternative: VNC** - Use for open-source solution or when Jump Desktop not available
+
+**When to Use Remote Desktop:**
+- User needs full interactivity on TV (not just display)
+- Casting protocols not supported by TV
+- Need to access full PASSFEL interface from TV
+- Multi-monitor setup with TV as secondary display
+
+This remote desktop fallback ensures PASSFEL can be displayed on any TV or large display, even when modern casting protocols are unavailable.
+
+---
+
 ## Conclusion
 
 For PASSFEL's multi-device access (#6), the recommended implementation approach is:
 
 1. **Start with PWA** as the primary access method (works on all devices, single codebase, $0 cost)
-2. **Add Capacitor wrapper** for app store presence and enhanced mobile features ($124/year)
-3. **Consider Electron or Tauri** for native desktop experience (optional, $0-299/year)
+2. **Add voice interface** with push-to-talk using Web Speech API (free, browser-based)
+3. **Add Capacitor wrapper** for app store presence and enhanced mobile features ($124/year)
 4. **Integrate Chromecast/AirPlay** for TV display (free, simple integration)
-5. **Implement robust authentication and sync** for seamless cross-device experience
+5. **Add remote desktop fallback** (Jump Desktop or VNC) for TV display when casting unavailable
+6. **Consider Electron or Tauri** for native desktop experience (optional, $0-299/year)
+7. **Implement wake-word detection** for hands-free operation (optional, $0-55/month)
+8. **Implement robust authentication and sync** for seamless cross-device experience
 
-This phased approach provides comprehensive multi-device access while minimizing development complexity and costs. The PWA-first strategy ensures immediate availability across all platforms with a single codebase, while optional native wrappers provide enhanced features and app store presence when needed.
+This phased approach provides comprehensive multi-device access while minimizing development complexity and costs. The PWA-first strategy ensures immediate availability across all platforms with a single codebase, while voice interface enables hands-free operation, and remote desktop fallback ensures TV display compatibility in all scenarios.
 
 ---
 
-*Last Updated: 2025-01-29*
+*Last Updated: 2025-10-29*
 *Research conducted for PASSFEL project feature #6 (Multi-Device Access) by Devin*

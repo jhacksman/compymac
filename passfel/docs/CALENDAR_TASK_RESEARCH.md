@@ -500,19 +500,357 @@ curl -X POST "https://api.notion.com/v1/databases/DATABASE_ID/query" \
 # Response: {"results": [...], "has_more": false}
 ```
 
+## ICS Format and Calendar Interoperability
+
+As mentioned in the PDF, the assistant should support standard calendar formats like ICS (iCalendar) for interoperability between different calendar systems. This enables seamless import/export of calendar data across platforms.
+
+### ICS Format Overview
+
+**ICS (iCalendar)** is the standard calendar data exchange format defined in RFC 5545. It's a text-based format that represents calendar events, tasks, and other calendar objects in a platform-independent way.
+
+**Key Features:**
+- Human-readable text format
+- Supports events, tasks (todos), journals, free/busy time
+- Handles recurring events with complex patterns
+- Time zone support
+- Attachment and alarm support
+- Widely supported across all major calendar applications
+
+### ICS File Structure
+
+```ics
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//PASSFEL//Calendar Export//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+
+BEGIN:VEVENT
+UID:event-001@passfel.example.com
+DTSTAMP:20251029T120000Z
+DTSTART:20251030T140000Z
+DTEND:20251030T150000Z
+SUMMARY:Team Meeting
+DESCRIPTION:Weekly team sync to discuss project progress and blockers.
+LOCATION:Conference Room A
+STATUS:CONFIRMED
+SEQUENCE:0
+CREATED:20251029T120000Z
+LAST-MODIFIED:20251029T120000Z
+BEGIN:VALARM
+TRIGGER:-PT15M
+ACTION:DISPLAY
+DESCRIPTION:Reminder: Team Meeting in 15 minutes
+END:VALARM
+END:VEVENT
+
+BEGIN:VTODO
+UID:todo-001@passfel.example.com
+DTSTAMP:20251029T120000Z
+DTSTART:20251029T090000Z
+DUE:20251031T170000Z
+SUMMARY:Complete project documentation
+DESCRIPTION:Write comprehensive documentation for PASSFEL calendar integration
+PRIORITY:1
+STATUS:NEEDS-ACTION
+PERCENT-COMPLETE:0
+END:VTODO
+
+END:VCALENDAR
+```
+
+### Python Implementation
+
+```python
+from icalendar import Calendar, Event, Todo, Alarm
+from datetime import datetime, timedelta
+import pytz
+
+class ICSCalendarExporter:
+    def __init__(self):
+        self.calendar = Calendar()
+        self.calendar.add('prodid', '-//PASSFEL//Calendar Export//EN')
+        self.calendar.add('version', '2.0')
+        self.calendar.add('calscale', 'GREGORIAN')
+        self.calendar.add('method', 'PUBLISH')
+    
+    def add_event(self, summary, start_time, end_time, description=None, 
+                  location=None, alarm_minutes=None):
+        """Add an event to the calendar"""
+        event = Event()
+        
+        # Required fields
+        event.add('uid', f"{summary.replace(' ', '-').lower()}-{start_time.timestamp()}@passfel.example.com")
+        event.add('dtstamp', datetime.now(pytz.UTC))
+        event.add('dtstart', start_time)
+        event.add('dtend', end_time)
+        event.add('summary', summary)
+        
+        # Optional fields
+        if description:
+            event.add('description', description)
+        if location:
+            event.add('location', location)
+        
+        event.add('status', 'CONFIRMED')
+        event.add('sequence', 0)
+        event.add('created', datetime.now(pytz.UTC))
+        event.add('last-modified', datetime.now(pytz.UTC))
+        
+        # Add alarm/reminder
+        if alarm_minutes:
+            alarm = Alarm()
+            alarm.add('trigger', timedelta(minutes=-alarm_minutes))
+            alarm.add('action', 'DISPLAY')
+            alarm.add('description', f'Reminder: {summary} in {alarm_minutes} minutes')
+            event.add_component(alarm)
+        
+        self.calendar.add_component(event)
+        return event
+    
+    def add_recurring_event(self, summary, start_time, end_time, 
+                           recurrence_rule, description=None):
+        """Add a recurring event"""
+        event = Event()
+        
+        event.add('uid', f"{summary.replace(' ', '-').lower()}-recurring@passfel.example.com")
+        event.add('dtstamp', datetime.now(pytz.UTC))
+        event.add('dtstart', start_time)
+        event.add('dtend', end_time)
+        event.add('summary', summary)
+        
+        if description:
+            event.add('description', description)
+        
+        # Add recurrence rule
+        # Example: FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10
+        event.add('rrule', recurrence_rule)
+        
+        self.calendar.add_component(event)
+        return event
+    
+    def add_todo(self, summary, due_date, description=None, priority=None):
+        """Add a todo/task to the calendar"""
+        todo = Todo()
+        
+        todo.add('uid', f"{summary.replace(' ', '-').lower()}-{due_date.timestamp()}@passfel.example.com")
+        todo.add('dtstamp', datetime.now(pytz.UTC))
+        todo.add('dtstart', datetime.now(pytz.UTC))
+        todo.add('due', due_date)
+        todo.add('summary', summary)
+        
+        if description:
+            todo.add('description', description)
+        
+        if priority:
+            todo.add('priority', priority)  # 1 (highest) to 9 (lowest)
+        
+        todo.add('status', 'NEEDS-ACTION')
+        todo.add('percent-complete', 0)
+        
+        self.calendar.add_component(todo)
+        return todo
+    
+    def export_to_file(self, filename):
+        """Export calendar to ICS file"""
+        with open(filename, 'wb') as f:
+            f.write(self.calendar.to_ical())
+    
+    def export_to_string(self):
+        """Export calendar as string"""
+        return self.calendar.to_ical().decode('utf-8')
+
+# Usage Example
+exporter = ICSCalendarExporter()
+
+# Add a simple event
+exporter.add_event(
+    summary="Team Meeting",
+    start_time=datetime(2025, 10, 30, 14, 0, tzinfo=pytz.UTC),
+    end_time=datetime(2025, 10, 30, 15, 0, tzinfo=pytz.UTC),
+    description="Weekly team sync",
+    location="Conference Room A",
+    alarm_minutes=15
+)
+
+# Add a recurring event (every Monday, Wednesday, Friday for 10 occurrences)
+exporter.add_recurring_event(
+    summary="Daily Standup",
+    start_time=datetime(2025, 10, 29, 9, 0, tzinfo=pytz.UTC),
+    end_time=datetime(2025, 10, 29, 9, 15, tzinfo=pytz.UTC),
+    recurrence_rule={'FREQ': 'WEEKLY', 'BYDAY': ['MO', 'WE', 'FR'], 'COUNT': 10},
+    description="Quick daily sync"
+)
+
+# Add a todo
+exporter.add_todo(
+    summary="Complete project documentation",
+    due_date=datetime(2025, 10, 31, 17, 0, tzinfo=pytz.UTC),
+    description="Write comprehensive docs",
+    priority=1
+)
+
+# Export to file
+exporter.export_to_file('passfel_calendar.ics')
+print("Calendar exported to passfel_calendar.ics")
+```
+
+### ICS Import Implementation
+
+```python
+from icalendar import Calendar
+from datetime import datetime
+
+class ICSCalendarImporter:
+    def __init__(self, ics_file_path):
+        with open(ics_file_path, 'rb') as f:
+            self.calendar = Calendar.from_ical(f.read())
+    
+    def extract_events(self):
+        """Extract all events from ICS file"""
+        events = []
+        
+        for component in self.calendar.walk():
+            if component.name == "VEVENT":
+                event = {
+                    'uid': str(component.get('uid')),
+                    'summary': str(component.get('summary')),
+                    'start': component.get('dtstart').dt,
+                    'end': component.get('dtend').dt,
+                    'description': str(component.get('description', '')),
+                    'location': str(component.get('location', '')),
+                    'status': str(component.get('status', 'TENTATIVE'))
+                }
+                
+                # Handle recurrence
+                if component.get('rrule'):
+                    event['recurrence'] = component.get('rrule').to_ical().decode('utf-8')
+                
+                events.append(event)
+        
+        return events
+    
+    def extract_todos(self):
+        """Extract all todos from ICS file"""
+        todos = []
+        
+        for component in self.calendar.walk():
+            if component.name == "VTODO":
+                todo = {
+                    'uid': str(component.get('uid')),
+                    'summary': str(component.get('summary')),
+                    'due': component.get('due').dt if component.get('due') else None,
+                    'description': str(component.get('description', '')),
+                    'priority': int(component.get('priority', 0)),
+                    'status': str(component.get('status', 'NEEDS-ACTION')),
+                    'percent_complete': int(component.get('percent-complete', 0))
+                }
+                
+                todos.append(todo)
+        
+        return todos
+
+# Usage Example
+importer = ICSCalendarImporter('imported_calendar.ics')
+
+events = importer.extract_events()
+print(f"Found {len(events)} events:")
+for event in events:
+    print(f"  - {event['summary']} on {event['start']}")
+
+todos = importer.extract_todos()
+print(f"\nFound {len(todos)} todos:")
+for todo in todos:
+    print(f"  - {todo['summary']} (due: {todo['due']})")
+```
+
+### Integration with Calendar Systems
+
+**Google Calendar:**
+```python
+# Export Google Calendar events to ICS
+def export_google_calendar_to_ics(service, calendar_id='primary'):
+    events_result = service.events().list(calendarId=calendar_id).execute()
+    events = events_result.get('items', [])
+    
+    exporter = ICSCalendarExporter()
+    
+    for event in events:
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        end = event['end'].get('dateTime', event['end'].get('date'))
+        
+        exporter.add_event(
+            summary=event.get('summary', 'No Title'),
+            start_time=datetime.fromisoformat(start.replace('Z', '+00:00')),
+            end_time=datetime.fromisoformat(end.replace('Z', '+00:00')),
+            description=event.get('description'),
+            location=event.get('location')
+        )
+    
+    return exporter.export_to_string()
+```
+
+**CalDAV/Apple Calendar:**
+```python
+# CalDAV already uses ICS format natively
+import caldav
+
+def sync_caldav_to_ics(caldav_url, username, password):
+    client = caldav.DAVClient(url=caldav_url, username=username, password=password)
+    principal = client.principal()
+    calendars = principal.calendars()
+    
+    exporter = ICSCalendarExporter()
+    
+    for calendar in calendars:
+        events = calendar.events()
+        for event in events:
+            # CalDAV events are already in ICS format
+            ics_data = event.data
+            # Parse and add to exporter
+            imported_cal = Calendar.from_ical(ics_data)
+            for component in imported_cal.walk():
+                if component.name == "VEVENT":
+                    exporter.calendar.add_component(component)
+    
+    return exporter.export_to_string()
+```
+
+### Use Cases for PASSFEL
+
+1. **Calendar Backup**: Export all calendar data to ICS for backup
+2. **Cross-Platform Sync**: Import/export between different calendar systems
+3. **Event Sharing**: Share individual events or entire calendars via ICS files
+4. **Migration**: Move calendar data when switching calendar providers
+5. **Integration**: Enable third-party apps to consume calendar data
+6. **Offline Access**: Store calendar data locally in standard format
+
+### Key Benefits
+
+- **Universal Compatibility**: Works with Google Calendar, Apple Calendar, Outlook, Thunderbird, and virtually all calendar applications
+- **Human-Readable**: Text format can be inspected and edited manually if needed
+- **Standard-Based**: RFC 5545 ensures long-term compatibility
+- **Feature-Rich**: Supports complex scenarios like recurring events, time zones, alarms
+- **No Vendor Lock-in**: Calendar data remains portable across platforms
+
+This ICS implementation ensures PASSFEL can interoperate with any calendar system, providing users with flexibility and data portability as emphasized in the PDF's multi-device access requirements.
+
+---
+
 ## Conclusion
 
 For PASSFEL's calendar, task, and note management requirements, the recommended implementation approach is:
 
 1. **Start with Google Calendar API** for calendar management due to its excellent documentation, free tier, and comprehensive features
 2. **Implement Joplin API** for note-taking and task management, providing privacy-focused local storage
-3. **Add Notion API** for team collaboration features and rich content management
-4. **Consider CalDAV** for Apple ecosystem integration
-5. **Evaluate Obsidian** for advanced knowledge management in future phases
+3. **Add ICS format support** for calendar import/export and interoperability (as mentioned in PDF)
+4. **Add Notion API** for team collaboration features and rich content management
+5. **Consider CalDAV** for Apple ecosystem integration and standards-based calendar access
+6. **Evaluate Obsidian** for advanced knowledge management in future phases
 
-This phased approach balances functionality, implementation complexity, and user privacy while providing a solid foundation for PASSFEL's productivity features.
+This phased approach balances functionality, implementation complexity, and user privacy while providing a solid foundation for PASSFEL's productivity features. The inclusion of ICS format support ensures calendar data portability and interoperability across all platforms.
 
 ---
 
-*Last Updated: 2025-01-29*
+*Last Updated: 2025-10-29*
 *Research conducted for PASSFEL project by Devin*

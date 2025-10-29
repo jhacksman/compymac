@@ -6,6 +6,8 @@ An AI-powered personal assistant that integrates seamlessly into daily life, pro
 
 PASSFEL aims to be the comprehensive personal assistant that technology enthusiasts have dreamed about for years - a single, intelligent interface that handles all aspects of daily life through natural language interaction.
 
+**Planning Document**: See [Planning-an-AI-Powered-Personal-Assistant.pdf](docs/Planning-an-AI-Powered-Personal-Assistant.pdf) for the complete project vision and requirements.
+
 ## Core Features
 
 The following features are numbered 1-6 for tracking and implementation purposes:
@@ -42,9 +44,10 @@ The following features are numbered 1-6 for tracking and implementation purposes
 
 ### 6. Multi-Device Access (Mobile, Desktop, TV)
 - **Progressive Web App**: Primary access method for all devices
+- **Voice Interface**: Push-to-talk and wake-word detection for hands-free operation
 - **Mobile Apps**: Optional Capacitor wrapper for app store presence
 - **Desktop Apps**: Electron or Tauri for native desktop experience
-- **TV Display**: Chromecast/AirPlay casting integration
+- **TV Display**: Chromecast/AirPlay casting integration, remote desktop fallback (Jump Desktop/VNC)
 - **Research Documentation**: [MULTI_DEVICE_ACCESS_RESEARCH.md](docs/MULTI_DEVICE_ACCESS_RESEARCH.md)
 
 ## Architecture

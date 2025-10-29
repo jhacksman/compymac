@@ -749,6 +749,37 @@ asyncio.run(control_apple_tv())
 
 ---
 
+### Remote Desktop Fallback for TV Display
+
+As mentioned in the PDF, when casting protocols (Chromecast/AirPlay) are not suitable or available, remote desktop solutions like Jump Desktop or VNC can be used as a fallback for displaying PASSFEL on TV screens.
+
+**Jump Desktop:**
+- Commercial remote desktop solution ($14.99 one-time per platform)
+- Available for Apple TV and Android TV
+- Low latency, high-quality streaming
+- Full desktop interaction from TV remote
+
+**VNC (Virtual Network Computing):**
+- Open-source remote desktop protocol
+- Free VNC clients available for Apple TV (Screens app) and Android TV (bVNC, VNC Viewer)
+- Requires VNC server running on PASSFEL host
+- Good fallback when Jump Desktop not available
+
+**Use Cases:**
+- TV doesn't support Chromecast or AirPlay
+- Need full interactivity on TV (not just display)
+- Want to access complete PASSFEL interface from TV
+- Multi-monitor setup with TV as secondary display
+
+**Implementation:**
+1. **Primary**: Use Chromecast/AirPlay for simple dashboard casting
+2. **Fallback**: Use Jump Desktop or VNC when casting unavailable or full desktop experience needed
+3. **Setup**: Install VNC server on PASSFEL host, install VNC client on TV device
+
+This ensures PASSFEL can be displayed on any TV or large display, even when modern casting protocols are unavailable. See MULTI_DEVICE_ACCESS_RESEARCH.md for detailed implementation examples.
+
+---
+
 ## Implementation Recommendations
 
 ### Phase 1: Core Platform (Immediate Implementation)
@@ -1071,5 +1102,5 @@ This phased approach balances functionality, cost, and implementation complexity
 
 ---
 
-*Last Updated: 2025-01-29*
+*Last Updated: 2025-10-29*
 *Research conducted for PASSFEL project feature #5 (Smart Home Integration) by Devin*
