@@ -6,11 +6,15 @@
 
 PASSFEL (Personal ASSistant For Everyday Life) requires a self-hosted LLM as the central orchestrator for all user interactions and data sources. This document evaluates SOTA models for deployment on the ASUS Ascent GX10 (NVIDIA GB10 Grace Blackwell, 128GB unified memory).
 
+**FINAL DECISION (2025-10-29):** ✅ **Qwen3-Next-80B-A3B-Thinking selected as the production model for PASSFEL**
+
 **Critical Findings:**
 1. **Llama models are NOT SOTA** - Llama 3.1/3.3 70B rank poorly on tool-calling benchmarks (17-31% BFCL accuracy)
 2. **Tool-calling performance is critical** - PASSFEL requires strong function-calling for weather/news/calendar/finance/Home Assistant
 3. **Qwen3-Next-80B-A3B-Thinking is the winner** - 72.0% BFCL-v3, Apache 2.0 license, fits GX10 with FP8 (90-100GB)
 4. **Leaderboard rankings matter** - LMSys Arena (human preference) and BFCL (tool-calling) are more relevant than older benchmarks
+5. **Qwen3-Max is NOT compatible** - 1T+ params requires 500GB+ memory (GX10 has 128GB)
+6. **No Nemotron fine-tunes exist** - Qwen3-Next-80B-A3B-Thinking is too new (released Sep 2025)
 
 **Recommended Model:** Qwen3-Next-80B-A3B-Thinking (80B total, 3B activated MoE) with FP8 quantization
 
