@@ -139,6 +139,13 @@ from langchain_core.runnables import Runnable
 class MockLLM(BaseLLM, RunnableSerializable[Dict, str]):
     """Mock LLM for testing."""
 
+    def __setattr__(self, name, value):
+        """Allow monkeypatching _generate and _agenerate for tests."""
+        if name in ("_generate", "_agenerate"):
+            object.__setattr__(self, name, value)
+            return
+        return super().__setattr__(name, value)
+
     def get_name(self) -> str:
         """Get name of the runnable."""
         return "MockLLM"
