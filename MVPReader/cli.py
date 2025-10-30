@@ -137,7 +137,7 @@ Examples:
         print(f"  Slack: {'✓ Configured' if self.settings.slack_token else '✗ Not configured'}")
         print(f"  Mastodon: {'✓ Configured' if self.settings.mastodon_token else '✗ Not configured'}")
         print(f"  Bluesky: {'✓ Configured' if self.settings.bluesky_username else '✗ Not configured'}")
-        print(f"  OpenAI: {'✓ Configured' if self.settings.openai_api_key else '✗ Not configured'}")
+        print(f"  Venice.ai: {'✓ Configured' if self.settings.venice_api_key else '✗ Not configured'}")
         
         print("\nUser Interests:")
         print(f"  Keywords: {', '.join(self.settings.user_keywords)}")

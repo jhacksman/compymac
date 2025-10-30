@@ -47,8 +47,9 @@ class Settings:
                     "username": os.getenv("BLUESKY_USERNAME", ""),
                     "password": os.getenv("BLUESKY_PASSWORD", "")
                 },
-                "openai": {
-                    "api_key": os.getenv("OPENAI_API_KEY", "")
+                "venice": {
+                    "api_key": os.getenv("VENICE_API_KEY", ""),
+                    "base_url": os.getenv("VENICE_BASE_URL", "https://api.venice.ai")
                 }
             },
             "user_interests": {
@@ -63,7 +64,7 @@ class Settings:
                 "polling_interval_minutes": 5
             },
             "ai_settings": {
-                "model": "gpt-4",
+                "model": "qwen3-next-80b",
                 "max_tokens": 1000,
                 "temperature": 0.7
             }
@@ -95,8 +96,12 @@ class Settings:
         return self.config["api_credentials"]["bluesky"]["password"]
     
     @property
-    def openai_api_key(self) -> str:
-        return self.config["api_credentials"]["openai"]["api_key"]
+    def venice_api_key(self) -> str:
+        return self.config["api_credentials"]["venice"]["api_key"]
+    
+    @property
+    def venice_base_url(self) -> str:
+        return self.config["api_credentials"]["venice"]["base_url"]
     
     @property
     def user_keywords(self) -> List[str]:

@@ -3,12 +3,13 @@ AI Analyzer
 Uses LLM to analyze feed events and generate summaries and suggestions
 """
 
-import openai
+import asyncio
 from typing import List, Dict, Any
 from datetime import datetime
 
 from ..core.models import FeedEvent, AISummary
 from ..config.settings import Settings
+from .venice_llm_client import VeniceLLMClient
 
 
 class AIAnalyzer:
@@ -25,8 +26,11 @@ class AIAnalyzer:
             settings: Settings object with API credentials
         """
         self.settings = settings
-        openai.api_key = settings.openai_api_key
-        self.model = settings.ai_model
+        self.llm_client = VeniceLLMClient(
+            api_key=settings.venice_api_key,
+            base_url=settings.venice_base_url,
+            model=settings.ai_model
+        )
     
     def analyze_events(self, events: List[FeedEvent]) -> AISummary:
         """
@@ -50,23 +54,27 @@ class AIAnalyzer:
         prompt = self._build_prompt(events)
         
         try:
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": self._get_system_prompt()
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=1000
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            content = loop.run_until_complete(
+                self.llm_client.chat(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": self._get_system_prompt()
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=1000
+                )
             )
             
-            content = response.choices[0].message.content
+            loop.close()
             highlights, suggestions = self._parse_response(content)
             
             sources = list(set(e.source.value for e in events))

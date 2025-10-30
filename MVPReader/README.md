@@ -10,7 +10,7 @@ MVPReader serves as a unified feed reader that retrieves notifications and posts
 
 - **Multi-Platform Integration**: Connects to Slack, Mastodon, and Bluesky
 - **Intelligent Filtering**: Tags and filters events based on your interests and keywords
-- **AI-Powered Analysis**: Uses GPT-4 to generate summaries and suggestions
+- **AI-Powered Analysis**: Uses Venice.ai (qwen3-next-80b) to generate summaries and suggestions
 - **Feedback System**: Upvote/downvote suggestions to improve relevance over time
 - **Local Storage**: SQLite database for event storage with configurable retention
 - **CLI Interface**: Simple command-line interface for interaction
@@ -54,7 +54,8 @@ export MASTODON_ACCESS_TOKEN="your-token"
 export MASTODON_INSTANCE_URL="https://mastodon.social"
 export BLUESKY_USERNAME="your-username.bsky.social"
 export BLUESKY_PASSWORD="your-app-password"
-export OPENAI_API_KEY="sk-your-key"
+export VENICE_API_KEY="your-venice-api-key"
+export VENICE_BASE_URL="https://api.venice.ai"
 ```
 
 ## Configuration
@@ -76,8 +77,9 @@ export OPENAI_API_KEY="sk-your-key"
 1. Use your Bluesky username (e.g., username.bsky.social)
 2. Generate an App Password in settings (not your main password)
 
-#### OpenAI
-1. Get API key from https://platform.openai.com/api-keys
+#### Venice.ai
+1. Get API key from https://venice.ai
+2. Default model is qwen3-next-80b (configurable in settings)
 
 ### User Interests
 
@@ -146,7 +148,7 @@ print(f"Suggestions: {summary.suggestions}")
 2. **Transform**: Normalizes data into a common `FeedEvent` format
 3. **Filter**: Applies interest-based filtering and relevance scoring
 4. **Store**: Saves events to local SQLite database
-5. **Analyze**: Uses GPT-4 to generate summaries and suggestions
+5. **Analyze**: Uses Venice.ai LLM to generate summaries and suggestions
 6. **Present**: Displays results in formatted output
 
 ## Data Flow
@@ -173,7 +175,7 @@ Events with ignore keywords are filtered out. Only relevant events (score > 0 or
 
 ## AI Analysis
 
-The system uses GPT-4 to:
+The system uses Venice.ai (qwen3-next-80b model) to:
 1. Identify important events requiring attention
 2. Summarize key highlights in concise format
 3. Suggest appropriate actions or responses
@@ -211,7 +213,7 @@ Users can upvote/downvote suggestions to indicate relevance. Feedback is logged 
 - **Read-only**: MVP does not post or reply (future feature)
 - **No long-term memory**: Relies on LLM context window
 - **Rate limits**: Respects API rate limits (may delay updates)
-- **Token costs**: OpenAI API usage incurs costs
+- **API costs**: Venice.ai API usage may incur costs
 
 ## Troubleshooting
 
@@ -221,7 +223,7 @@ Users can upvote/downvote suggestions to indicate relevance. Feedback is logged 
 - Check API rate limits
 
 ### AI analysis fails
-- Verify OpenAI API key
+- Verify Venice.ai API key
 - Check API quota/billing
 - Review error messages in output
 
@@ -247,4 +249,4 @@ MIT License - See LICENSE file for details
 - Built for integration with CompyMac project
 - Inspired by ElizaOS memory architecture
 - Uses AT Protocol for Bluesky integration
-- Leverages OpenAI GPT-4 for analysis
+- Leverages Venice.ai for LLM analysis
