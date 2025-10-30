@@ -1,0 +1,50 @@
+{
+  "api_credentials": {
+    "slack": {
+      "token": "xoxb-your-slack-bot-token",
+      "workspace": "CtrlH"
+    },
+    "mastodon": {
+      "access_token": "your-mastodon-access-token",
+      "instance_url": "https://mastodon.social"
+    },
+    "bluesky": {
+      "username": "your-username.bsky.social",
+      "password": "your-app-password"
+    },
+    "openai": {
+      "api_key": "sk-your-openai-api-key"
+    }
+  },
+  "user_interests": {
+    "keywords": [
+      "AI",
+      "coding",
+      "machine learning",
+      "python",
+      "LLM",
+      "software development"
+    ],
+    "topics": [
+      "AI research",
+      "software development",
+      "technology",
+      "programming"
+    ],
+    "priority_channels": [],
+    "ignore_keywords": [
+      "sports",
+      "weather"
+    ]
+  },
+  "feed_settings": {
+    "retention_hours": 48,
+    "max_events_per_source": 100,
+    "polling_interval_minutes": 5
+  },
+  "ai_settings": {
+    "model": "gpt-4",
+    "max_tokens": 1000,
+    "temperature": 0.7
+  }
+}
