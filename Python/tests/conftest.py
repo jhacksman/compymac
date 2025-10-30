@@ -61,11 +61,19 @@ class MockLLM(Runnable):
     
     class Config:
         extra = "allow"
+        arbitrary_types_allowed = True
     
     def __init__(self, response=None):
         super().__init__()
         self._response = response if response is not None else ""
         self._generate = None
+    
+    def __setattr__(self, name, value):
+        """Allow setting _generate for test monkeypatching."""
+        if name == "_generate":
+            object.__setattr__(self, name, value)
+            return
+        super().__setattr__(name, value)
     
     def _render(self, input_):
         """Render response based on input."""
