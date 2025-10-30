@@ -3,13 +3,9 @@ Venice.ai LLM Client
 Adapter for Venice.ai API using the existing VeniceClient
 """
 
-import sys
-import os
 import asyncio
 import aiohttp
 from typing import List, Dict, Any, Optional
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'Python'))
 
 from .llm_client import LLMClient
 
