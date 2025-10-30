@@ -181,14 +181,14 @@ class LibrarianAgent:
         self,
         memory_id: str,
         content: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Union[Dict[str, Any], MemoryMetadata]] = None
     ) -> Dict[str, Any]:
         """Update an existing memory's content or metadata.
         
         Args:
             memory_id: ID of memory to update
             content: Optional new content
-            metadata: Optional metadata updates
+            metadata: Optional metadata updates (can be dict or MemoryMetadata)
             
         Returns:
             Updated memory entry
@@ -215,6 +215,8 @@ class LibrarianAgent:
             if metadata is not None:
                 if isinstance(memory["metadata"], MemoryMetadata):
                     memory["metadata"] = memory["metadata"].to_dict()
+                if isinstance(metadata, MemoryMetadata):
+                    metadata = metadata.to_dict()
                 memory["metadata"].update(metadata)
                 
             # Update in Venice.ai
