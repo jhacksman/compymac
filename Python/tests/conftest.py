@@ -12,6 +12,9 @@ from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
 from langchain_core.runnables import Runnable
+from pydantic.v1 import PrivateAttr
+from typing import Any, List
+from langchain_core.outputs import LLMResult, Generation
 
 try:
     from langchain.chains import LLMChain
@@ -56,7 +59,10 @@ class MockResponse:
 
 class MockLLM(Runnable):
     """Mock LLM for testing that implements Runnable interface."""
+    _generate: Any = PrivateAttr(default=None)
+    
     def __init__(self, response=None):
+        super().__init__()
         self._response = response if response is not None else ""
         self._generate = None
     
@@ -69,6 +75,17 @@ class MockLLM(Runnable):
         if isinstance(self._response, (dict, list)):
             return json.dumps(self._response)
         return str(self._response)
+    
+    def generate(self, prompts: List[str], **kwargs) -> LLMResult:
+        """Generate method for BaseLanguageModel compatibility."""
+        if callable(self._generate):
+            return self._generate(prompts, **kwargs)
+        texts = [self._render(prompts[0] if prompts else "")]
+        return LLMResult(generations=[[Generation(text=t) for t in texts]])
+    
+    async def agenerate(self, prompts: List[str], **kwargs) -> LLMResult:
+        """Async generate method for BaseLanguageModel compatibility."""
+        return self.generate(prompts, **kwargs)
     
     def invoke(self, input, config=None, **kwargs):
         """Runnable interface: invoke."""
