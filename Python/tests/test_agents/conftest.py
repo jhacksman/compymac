@@ -22,18 +22,22 @@ try:
     from langchain_core.runnables import RunnableSequence
     
     if not hasattr(LLMChain, "predict"):
-        def _llmchain_predict(self, **kwargs):
-            return self.invoke(kwargs)
-        async def _llmchain_apredict(self, **kwargs):
-            return await self.ainvoke(kwargs)
+        def _llmchain_predict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return self.invoke(input_data)
+        async def _llmchain_apredict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return await self.ainvoke(input_data)
         LLMChain.predict = _llmchain_predict
         LLMChain.apredict = _llmchain_apredict
     
     if not hasattr(RunnableSequence, "predict"):
-        def _rs_predict(self, **kwargs):
-            return self.invoke(kwargs)
-        async def _rs_apredict(self, **kwargs):
-            return await self.ainvoke(kwargs)
+        def _rs_predict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return self.invoke(input_data)
+        async def _rs_apredict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return await self.ainvoke(input_data)
         RunnableSequence.predict = _rs_predict
         RunnableSequence.apredict = _rs_apredict
 except ImportError:
