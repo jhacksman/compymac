@@ -12,7 +12,25 @@ from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
 
-# Mock LLM for testing
+class MockResponse:
+    """Mock HTTP response for testing."""
+    def __init__(self, status_code=200, json_data=None, text="", content=b""):
+        self.status_code = status_code
+        self._json = json_data or {}
+        self.text = text
+        self.content = content
+    
+    @property
+    def ok(self):
+        return 200 <= self.status_code < 300
+    
+    def json(self):
+        return self._json
+    
+    def raise_for_status(self):
+        if not self.ok:
+            raise Exception(f"HTTP {self.status_code}")
+
 class MockLLM:
     """Mock LLM for testing."""
     def __init__(self, response=None):

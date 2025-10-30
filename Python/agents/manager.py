@@ -472,3 +472,5 @@ Action Input: The input for the tool
                 artifacts={},
                 error=str(e)
             )
+
+AgentManager = ManagerAgent
