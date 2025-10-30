@@ -1,0 +1,14 @@
+# MVPReader Dependencies
+
+# API Clients
+requests>=2.31.0
+openai>=1.3.0
+
+# Data Processing
+python-dateutil>=2.8.2
+
+# Optional: For better Mastodon support
+# Mastodon.py>=1.8.0
+
+# Optional: For better AT Protocol support
+# atproto>=0.0.1
