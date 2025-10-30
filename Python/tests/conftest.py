@@ -20,22 +20,62 @@ try:
     from langchain_core.runnables import RunnableSequence
     
     if not hasattr(LLMChain, "predict"):
-        def _llmchain_predict(self, **kwargs):
-            return self.invoke(kwargs)
-        async def _llmchain_apredict(self, **kwargs):
-            return await self.ainvoke(kwargs)
+        def _llmchain_predict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return self.invoke(input_data)
+        async def _llmchain_apredict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return await self.ainvoke(input_data)
         LLMChain.predict = _llmchain_predict
         LLMChain.apredict = _llmchain_apredict
     
     if not hasattr(RunnableSequence, "predict"):
-        def _rs_predict(self, **kwargs):
-            return self.invoke(kwargs)
-        async def _rs_apredict(self, **kwargs):
-            return await self.ainvoke(kwargs)
+        def _rs_predict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return self.invoke(input_data)
+        async def _rs_apredict(self, *args, **kwargs):
+            input_data = args[0] if args else kwargs
+            return await self.ainvoke(input_data)
         RunnableSequence.predict = _rs_predict
         RunnableSequence.apredict = _rs_apredict
+    
+    try:
+        from langchain.chains.llm import LLMChain as LLMChain2
+        if not hasattr(LLMChain2, "predict"):
+            LLMChain2.predict = _llmchain_predict
+            LLMChain2.apredict = _llmchain_apredict
+    except ImportError:
+        pass
+    
+    try:
+        from langchain_core.runnables.base import RunnableSequence as RunnableSequence2
+        if not hasattr(RunnableSequence2, "predict"):
+            RunnableSequence2.predict = _rs_predict
+            RunnableSequence2.apredict = _rs_apredict
+    except ImportError:
+        pass
 except ImportError:
     pass
+
+@pytest.fixture(scope="session", autouse=True)
+def patch_basellm_setattr():
+    """Patch BaseLLM.__setattr__ to allow monkeypatching _generate and _agenerate."""
+    try:
+        from langchain_core.language_models.llms import BaseLLM
+        
+        original_setattr = BaseLLM.__setattr__
+        
+        def patched_setattr(self, name, value):
+            if name in ("_generate", "_agenerate"):
+                object.__setattr__(self, name, value)
+                return
+            return original_setattr(self, name, value)
+        
+        BaseLLM.__setattr__ = patched_setattr
+        yield
+        BaseLLM.__setattr__ = original_setattr
+    except ImportError:
+        yield
 
 class MockResponse:
     """Mock HTTP response for testing."""
