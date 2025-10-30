@@ -85,7 +85,7 @@ class LibrarianAgent:
                             memory_entry = {
                                 "id": memory_id,
                                 "content": content,
-                                "metadata": metadata.to_dict()
+                                "metadata": metadata
                             }
                             self.recent_memories.append(memory_entry)
                             self._shared_memories.append(memory_entry)
@@ -104,7 +104,7 @@ class LibrarianAgent:
                             memory_entry = {
                                 "id": memory_id,
                                 "content": content,
-                                "metadata": metadata.to_dict()
+                                "metadata": metadata
                             }
                             self.recent_memories.append(memory_entry)
                             self._shared_memories.append(memory_entry)
@@ -213,11 +213,12 @@ class LibrarianAgent:
                 
             # Update metadata if provided
             if metadata is not None:
-                if isinstance(memory["metadata"], MemoryMetadata):
-                    memory["metadata"] = memory["metadata"].to_dict()
                 if isinstance(metadata, MemoryMetadata):
-                    metadata = metadata.to_dict()
-                memory["metadata"].update(metadata)
+                    memory["metadata"] = metadata
+                else:
+                    if isinstance(memory["metadata"], MemoryMetadata):
+                        memory["metadata"] = memory["metadata"].to_dict()
+                    memory["metadata"].update(metadata)
                 
             # Update in Venice.ai
             response = await self.venice_client.update_memory(
