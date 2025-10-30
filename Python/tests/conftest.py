@@ -127,8 +127,8 @@ class MockLLM(Runnable):
         return self._render(input_)
 
 @pytest.fixture
-def mock_llm():
-    """Create mock LLM."""
+def mock_llm_memory():
+    """Create mock LLM for memory tests."""
     return MockLLM()
 
 @pytest_asyncio.fixture
