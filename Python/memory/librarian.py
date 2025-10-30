@@ -213,6 +213,8 @@ class LibrarianAgent:
                 
             # Update metadata if provided
             if metadata is not None:
+                if isinstance(memory["metadata"], MemoryMetadata):
+                    memory["metadata"] = memory["metadata"].to_dict()
                 memory["metadata"].update(metadata)
                 
             # Update in Venice.ai
