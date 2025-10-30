@@ -52,6 +52,11 @@ class ManagerAgent:
         self.tools = self._setup_tools()
         if self._llm:
             self.agent_executor = self._setup_agent_executor()
+    
+    @property
+    def llm(self):
+        """Backward-compatible property for accessing LLM."""
+        return self._llm
         
     def _setup_tools(self) -> List[Tool]:
         """Set up available tools for the agent.
@@ -472,3 +477,5 @@ Action Input: The input for the tool
                 artifacts={},
                 error=str(e)
             )
+
+AgentManager = ManagerAgent

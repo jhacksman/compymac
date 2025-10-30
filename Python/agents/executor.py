@@ -44,6 +44,11 @@ class ExecutorAgent:
         
         # Set up execution chain
         self.execution_chain = self._setup_execution_chain()
+    
+    @property
+    def llm(self):
+        """Backward-compatible property for accessing LLM."""
+        return self._llm
         
     def _setup_execution_chain(self) -> LLMChain:
         """Set up the execution chain with LangChain.
