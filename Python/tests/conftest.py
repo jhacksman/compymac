@@ -58,6 +58,7 @@ class MockLLM(Runnable):
     """Mock LLM for testing that implements Runnable interface."""
     def __init__(self, response=None):
         self._response = response if response is not None else ""
+        self._generate = None
     
     def _render(self, input_):
         """Render response based on input."""
