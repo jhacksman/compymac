@@ -38,6 +38,22 @@ try:
             return await self.ainvoke(input_data)
         RunnableSequence.predict = _rs_predict
         RunnableSequence.apredict = _rs_apredict
+    
+    try:
+        from langchain.chains.llm import LLMChain as LLMChain2
+        if not hasattr(LLMChain2, "predict"):
+            LLMChain2.predict = _llmchain_predict
+            LLMChain2.apredict = _llmchain_apredict
+    except ImportError:
+        pass
+    
+    try:
+        from langchain_core.runnables.base import RunnableSequence as RunnableSequence2
+        if not hasattr(RunnableSequence2, "predict"):
+            RunnableSequence2.predict = _rs_predict
+            RunnableSequence2.apredict = _rs_apredict
+    except ImportError:
+        pass
 except ImportError:
     pass
 
