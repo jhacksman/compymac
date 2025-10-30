@@ -292,9 +292,10 @@ Response:""",
                 "context": context
             }
             
-            result = self.reflection_chain.predict(
-                result=json.dumps(reflection_input, indent=2)
-            )
+            result = self.reflection_chain.invoke({
+                "result": json.dumps(reflection_input, indent=2),
+                "reflection_history": ""
+            })
             
             # Parse JSON response
             analysis = json.loads(result)
