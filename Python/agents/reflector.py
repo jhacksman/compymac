@@ -83,8 +83,77 @@ Response:""",
         chain = prompt | self._llm
         return chain
         
-    async def analyze_execution(self, result: TaskResult) -> TaskResult:
-        """Analyze task execution.
+    def analyze_execution(self, result: TaskResult) -> Dict:
+        """Analyze task execution (synchronous version for tests).
+        
+        Args:
+            result: Task execution result
+            
+        Returns:
+            Analysis result as dict
+        """
+        try:
+            # Get relevant context if memory manager exists
+            context = ""
+            if self.memory_manager:
+                memories = self.memory_manager.retrieve_context(
+                    query=result.message,
+                    time_range="7d"  # Last week
+                )
+                if memories:
+                    context = "\nRelevant context:\n" + "\n".join(
+                        f"- {m['content']}" for m in memories
+                    )
+            
+            # Generate reflection
+            reflection_input = {
+                "success": result.success,
+                "message": result.message,
+                "error": result.error,
+                "artifacts": result.artifacts,
+                "context": context
+            }
+            
+            result_str = self.reflection_chain.predict(
+                result=json.dumps(reflection_input, indent=2)
+            )
+            
+            # Parse JSON response
+            analysis = json.loads(result_str)
+            
+            # Store reflection in memory if manager exists
+            if self.memory_manager:
+                self.memory_manager.store_memory(
+                    content=json.dumps(analysis, indent=2),
+                    metadata={
+                        "type": "task_reflection",
+                        "success": reflection_input["success"],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            
+            return analysis
+            
+        except Exception as e:
+            # Return minimal valid analysis on error
+            return {
+                "analysis": {
+                    "success": False,
+                    "key_observations": [f"Error in reflection: {str(e)}"],
+                    "improvement_areas": ["Error handling"]
+                },
+                "recommendations": [{
+                    "type": "error_prevention",
+                    "description": "Implement better error handling in reflection",
+                    "priority": 5
+                }],
+                "learning_outcomes": [
+                    "Need to improve reflection system robustness"
+                ]
+            }
+    
+    async def analyze_execution_async(self, result: TaskResult) -> TaskResult:
+        """Analyze task execution (async version).
         
         Args:
             result: Task execution result
@@ -268,74 +337,5 @@ Response:""",
                 success=False,
                 message=f"Evaluation failed: {str(e)}",
                 artifacts={},
-                error=str(e)
-            )
-        try:
-            # Get relevant context if memory manager exists
-            context = ""
-            if self.memory_manager:
-                memories = self.memory_manager.retrieve_context(
-                    query=result.message,
-                    time_range="7d"  # Last week
-                )
-                if memories:
-                    context = "\nRelevant context:\n" + "\n".join(
-                        f"- {m['content']}" for m in memories
-                    )
-            
-            # Generate reflection
-            reflection_input = {
-                "success": result.success,
-                "message": result.message,
-                "error": result.error,
-                "artifacts": result.artifacts,
-                "context": context
-            }
-            
-            result = self.reflection_chain.invoke({
-                "result": json.dumps(reflection_input, indent=2),
-                "reflection_history": ""
-            })
-            
-            # Parse JSON response
-            analysis = json.loads(result)
-            
-            # Store reflection in memory if manager exists
-            if self.memory_manager:
-                self.memory_manager.store_memory(
-                    content=json.dumps(analysis, indent=2),
-                    metadata={
-                        "type": "task_reflection",
-                        "success": reflection_input["success"],
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-            
-            return TaskResult(
-                success=True,
-                message="Analysis complete",
-                artifacts=analysis
-            )
-            
-        except Exception as e:
-            # Return minimal valid analysis on error
-            return TaskResult(
-                success=False,
-                message=f"Analysis failed: {str(e)}",
-                artifacts={
-                    "analysis": {
-                        "success": False,
-                        "key_observations": [f"Error in reflection: {str(e)}"],
-                        "improvement_areas": ["Error handling"]
-                    },
-                    "recommendations": [{
-                        "type": "error_prevention",
-                        "description": "Implement better error handling in reflection",
-                        "priority": 5
-                    }],
-                    "learning_outcomes": [
-                        "Need to improve reflection system robustness"
-                    ]
-                },
                 error=str(e)
             )
