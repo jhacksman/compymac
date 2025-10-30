@@ -77,6 +77,26 @@ def patch_basellm_setattr():
     except ImportError:
         yield
 
+@pytest.fixture(scope="session", autouse=True)
+def patch_runnablesequence_setattr():
+    """Patch RunnableSequence.__setattr__ to allow monkeypatching predict method."""
+    try:
+        from langchain_core.runnables import RunnableSequence
+        
+        original_setattr = RunnableSequence.__setattr__
+        
+        def patched_setattr(self, name, value):
+            if name in ("predict", "apredict"):
+                object.__setattr__(self, name, value)
+                return
+            return original_setattr(self, name, value)
+        
+        RunnableSequence.__setattr__ = patched_setattr
+        yield
+        RunnableSequence.__setattr__ = original_setattr
+    except ImportError:
+        yield
+
 class MockResponse:
     """Mock HTTP response for testing."""
     def __init__(self, status_code=200, json_data=None, text="", content=b""):
