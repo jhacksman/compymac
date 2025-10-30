@@ -17,9 +17,9 @@ def main():
     
     settings = Settings()
     
-    if not settings.openai_api_key:
-        print("\n⚠️  Warning: OpenAI API key not configured")
-        print("Set OPENAI_API_KEY environment variable or edit config.json")
+    if not settings.venice_api_key:
+        print("\n⚠️  Warning: Venice.ai API key not configured")
+        print("Set VENICE_API_KEY environment variable or edit config.json")
         return
     
     print("\n1. Initializing feed aggregator...")

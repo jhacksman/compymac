@@ -33,7 +33,7 @@ MVPReader is designed as a modular feed aggregation system that follows a pipeli
                      ▼
             ┌─────────────────┐
             │   AI Analyzer   │
-            │ (OpenAI GPT-4)  │
+            │  (Venice.ai)    │
             └────────┬────────┘
                      │
                      ▼
@@ -104,7 +104,7 @@ AI analysis process:
   - System context (user interests)
   - Formatted event list
   - Analysis instructions
-- Calls OpenAI API
+- Calls Venice.ai API (qwen3-next-80b model)
 - Parses response into highlights and suggestions
 - Marks events as processed
 
@@ -196,8 +196,8 @@ Future: Could train ranking model or adjust filters based on feedback.
 3. Add new configuration options to settings
 
 ### Alternative AI Models
-1. Modify `AIAnalyzer` class
-2. Replace OpenAI client with alternative (Anthropic, local model, etc.)
+1. Modify `AIAnalyzer` class or create new LLMClient implementation
+2. Replace Venice.ai client with alternative (DGX Spark, Anthropic, local model, etc.)
 3. Adjust prompt format as needed
 
 ### Additional Storage Backends
@@ -217,9 +217,9 @@ Strategy: Periodic polling (5-minute intervals) stays well within limits.
 ### Token Usage
 - Average event: ~50 tokens
 - 100 events: ~5000 tokens
-- GPT-4 prompt: ~6000 tokens total
+- LLM prompt: ~6000 tokens total
 - Response: ~1000 tokens
-- Cost per analysis: ~$0.10 (GPT-4 pricing)
+- Cost per analysis: Varies by Venice.ai pricing
 
 ### Database Size
 - Average event: ~1KB
@@ -238,11 +238,11 @@ Strategy: Periodic polling (5-minute intervals) stays well within limits.
 - Slack: Read-only scopes (channels:read, channels:history)
 - Mastodon: read:notifications only
 - Bluesky: App password (not main password)
-- OpenAI: Standard API key
+- Venice.ai: Standard API key
 
 ### Data Privacy
 - All data stored locally
-- No external sharing except OpenAI API
+- No external sharing except Venice.ai API
 - User controls retention period
 - Can delete database at any time
 

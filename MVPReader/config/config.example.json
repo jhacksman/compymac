@@ -12,8 +12,9 @@
       "username": "your-username.bsky.social",
       "password": "your-app-password"
     },
-    "openai": {
-      "api_key": "sk-your-openai-api-key"
+    "venice": {
+      "api_key": "your-venice-api-key",
+      "base_url": "https://api.venice.ai"
     }
   },
   "user_interests": {
@@ -43,7 +44,7 @@
     "polling_interval_minutes": 5
   },
   "ai_settings": {
-    "model": "gpt-4",
+    "model": "qwen3-next-80b",
     "max_tokens": 1000,
     "temperature": 0.7
   }
