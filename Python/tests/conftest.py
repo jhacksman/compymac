@@ -11,8 +11,6 @@ from memory.venice_client import VeniceClient
 from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
-from langchain_core.runnables import Runnable
-from pydantic.v1 import PrivateAttr
 from typing import Any, List
 from langchain_core.outputs import LLMResult, Generation
 
@@ -57,12 +55,10 @@ class MockResponse:
         if not self.ok:
             raise Exception(f"HTTP {self.status_code}")
 
-class MockLLM(Runnable):
-    """Mock LLM for testing that implements Runnable interface."""
-    _generate: Any = PrivateAttr(default=None)
+class MockLLM:
+    """Mock LLM for testing that implements Runnable protocol without pydantic inheritance."""
     
     def __init__(self, response=None):
-        super().__init__()
         self._response = response if response is not None else ""
         self._generate = None
     
@@ -88,19 +84,19 @@ class MockLLM(Runnable):
         return self.generate(prompts, **kwargs)
     
     def invoke(self, input, config=None, **kwargs):
-        """Runnable interface: invoke."""
+        """Runnable protocol: invoke."""
         return self._render(input)
     
     async def ainvoke(self, input, config=None, **kwargs):
-        """Runnable interface: async invoke."""
+        """Runnable protocol: async invoke."""
         return self._render(input)
     
     def batch(self, inputs, config=None, **kwargs):
-        """Runnable interface: batch."""
+        """Runnable protocol: batch."""
         return [self._render(x) for x in inputs]
     
     async def abatch(self, inputs, config=None, **kwargs):
-        """Runnable interface: async batch."""
+        """Runnable protocol: async batch."""
         return [self._render(x) for x in inputs]
     
     def __call__(self, input, **kwargs):
