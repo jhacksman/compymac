@@ -11,6 +11,7 @@ from memory.venice_client import VeniceClient
 from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
+from langchain_core.runnables import Runnable
 from typing import Any, List
 from langchain_core.outputs import LLMResult, Generation
 
@@ -55,10 +56,14 @@ class MockResponse:
         if not self.ok:
             raise Exception(f"HTTP {self.status_code}")
 
-class MockLLM:
-    """Mock LLM for testing that implements Runnable protocol without pydantic inheritance."""
+class MockLLM(Runnable):
+    """Mock LLM for testing that implements Runnable interface with extra fields allowed."""
+    
+    class Config:
+        extra = "allow"
     
     def __init__(self, response=None):
+        super().__init__()
         self._response = response if response is not None else ""
         self._generate = None
     
