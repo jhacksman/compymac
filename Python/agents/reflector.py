@@ -83,8 +83,8 @@ Response:""",
         chain = prompt | self._llm
         return chain
         
-    async def analyze_execution(self, result: TaskResult) -> TaskResult:
-        """Analyze task execution.
+    async def analyze_execution_async(self, result: TaskResult) -> TaskResult:
+        """Analyze task execution (async version).
         
         Args:
             result: Task execution result
@@ -270,6 +270,16 @@ Response:""",
                 artifacts={},
                 error=str(e)
             )
+    
+    def analyze_execution(self, result: TaskResult) -> Dict:
+        """Synchronous wrapper for analyze_execution (for tests).
+        
+        Args:
+            result: Task execution result
+            
+        Returns:
+            Analysis result as dict
+        """
         try:
             # Get relevant context if memory manager exists
             context = ""
@@ -292,10 +302,9 @@ Response:""",
                 "context": context
             }
             
-            result = self.reflection_chain.invoke({
-                "result": json.dumps(reflection_input, indent=2),
-                "reflection_history": ""
-            })
+            result = self.reflection_chain.predict(
+                result=json.dumps(reflection_input, indent=2)
+            )
             
             # Parse JSON response
             analysis = json.loads(result)
@@ -311,31 +320,22 @@ Response:""",
                     }
                 )
             
-            return TaskResult(
-                success=True,
-                message="Analysis complete",
-                artifacts=analysis
-            )
+            return analysis
             
         except Exception as e:
             # Return minimal valid analysis on error
-            return TaskResult(
-                success=False,
-                message=f"Analysis failed: {str(e)}",
-                artifacts={
-                    "analysis": {
-                        "success": False,
-                        "key_observations": [f"Error in reflection: {str(e)}"],
-                        "improvement_areas": ["Error handling"]
-                    },
-                    "recommendations": [{
-                        "type": "error_prevention",
-                        "description": "Implement better error handling in reflection",
-                        "priority": 5
-                    }],
-                    "learning_outcomes": [
-                        "Need to improve reflection system robustness"
-                    ]
+            return {
+                "analysis": {
+                    "success": False,
+                    "key_observations": [f"Error in reflection: {str(e)}"],
+                    "improvement_areas": ["Error handling"]
                 },
-                error=str(e)
-            )
+                "recommendations": [{
+                    "type": "error_prevention",
+                    "description": "Implement better error handling in reflection",
+                    "priority": 5
+                }],
+                "learning_outcomes": [
+                    "Need to improve reflection system robustness"
+                ]
+            }
