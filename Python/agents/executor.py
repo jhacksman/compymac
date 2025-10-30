@@ -230,9 +230,9 @@ Response:""",
                         artifacts=execution_result["artifacts"]
                     )
                 
-                # Success criteria not met
-                last_error = Exception("Success criteria not met")
-                raise last_error
+                # Success criteria not met - preserve this as the error
+                last_error = "Success criteria not met"
+                raise Exception(last_error)
                 
             except Exception as e:
                 last_error = e
