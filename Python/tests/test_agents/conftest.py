@@ -17,6 +17,28 @@ from ...agents import ExecutorAgent, PlannerAgent, ReflectorAgent
 from ...agents.manager import ManagerAgent
 from ...agents.protocols import AgentRole, AgentMessage, TaskResult
 
+try:
+    from langchain.chains import LLMChain
+    from langchain_core.runnables import RunnableSequence
+    
+    if not hasattr(LLMChain, "predict"):
+        def _llmchain_predict(self, **kwargs):
+            return self.invoke(kwargs)
+        async def _llmchain_apredict(self, **kwargs):
+            return await self.ainvoke(kwargs)
+        LLMChain.predict = _llmchain_predict
+        LLMChain.apredict = _llmchain_apredict
+    
+    if not hasattr(RunnableSequence, "predict"):
+        def _rs_predict(self, **kwargs):
+            return self.invoke(kwargs)
+        async def _rs_apredict(self, **kwargs):
+            return await self.ainvoke(kwargs)
+        RunnableSequence.predict = _rs_predict
+        RunnableSequence.apredict = _rs_apredict
+except ImportError:
+    pass
+
 @pytest.fixture
 def venice_api():
     """Create mock Venice API client."""
