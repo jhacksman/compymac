@@ -11,6 +11,7 @@ from memory.venice_client import VeniceClient
 from memory.db import MemoryDB
 from memory.librarian import LibrarianAgent
 from .mock_memory_db import MockMemoryDB
+from langchain_core.runnables import Runnable
 
 class MockResponse:
     """Mock HTTP response for testing."""
@@ -31,22 +32,50 @@ class MockResponse:
         if not self.ok:
             raise Exception(f"HTTP {self.status_code}")
 
-class MockLLM:
-    """Mock LLM for testing."""
+class MockLLM(Runnable):
+    """Mock LLM for testing that implements Runnable interface."""
     def __init__(self, response=None):
-        self._response = response or {}
-        
-    async def apredict(self, *args, **kwargs):
-        """Mock async prediction."""
+        self._response = response if response is not None else ""
+    
+    def _render(self, input_):
+        """Render response based on input."""
         if isinstance(self._response, Exception):
             raise self._response
-        return json.dumps(self._response)
-        
+        if callable(self._response):
+            return self._response(input_)
+        if isinstance(self._response, (dict, list)):
+            return json.dumps(self._response)
+        return str(self._response)
+    
+    def invoke(self, input, config=None, **kwargs):
+        """Runnable interface: invoke."""
+        return self._render(input)
+    
+    async def ainvoke(self, input, config=None, **kwargs):
+        """Runnable interface: async invoke."""
+        return self._render(input)
+    
+    def batch(self, inputs, config=None, **kwargs):
+        """Runnable interface: batch."""
+        return [self._render(x) for x in inputs]
+    
+    async def abatch(self, inputs, config=None, **kwargs):
+        """Runnable interface: async batch."""
+        return [self._render(x) for x in inputs]
+    
+    def __call__(self, input, **kwargs):
+        """Make callable for prompt | llm usage."""
+        return self._render(input)
+    
     def predict(self, *args, **kwargs):
-        """Mock sync prediction."""
-        if isinstance(self._response, Exception):
-            raise self._response
-        return json.dumps(self._response)
+        """Backward-compat: sync prediction."""
+        input_ = args[0] if args else kwargs.get("input", "")
+        return self._render(input_)
+    
+    async def apredict(self, *args, **kwargs):
+        """Backward-compat: async prediction."""
+        input_ = args[0] if args else kwargs.get("input", "")
+        return self._render(input_)
 
 @pytest.fixture
 def mock_llm():
