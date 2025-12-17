@@ -334,7 +334,142 @@ This section lists every tool available in this session with granular detail.
 | **list_secrets** | - | - | Secret names only |
 
 
-## 4. Measured Constraints
+
+
+---
+
+## 4. Outer Harness Infrastructure (Empirical Evidence)
+
+This section documents evidence of infrastructure **outside** the visible tool layer - the "outer harness" that manages VM orchestration, state persistence, and remote coordination.
+
+### 4.1 VM Infrastructure
+
+| Evidence | Location | Significance |
+|----------|----------|--------------|
+| **Firecracker VM** | `remote_id`: "vm-orch-firecracker-xlarge-bdiff-2025-12-17-cmDW7Fs5" | VM is orchestrated externally |
+| **VM image reuse** | Journal logs show boots across Jan-Dec 2025 | Same image used across sessions |
+| **Host-level FRP** | `IS_FIRECRACKER=True` → "FRP runs on the host" | Reverse proxy runs outside VM |
+
+### 4.2 Local Services (on VM)
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **pty_service** | 32403 | WebSocket API for PTY management |
+| **reh_proxy** | 32401/32402 | Remote Extension Host proxy (devin ↔ ext hosts) |
+| **realproxyclient** | 21080 | SOCKS5 proxy to realproxy.devin.ai:1080 |
+| **websockify** | 6080 | VNC proxy |
+| **VSCode server** | 6789 | Web IDE |
+
+### 4.3 Remote Endpoints
+
+| Endpoint | Purpose | Auth Mechanism |
+|----------|---------|----------------|
+| **api.devin.ai** | Main API host | JWT (auth_token in config) |
+| **git-manager.devin.ai** | Git proxy | JWT with org_id, devin_id, exp |
+| **realproxy.devin.ai:1080** | SOCKS5 proxy | JWT with user sub, exp |
+| **app.devin.ai/sessions/** | Session UI | Implies remote state storage |
+
+### 4.4 Identity & Authentication
+
+**JWT Structure** (from identity_token):
+```
+{
+  "org_id": "personal-clerk-user_...",
+  "iat": <issued_at_timestamp>,
+  "type": "devin-session",
+  "devin_id": "devin-<session_uuid>",
+  "user_id": "clerk-user_..."
+}
+```
+
+**Key files in /opt/.devin/**:
+- `identity_token` - Session JWT (ES384 signed)
+- `.realproxy-addr` - SOCKS5 proxy URL with JWT
+- `.devin-integration-git-credentials` - Git proxy auth
+- `custom_remote_config.json` - API host, auth token, firecracker flag
+
+### 4.5 State Persistence Evidence
+
+| Artifact | Location | What Writes It |
+|----------|----------|----------------|
+| **Commit tracking** | `/opt/.devin/.devin-commits` | `devin_git_hook.sh` (wraps git command) |
+| **Truncated outputs** | `/home/ubuntu/full_outputs/` | Harness truncation operator |
+| **Screenshots** | `/home/ubuntu/screenshots/` | Browser operators |
+| **Secrets** | `/opt/.devin/.devin_secrets.sh` | Provisioned at session start |
+
+**Git hook mechanism** (proven by code inspection):
+```bash
+# From devin_git_hook.sh - wraps git command
+function git() {
+    if [[ "$1" == "commit" ]]; then
+        original_git commit "$@" --trailer="Co-Authored-By: ..."
+        if [ $ret -eq 0 ]; then
+            original_git rev-parse HEAD >> /opt/.devin/.devin-commits
+        fi
+    fi
+}
+```
+
+### 4.6 Architecture Inference
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    REMOTE (api.devin.ai)                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ Session DB  │  │ Tool Router │  │ Transcript/Replay   │  │
+│  │ (state)     │  │ (dispatch)  │  │ (UI backing store)  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           │ JWT-authenticated connections
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│              HOST (Firecracker hypervisor)                  │
+│  ┌─────────────┐  ┌─────────────┐                           │
+│  │ FRP tunnel  │  │ VM orch     │                           │
+│  └─────────────┘  └─────────────┘                           │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           │ SSH / reverse tunnel
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    VM (this environment)                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ pty_service │  │ reh_proxy   │  │ realproxyclient     │  │
+│  │ (terminal)  │  │ (VSCode)    │  │ (SOCKS5)            │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ Local artifacts: full_outputs/, screenshots/,       │    │
+│  │ .devin-commits, identity files                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.7 What We Cannot Observe Directly
+
+| Unknown | Why | Experiment to Reveal |
+|---------|-----|---------------------|
+| **Remote database schema** | No direct access | Infer from API behavior, stable IDs |
+| **Checkpoint/resume logic** | Runs outside VM | Induce failure, observe retry behavior |
+| **Event log structure** | Backing webapp replay | Compare UI timeline to local artifacts |
+| **Scheduler state** | Remote orchestration | Issue many parallel calls, observe queuing |
+
+### 4.8 Recovery Mechanism Hypotheses
+
+**Local recovery** (observed):
+- systemd services have `Restart=always`
+- Daemons auto-restart on failure
+
+**Remote recovery** (hypothesized, not proven):
+- Session state persists in remote DB (evidence: session URL survives VM restarts)
+- Tool call transcript stored remotely (evidence: webapp shows history)
+- Checkpoint/resume for long tasks (needs testing)
+
+**Experiment to test**: Kill a shell mid-command, observe if harness retries or reports failure.
+
+
+## 5. Measured Constraints
 
 | Constraint | Observed Value | How Measured |
 |------------|----------------|--------------|
@@ -347,7 +482,7 @@ This section lists every tool available in this session with granular detail.
 
 ---
 
-## 5. Unknowns (Not Yet Measured)
+## 6. Unknowns (Not Yet Measured)
 
 | Unknown | Why It Matters | How To Measure |
 |---------|----------------|----------------|
@@ -360,7 +495,7 @@ This section lists every tool available in this session with granular detail.
 
 ---
 
-## 6. Experiment Backlog
+## 7. Experiment Backlog
 
 Concrete, repeatable experiments with clear methods and measurable outcomes.
 
@@ -427,12 +562,13 @@ Concrete, repeatable experiments with clear methods and measurable outcomes.
 
 ---
 
-## 7. Next Steps
+## 8. Next Steps
 
-1. Run truncation threshold experiments (Section 6.2)
-2. Profile operator latencies (Section 6.3)
-3. Test determinism across operators (Section 6.4)
-4. Probe ask_smart_friend context scope (Section 6.5)
+1. Run truncation threshold experiments (Section 7.1)
+2. Profile operator latencies (Section 7.10)
+3. Test determinism across operators (Section 7.8)
+4. Probe ask_smart_friend context scope (Section 7.9)
+5. Test recovery mechanisms (Section 4.8)
 5. Update this notebook with measured data
 
 **Principle**: Every claim should be backed by reproducible observation. Speculation belongs in the "Unknowns" section until tested.
