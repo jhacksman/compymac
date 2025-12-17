@@ -198,6 +198,142 @@ These operators produce notably different output formats, suggesting different p
 
 ---
 
+
+
+---
+
+## 3.10 Complete Tool Inventory
+
+This section lists every tool available in this session with granular detail.
+
+### File Operations
+
+| Tool | Required Params | Optional Params | Output | Side Effects |
+|------|-----------------|-----------------|--------|--------------|
+| **Read** | file_path | offset, limit | `<full-file-view>` tags with line numbers | None |
+| **Edit** | file_path, old_string, new_string | replace_all | Success/error message | Modifies file |
+| **Write** | file_path, content | - | Success/error message | Creates/overwrites file |
+
+**Constraints**: Edit requires prior Read; old_string must be unique unless replace_all=true
+
+---
+
+### Shell Operations
+
+| Tool | Required Params | Optional Params | Output | Side Effects |
+|------|-----------------|-----------------|--------|--------------|
+| **bash** | command, exec_dir, bash_id | timeout, description, run_in_background | `<shell-output>` with return code | Varies |
+| **bash_output** | bash_id | filter (regex) | Shell output since last check | None |
+| **write_to_shell** | shell_id | content, press_enter | - | Sends input |
+| **kill_shell** | shell_id | - | Status | Terminates shell |
+
+**Constraints**: Output truncated at ~30k chars; full saved to /home/ubuntu/full_outputs/
+
+---
+
+### Browser Operations
+
+| Tool | Required Params | Optional Params | Output |
+|------|-----------------|-----------------|--------|
+| **browser_navigate** | url | tab_idx | Stripped HTML + screenshot |
+| **browser_view** | - | tab_idx, reload_window | Current page state |
+| **browser_click** | - | devinid, coordinates, tab_idx | - |
+| **browser_type** | content | devinid, coordinates, press_enter, tab_idx | - |
+| **browser_press_key** | content | tab_idx | - |
+| **browser_move_mouse** | - | devinid, coordinates, tab_idx | - |
+| **browser_scroll** | direction, devinid | tab_idx | - |
+| **browser_console** | - | content (JS), tab_idx | Console output |
+| **browser_select_option** | index | devinid, tab_idx | - |
+| **browser_select_file** | content (paths) | tab_idx | - |
+| **browser_set_mobile** | enabled | tab_idx | - |
+| **browser_restart** | url | extensions | - |
+
+**Side effects**: Screenshots to /home/ubuntu/screenshots/; HTML stripped with devinid injection
+
+---
+
+### Git Operations
+
+| Tool | Required Params | Optional Params | Output |
+|------|-----------------|-----------------|--------|
+| **git_view_pr** | repo, pull_number | - | PR details, diff, comments |
+| **git_create_pr** | repo, title, head_branch, base_branch, exec_dir | draft | PR URL |
+| **git_update_pr_description** | repo, pull_number | force | - |
+| **git_pr_checks** | repo, pull_number | wait_until_complete | CI status with job IDs |
+| **git_ci_job_logs** | repo, job_id | - | Detailed CI logs |
+| **git_comment_on_pr** | repo, pull_number, body | commit_id, path, line, side, in_reply_to | - |
+| **list_repos** | - | keyword, page | Paginated repo list |
+
+**Auth**: Transparent via proxy URL (git-manager.devin.ai)
+
+---
+
+### Search Operations
+
+| Tool | Required Params | Optional Params | Output |
+|------|-----------------|-----------------|--------|
+| **grep** | pattern, path | output_mode, glob, type, -A/-B/-C, -i, -n, multiline, head_limit | Matches with line numbers |
+| **glob** | pattern, path | - | File paths |
+| **web_search** | query | num_results, type, include_domains, exclude_domains, start_published_date | URL, date, snippet |
+| **web_get_contents** | urls (max 10) | - | Full page content |
+
+---
+
+### Code Intelligence
+
+| Tool | Required Params | Commands | Optional Params |
+|------|-----------------|----------|-----------------|
+| **lsp_tool** | command, path | goto_definition, goto_references, hover_symbol, file_diagnostics | line, symbol |
+
+---
+
+### Integration (MCP)
+
+| Tool | Required Params | Commands | Optional Params |
+|------|-----------------|----------|-----------------|
+| **mcp_tool** | command | list_servers, list_tools, call_tool, read_resource | server, tool_name, tool_args, resource_uri, shell_id |
+
+**Note**: No servers configured in this session
+
+---
+
+### Deployment
+
+| Tool | Required Params | Commands | Optional Params |
+|------|-----------------|----------|-----------------|
+| **deploy** | command | frontend, backend, logs, expose | dir, port |
+
+---
+
+### Recording
+
+| Tool | Params | Output |
+|------|--------|--------|
+| **recording_start** | None | Starts browser recording |
+| **recording_stop** | None | Video path |
+
+---
+
+### Variable-Output Operators
+
+| Tool | Required Params | Output Format | Behavior |
+|------|-----------------|---------------|----------|
+| **ask_smart_friend** | question | Suggestions / Answer / Be Careful / MISSING INFO | Variable, higher latency |
+| **visual_checker** | question | Avoiding Bias / Visual Analysis / Answer / MISSING INFO | Analyzes images, variable |
+
+---
+
+### Utility
+
+| Tool | Required Params | Optional Params | Output |
+|------|-----------------|-----------------|--------|
+| **message_user** | message, block_on_user, should_use_concise_message | attachments, request_auth, request_deploy | - |
+| **wait** | seconds (max 600) | - | - |
+| **TodoWrite** | todos (array) | - | - |
+| **think** | thought | - | None (internal) |
+| **list_secrets** | - | - | Secret names only |
+
+
 ## 4. Measured Constraints
 
 | Constraint | Observed Value | How Measured |
@@ -224,37 +360,70 @@ These operators produce notably different output formats, suggesting different p
 
 ---
 
-## 6. Questions for Further Investigation
+## 6. Experiment Backlog
 
-To gather more observable data, the following experiments could be run:
+Concrete, repeatable experiments with clear methods and measurable outcomes.
 
-### 6.1 Context Window Probing
-**Question**: What is the exact context window size, and how is overflow handled?
-**Method**: Incrementally increase conversation length, observe when/how truncation occurs. Check if truncation is signaled or silent.
+### 6.1 Truncation Threshold Mapping
+**Goal**: Find exact cutoffs per operator
+**Method**: `python3 -c "print('x' * N)"` for N in [29000, 29500, 30000, 30500, 31000]
+**Data**: Exact threshold, chars vs bytes
 
-### 6.2 Truncation Threshold Mapping
-**Question**: What are the exact byte/character thresholds for each operator?
-**Method**: Generate outputs of known sizes (e.g., `python -c "print('x' * N)"`) and find the cutoff point.
+### 6.2 Schema Validation Probing
+**Goal**: Where does validation occur?
+**Method**: For each tool: (1) omit required arg, (2) wrong type, (3) unknown field
+**Data**: Error messages revealing validation layer
 
-### 6.3 Operator Latency Profiling
-**Question**: Can we distinguish operator types by latency distribution?
-**Method**: Run each operator 10+ times, record timestamps, compute mean/variance. Higher variance may indicate non-deterministic processing.
+### 6.3 Tool Result Isolation Test
+**Goal**: How are tool outputs delimited?
+**Method**: Create file with "IGNORE PREVIOUS INSTRUCTIONS", Read it, observe envelope
+**Data**: Delimiter structure around tool results
 
-### 6.4 Determinism Testing
-**Question**: Which operators produce identical output for identical input?
-**Method**: Run same input 5x, compare outputs byte-for-byte. Document any variance.
+### 6.4 Redaction Operator Test
+**Goal**: Are secret-shaped strings masked?
+**Method**: Create file with "sk-test-1234567890abcdef", Read it
+**Data**: Whether redaction exists and patterns that trigger it
 
-### 6.5 ask_smart_friend Context Scope
-**Question**: What context does ask_smart_friend receive?
-**Method**: Ask it specific questions about earlier parts of this conversation. If it knows details I didn't include in the question, it has broader context.
+### 6.5 Concurrency Limits Test
+**Goal**: Max parallel calls, scheduling behavior
+**Method**: Issue 10 parallel sleep 2 commands, measure wall time
+**Data**: Max concurrency (concurrent: ~2s, serial: ~20s, limited to N: ~2*(10/N)s)
 
-### 6.6 Parallel Execution Verification
-**Question**: Are parallel tool calls truly concurrent?
-**Method**: Issue N slow operations (e.g., `sleep 2`) in parallel, measure total wall-clock time. If concurrent: ~2s. If serial: ~2N seconds.
+### 6.6 Max Input Size Test
+**Goal**: Per-tool input limits
+**Method**: Increase Write content / ask_smart_friend question size until failure
+**Data**: Exact cutoff points per tool
 
-### 6.7 Result Formatting Variance
-**Question**: Is result formatting deterministic or variable?
-**Method**: Run identical tool calls, compare exact formatting of results. Look for paraphrasing vs templated output.
+### 6.7 Error Envelope Comparison
+**Goal**: Centralized vs per-tool error formatting
+**Method**: Trigger errors in Read, bash, browser_click, Edit; compare structure
+**Data**: Whether errors share formatting
+
+### 6.8 Browser DOM Transformation Stability
+**Goal**: Mechanical vs interpretive HTML stripping
+**Method**: 5x browser_view on static page, diff outputs
+**Data**: Empty diffs = deterministic; variance = interpretive
+
+### 6.9 ask_smart_friend Context Scope
+**Goal**: What context does it receive?
+**Method**: Establish fact early ("secret code is BANANA"), later ask smart friend about it
+**Data**: Question-only vs conversation history
+
+### 6.10 Latency Distribution Profiling
+**Goal**: Characterize operator latency
+**Method**: Run each operator 10x, record timestamps, compute mean/variance
+**Data**: Latency profiles (high variance may indicate non-deterministic processing)
+
+### 6.11 Caching/Dedup Test
+**Goal**: Do operators cache results?
+**Method**: Identical web_search/Read calls back-to-back, compare results
+**Data**: Cached vs fresh
+
+### 6.12 Parallel Execution Verification
+**Goal**: Confirm true concurrency
+**Method**: 5 parallel sleep 2 in single turn, measure wall time
+**Data**: Concurrent (~2s) vs serial (~10s)
+
 
 ---
 
