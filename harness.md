@@ -473,7 +473,7 @@ function git() {
 
 | Constraint | Observed Value | How Measured |
 |------------|----------------|--------------|
-| Shell output truncation | ~30,000 chars | Explicit message in output |
+| Shell output truncation | 20,000 chars (display) | Tested with controlled output sizes |
 | File edit prerequisite | Must Read first | Error when attempting Edit without Read |
 | Edit uniqueness | old_string must be unique | Error message on non-unique |
 | Parallel tool calls | Supported | Observed multiple tools executing in single turn |
@@ -488,10 +488,10 @@ function git() {
 |---------|----------------|----------------|
 | Context window size | Affects what history is retained | Probe with increasing context until truncation |
 | Context truncation strategy | Naive vs summarization | Compare retained content across long sessions |
-| Exact truncation thresholds | Predictability | Send controlled-size outputs, find cutoff |
+| Exact truncation thresholds | **MEASURED**: 20,000 chars display limit | See Experiment 7.1 |
 | Operator latency distributions | Distinguish processing types | Timestamp before/after each tool call |
 | ask_smart_friend context | Does it see my full history? | Ask it about earlier conversation details |
-| Routing parallelism | True concurrent vs serialized | Measure wall-clock time for N parallel calls |
+| Routing parallelism | **MEASURED**: True concurrent | See Experiment 7.12 |
 
 ---
 
@@ -499,10 +499,33 @@ function git() {
 
 Concrete, repeatable experiments with clear methods and measurable outcomes.
 
-### 7.1 Truncation Threshold Mapping
+### 7.1 Truncation Threshold Mapping (COMPLETED)
 **Goal**: Find exact cutoffs per operator
-**Method**: `python3 -c "print('x' * N)"` for N in [29000, 29500, 30000, 30500, 31000]
-**Data**: Exact threshold, chars vs bytes
+**Method**: `python3 -c "print('x' * N)"` for various N values
+**Status**: COMPLETED - 2025-12-17
+
+**Tests Run**:
+
+| Output Size | Truncated? | Chars Shown | Chars Truncated |
+|-------------|------------|-------------|-----------------|
+| 19,999 chars | NO | 19,999 | 0 |
+| 20,000 chars | YES | 19,999 | 1 |
+| 29,000 chars | YES | ~20,000 | 9,001 |
+
+**Key Findings**:
+1. **Display threshold is exactly 20,000 characters**: Output up to 19,999 chars is shown in full; 20,000+ triggers truncation
+2. **Full output preserved**: Truncated content saved to `/home/ubuntu/full_outputs/` with descriptive filename
+3. **Truncation message format**: "The output is truncated by X characters for ease of reading..."
+4. **File path provided**: Message includes path to full output file
+
+**Observed Truncation Message**:
+```
+The output is truncated by 9001 characters for ease of reading. You may need to examine 
+the full output to find what you need if you cannot find it here. The full output has 
+been saved to `/home/ubuntu/full_outputs/python3_c_print_x_29_<timestamp>.txt`
+```
+
+**Conclusion**: The harness truncates shell output at exactly **20,000 characters** for display, but preserves full output in `/home/ubuntu/full_outputs/`. This is a display optimization, not data loss.
 
 ### 7.2 Schema Validation Probing (COMPLETED)
 **Goal**: Where does validation occur?
@@ -682,10 +705,33 @@ Tool Call
 **Method**: Identical web_search/Read calls back-to-back, compare results
 **Data**: Cached vs fresh
 
-### 7.12 Parallel Execution Verification
+### 7.12 Parallel Execution Verification (COMPLETED)
 **Goal**: Confirm true concurrency
 **Method**: 5 parallel sleep 2 in single turn, measure wall time
-**Data**: Concurrent (~2s) vs serial (~10s)
+**Status**: COMPLETED - 2025-12-17
+
+**Test Run**:
+Issued 5 parallel `time sleep 2` commands in a single turn using different shell IDs (shell1-shell5).
+
+**Results**:
+
+| Shell | Command | Real Time | Started | Completed |
+|-------|---------|-----------|---------|-----------|
+| shell1 | `time sleep 2` | 2.003s | T+0.0s | T+2.09s |
+| shell2 | `time sleep 2` | 2.003s | T+0.0s | T+2.59s |
+| shell3 | `time sleep 2` | 2.003s | T+0.0s | T+2.07s |
+| shell4 | `time sleep 2` | 2.003s | T+0.0s | T+2.15s |
+| shell5 | `time sleep 2` | 2.003s | T+0.0s | T+2.12s |
+
+**Total wall-clock time**: ~2.6 seconds (not ~10 seconds)
+
+**Key Findings**:
+1. **True parallel execution confirmed**: All 5 commands ran concurrently
+2. **No serialization**: If serial, total time would be ~10s; actual was ~2.6s
+3. **Independent shell sessions**: Each bash_id runs in its own PTY
+4. **Minimal overhead**: ~0.5s overhead for dispatching 5 parallel commands
+
+**Conclusion**: The harness supports **true parallel tool execution**. Multiple tool calls in a single turn are dispatched concurrently, not serialized. This enables efficient multi-tasking.
 
 
 ---
