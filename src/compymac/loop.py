@@ -13,6 +13,7 @@ The loop has a hard max_steps limit to prevent runaway execution.
 This is an operational constraint that exists in real agent systems.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -173,7 +174,7 @@ class AgentLoop:
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": str(tc.arguments),
+                            "arguments": json.dumps(tc.arguments),
                         },
                     }
                     for tc in response.tool_calls

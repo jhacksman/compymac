@@ -8,45 +8,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: ankane/pgvector:latest
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
-        
+
     - name: Install dependencies
       run: |
-        cd Python
-        pip install -r requirements.txt
-        pip install -e .
-        
-    - name: Initialize database
+        pip install -e ".[dev]"
+
+    - name: Lint
       run: |
-        psql -h localhost -U postgres -d test_db -f Python/memory/migrations/001_add_pgvector.sql
-        psql -h localhost -U postgres -d test_db -f Python/memory/migrations/002_init_db.sql
-      env:
-        PGPASSWORD: postgres
-        
+        ruff check src/ tests/
+
     - name: Run tests
       run: |
-        cd Python
-        pytest tests/ -v -m "not desktop"
-      env:
-        VENICE_API_KEY: B9Y68yQgatQw8wmpmnIMYcGip1phCt-43CS0OktZU6
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        pytest tests/ -v

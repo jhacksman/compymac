@@ -20,7 +20,7 @@ from compymac.context import ContextManager
 from compymac.llm import LLMClient
 from compymac.loop import AgentLoop
 from compymac.session import Session
-from compymac.tools import Tool, ToolRegistry
+from compymac.tools import Tool, ToolRegistry, create_mock_tools
 
 __all__ = [
     "Session",
@@ -29,4 +29,5 @@ __all__ = [
     "ToolRegistry",
     "Tool",
     "AgentLoop",
+    "create_mock_tools",
 ]

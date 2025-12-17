@@ -68,8 +68,8 @@ class TestNaiveTruncation:
     def test_truncation_drops_oldest_first(self) -> None:
         """When budget exceeded, oldest messages should be dropped first."""
         config = ContextConfig(
-            token_budget=200,
-            reserved_for_response=50,
+            token_budget=80,
+            reserved_for_response=20,
             chars_per_token=1.0,
         )
         cm = ContextManager(config)
