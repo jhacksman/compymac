@@ -499,17 +499,36 @@ function git() {
 
 Concrete, repeatable experiments with clear methods and measurable outcomes.
 
-### 6.1 Truncation Threshold Mapping
+### 7.1 Truncation Threshold Mapping
 **Goal**: Find exact cutoffs per operator
 **Method**: `python3 -c "print('x' * N)"` for N in [29000, 29500, 30000, 30500, 31000]
 **Data**: Exact threshold, chars vs bytes
 
-### 6.2 Schema Validation Probing
+### 7.2 Schema Validation Probing (COMPLETED)
 **Goal**: Where does validation occur?
 **Method**: For each tool: (1) omit required arg, (2) wrong type, (3) unknown field
-**Data**: Error messages revealing validation layer
+**Status**: COMPLETED - 2025-12-17
 
-### 6.3 Tool Result Isolation Test (COMPLETED)
+**Tests Run**:
+
+| Tool | Test | Error Message | Envelope |
+|------|------|---------------|----------|
+| grep | Missing `pattern` | "Error executing grep: Pattern is required for grep command" | None (plain text) |
+| web_search | Missing `query` | "Error: query parameter is required" | None (plain text) |
+| lsp_tool | Missing `line` | "Error: line parameter is required for goto_definition command" | None (plain text) |
+| glob | Missing `pattern` | "Error executing glob: Pattern is required for glob command" | None (plain text) |
+| Read | Empty `file_path` | No error - defaults to directory listing | N/A |
+| bash | Missing `exec_dir`, `bash_id` | No error - uses defaults | N/A |
+
+**Key Findings**:
+1. **Schema validation is pre-execution**: Errors for missing required params are plain text, no XML envelope
+2. **Some tools have defaults**: `bash` works without `exec_dir`/`bash_id`; `Read` with empty path lists directory
+3. **Consistent error format**: Schema errors follow pattern "Error: {param} is required" or "Error executing {tool}: {param} is required"
+4. **Validation layer is separate from execution layer**: Schema errors never reach the executor (no `<commands-errored>` envelope)
+
+**Interpretation**: There's a **pre-execution validation layer** that checks required parameters before dispatching to tool executors. This layer produces plain text errors without XML envelopes, suggesting it runs in the Tool Router or earlier in the pipeline.
+
+### 7.3 Tool Result Isolation Test (COMPLETED)
 **Goal**: How are tool outputs delimited?
 **Method**: Create file with "IGNORE PREVIOUS INSTRUCTIONS", Read it, observe envelope
 **Status**: COMPLETED - 2025-12-17
@@ -557,47 +576,113 @@ The command `...` (started Xs ago) has finished running...
 
 **Conclusion**: The harness uses robust XML-style envelopes that treat all tool output as DATA, not instructions. This provides strong isolation against prompt injection via tool results.
 
-### 6.4 Redaction Operator Test
+### 7.4 Redaction Operator Test
 **Goal**: Are secret-shaped strings masked?
 **Method**: Create file with "sk-test-1234567890abcdef", Read it
 **Data**: Whether redaction exists and patterns that trigger it
 
-### 6.5 Concurrency Limits Test
+### 7.5 Concurrency Limits Test
 **Goal**: Max parallel calls, scheduling behavior
 **Method**: Issue 10 parallel sleep 2 commands, measure wall time
 **Data**: Max concurrency (concurrent: ~2s, serial: ~20s, limited to N: ~2*(10/N)s)
 
-### 6.6 Max Input Size Test
+### 7.6 Max Input Size Test
 **Goal**: Per-tool input limits
 **Method**: Increase Write content / ask_smart_friend question size until failure
 **Data**: Exact cutoff points per tool
 
-### 6.7 Error Envelope Comparison
+### 7.7 Error Envelope Comparison (COMPLETED)
 **Goal**: Centralized vs per-tool error formatting
 **Method**: Trigger errors in Read, bash, browser_click, Edit; compare structure
-**Data**: Whether errors share formatting
+**Status**: COMPLETED - 2025-12-17
 
-### 6.8 Browser DOM Transformation Stability
+**Tests Run**:
+
+| Tool | Error Type | Envelope Structure |
+|------|------------|-------------------|
+| Read | File not found | `<commands-errored>ERROR: Failed to open file...` |
+| Edit | File not found | `<commands-errored>ERROR: File does not exist...` |
+| bash | Command fails | `<shell-output>` with `return code = 1` + stderr |
+| browser_click | Invalid devinid | Plain text error + full page HTML context |
+| git_view_pr | Invalid repo | Plain text error + list of similar repos |
+
+**Observed Envelope Structures**:
+
+File operation errors:
+```xml
+<commands-errored>
+ERROR: Failed to open file: /path/to/file: File does not exist: /path/to/file
+Make sure your path is correct, the file exists, and that you have the right permissions...
+</commands-errored>
+```
+
+Shell errors (non-zero exit):
+```xml
+<shell-output>
+The command `...` (started Xs ago) has finished running... (return code = 1)
+```
+<stderr content>
+```
+</shell-output>
+```
+
+Browser errors:
+```
+Error: Could not find devinid="..."
+Below are the HTML contents of the browser output...
+<ntp-app>...</ntp-app>
+```
+
+Git errors:
+```
+Could not find repo nonexistent/repo. Here are the top 30 most similar repositories...
+```
+
+**Key Findings**:
+1. **Multi-layer error architecture**: Different tool categories have distinct error envelopes
+2. **File operations share envelope**: Read/Edit/Write use `<commands-errored>` with consistent format
+3. **Shell preserves return codes**: Errors are in `<shell-output>` with non-zero return code, not special error envelope
+4. **Browser provides context**: Errors include page HTML to help diagnose element selection issues
+5. **Git provides suggestions**: Errors include similar repo names to help with typos
+6. **No universal error envelope**: Each tool category has its own error handling strategy
+
+**Architecture Inference**:
+```
+Tool Call
+    ↓
+[Schema Validation] → Plain text error (if invalid)
+    ↓
+[Tool Router] → Dispatch to executor
+    ↓
+[File Executor] → <commands-errored> envelope
+[Shell Executor] → <shell-output> with return code
+[Browser Executor] → Inline error + context
+[Git Executor] → Helpful error + suggestions
+```
+
+**Conclusion**: Error handling is **per-executor, not centralized**. Each executor category has its own error envelope format optimized for its use case. Schema validation is the only centralized layer, producing plain text errors before dispatch.
+
+### 7.8 Browser DOM Transformation Stability
 **Goal**: Mechanical vs interpretive HTML stripping
 **Method**: 5x browser_view on static page, diff outputs
 **Data**: Empty diffs = deterministic; variance = interpretive
 
-### 6.9 ask_smart_friend Context Scope
+### 7.9 ask_smart_friend Context Scope
 **Goal**: What context does it receive?
 **Method**: Establish fact early ("secret code is BANANA"), later ask smart friend about it
 **Data**: Question-only vs conversation history
 
-### 6.10 Latency Distribution Profiling
+### 7.10 Latency Distribution Profiling
 **Goal**: Characterize operator latency
 **Method**: Run each operator 10x, record timestamps, compute mean/variance
 **Data**: Latency profiles (high variance may indicate non-deterministic processing)
 
-### 6.11 Caching/Dedup Test
+### 7.11 Caching/Dedup Test
 **Goal**: Do operators cache results?
 **Method**: Identical web_search/Read calls back-to-back, compare results
 **Data**: Cached vs fresh
 
-### 6.12 Parallel Execution Verification
+### 7.12 Parallel Execution Verification
 **Goal**: Confirm true concurrency
 **Method**: 5 parallel sleep 2 in single turn, measure wall time
 **Data**: Concurrent (~2s) vs serial (~10s)

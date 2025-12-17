@@ -300,21 +300,21 @@ flowchart TB
                         <li>Find exact cutoff</li>
                     </ul>
                 </div>
-                <div class="card">
-                    <h3>Schema Validation</h3>
-                    <ul>
-                        <li>Omit required args</li>
-                        <li>Wrong types</li>
-                        <li>Unknown fields</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Result Isolation</h3>
-                    <ul>
-                        <li>File with instruction text</li>
-                        <li>Observe envelope</li>
-                    </ul>
-                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Schema Validation (DONE)</h3>
+                                    <ul>
+                                        <li>Pre-execution validation layer</li>
+                                        <li>Plain text errors, no envelope</li>
+                                        <li>Some tools have defaults</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Result Isolation (DONE)</h3>
+                                    <ul>
+                                        <li>XML envelopes isolate content</li>
+                                        <li>Injection attempts blocked</li>
+                                    </ul>
+                                </div>
                 <div class="card">
                     <h3>Redaction Test</h3>
                     <ul>
@@ -336,13 +336,13 @@ flowchart TB
                         <li>Find per-tool limits</li>
                     </ul>
                 </div>
-                <div class="card">
-                    <h3>Error Envelopes</h3>
-                    <ul>
-                        <li>Trigger errors across tools</li>
-                        <li>Compare structure</li>
-                    </ul>
-                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Error Envelopes (DONE)</h3>
+                                    <ul>
+                                        <li>Per-executor error handling</li>
+                                        <li>No universal error envelope</li>
+                                    </ul>
+                                </div>
                 <div class="card">
                     <h3>DOM Stability</h3>
                     <ul>
