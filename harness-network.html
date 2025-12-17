@@ -3,202 +3,150 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Harness Architecture - Network Map</title>
+    <title>Harness Operator Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
+        body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; padding: 20px; }
         h1 { text-align: center; margin-bottom: 10px; color: #00d4ff; }
         .subtitle { text-align: center; color: #888; margin-bottom: 30px; }
         .container { max-width: 1400px; margin: 0 auto; }
-        .diagram-section { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
-        .diagram-section h2 { color: #00d4ff; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #333; }
+        .section { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
+        .section h2 { color: #00d4ff; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
         .mermaid { background: #0f0f23; border-radius: 8px; padding: 20px; }
-        .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
-        .legend-item { display: flex; align-items: center; gap: 10px; }
-        .legend-color { width: 20px; height: 20px; border-radius: 4px; }
-        .mind { background: #e74c3c; }
-        .tool { background: #3498db; }
-        .infra { background: #2ecc71; }
-        .external { background: #9b59b6; }
-        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
-        .info-card { background: #0f0f23; border-radius: 8px; padding: 15px; border-left: 4px solid #00d4ff; }
-        .info-card h3 { color: #00d4ff; margin-bottom: 10px; }
-        .info-card ul { list-style: none; padding-left: 0; }
-        .info-card li { padding: 5px 0; border-bottom: 1px solid #222; }
-        .info-card li:last-child { border-bottom: none; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 20px; }
+        .card { background: #0f0f23; border-radius: 8px; padding: 15px; border-left: 4px solid #00d4ff; }
+        .card h3 { color: #00d4ff; margin-bottom: 10px; }
+        .card ul { list-style: none; }
+        .card li { padding: 5px 0; border-bottom: 1px solid #222; }
+        .card li:last-child { border-bottom: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #333; }
+        th { color: #00d4ff; }
+        .measured { color: #2ecc71; }
+        .unknown { color: #e74c3c; }
+        .partial { color: #f39c12; }
         a { color: #00d4ff; }
+        .legend { display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap; }
+        .legend span { display: flex; align-items: center; gap: 8px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot.g { background: #2ecc71; }
+        .dot.y { background: #f39c12; }
+        .dot.r { background: #e74c3c; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Harness Architecture Network Map</h1>
-        <p class="subtitle">Interactive visualization of the agent harness - the scaffolding that shapes LLM behavior</p>
+        <h1>Harness Operator Pipeline</h1>
+        <p class="subtitle">Observable data from black-box probing - behavior documented, implementation unknown</p>
         
-        <div class="diagram-section">
-            <h2>1. High-Level Architecture</h2>
+        <div class="section">
+            <h2>1. Operator Pipeline</h2>
             <div class="mermaid">
 flowchart TB
-    subgraph User["User Layer"]
-        U[User Input]
-        UM[User Messages]
-    end
-    subgraph Harness["Harness Layer"]
-        TR[Tool Router]
-        CF[Context Formatter]
-        TM[Truncation Manager]
-    end
-    subgraph Minds["LLM Minds"]
-        PRIMARY[Primary LLM - Devin]
-        SMART[Smart Friend]
-        VISUAL[Visual Checker]
-    end
-    subgraph Tools["Tool Executors"]
-        FILE[File Tools]
-        SHELL[Shell Tools]
-        BROWSER[Browser Tools]
-        GIT[Git Tools]
-        SEARCH[Search Tools]
-    end
-    U --> CF
-    CF --> PRIMARY
-    PRIMARY --> TR
-    TR --> FILE
-    TR --> SHELL
-    TR --> BROWSER
-    TR --> GIT
-    TR --> SEARCH
-    TR --> SMART
-    TR --> VISUAL
-    SMART --> CF
-    VISUAL --> CF
-    PRIMARY --> UM
-    UM --> U
-    style PRIMARY fill:#e74c3c,color:#fff
-    style SMART fill:#e74c3c,color:#fff
-    style VISUAL fill:#e74c3c,color:#fff
+    U[User Input] --> CA1[Context Assembly]
+    CA1 --> PP[Primary Processing]
+    PP --> TR[Tool Router]
+    TR --> FILE[File Ops]
+    TR --> SHELL[Shell]
+    TR --> BROWSER[Browser]
+    TR --> GIT[Git]
+    TR --> SEARCH[Search]
+    FILE --> RF[Result Formatter]
+    SHELL --> RF
+    BROWSER --> RF
+    GIT --> RF
+    SEARCH --> RF
+    RF --> TN[Truncation]
+    TN --> CA2[Context Assembly]
+    CA2 --> PP
+    PP --> U
             </div>
             <div class="legend">
-                <div class="legend-item"><div class="legend-color mind"></div> LLM Minds (reasoning)</div>
-                <div class="legend-item"><div class="legend-color tool"></div> Harness Components</div>
-                <div class="legend-item"><div class="legend-color infra"></div> Tool Executors</div>
+                <span><div class="dot g"></div> Measured</span>
+                <span><div class="dot y"></div> Partial</span>
+                <span><div class="dot r"></div> Unknown</span>
             </div>
         </div>
 
-        <div class="diagram-section">
-            <h2>2. Tool Invocation Flow</h2>
-            <div class="mermaid">
-sequenceDiagram
-    participant U as User
-    participant H as Harness
-    participant P as Primary LLM
-    participant T as Tool Executor
-    U->>H: User Input
-    H->>H: Format Context
-    H->>P: Context + Tool Schemas
-    P->>H: Tool Call(s)
-    H->>T: Execute Tool
-    T-->>H: Tool Result
-    H->>H: Truncate if needed
-    H->>P: Updated Context
-    P->>H: Response
-    H->>U: Final Response
-            </div>
+        <div class="section">
+            <h2>2. Operator Properties</h2>
+            <table>
+                <tr><th>Operator</th><th>Determinism</th><th>Constraints</th><th>Status</th></tr>
+                <tr><td>Context Assembly</td><td class="unknown">Unknown</td><td>Window limit exists</td><td class="unknown">Needs testing</td></tr>
+                <tr><td>Tool Router</td><td class="measured">Deterministic</td><td>Parallel dispatch</td><td class="partial">Partial</td></tr>
+                <tr><td>File Operators</td><td class="measured">Deterministic</td><td>Read-before-Edit</td><td class="measured">Measured</td></tr>
+                <tr><td>Shell Operator</td><td class="measured">Deterministic</td><td>~30k truncation</td><td class="measured">Measured</td></tr>
+                <tr><td>Truncation</td><td class="measured">Deterministic</td><td>Shell: ~30k chars</td><td class="partial">Needs exact threshold</td></tr>
+                <tr><td>ask_smart_friend</td><td class="partial">Variable</td><td>Structured format</td><td class="partial">Needs profiling</td></tr>
+                <tr><td>visual_checker</td><td class="partial">Variable</td><td>Structured format</td><td class="partial">Needs profiling</td></tr>
+            </table>
         </div>
 
-        <div class="diagram-section">
-            <h2>3. Minds Hierarchy</h2>
-            <div class="mermaid">
-flowchart LR
-    P[Devin - Primary Mind] -->|ask_smart_friend| SF[Smart Friend]
-    P -->|visual_checker| VC[Visual Checker]
-    SF -->|Suggestions + Answer| P
-    VC -->|Visual Analysis| P
-    style P fill:#e74c3c,color:#fff
-    style SF fill:#f39c12,color:#fff
-    style VC fill:#9b59b6,color:#fff
-            </div>
-        </div>
-
-        <div class="diagram-section">
-            <h2>4. Tool Categories</h2>
-            <div class="mermaid">
-mindmap
-    root((Tools))
-        File Ops
-            Read
-            Edit
-            Write
-        Shell
-            bash
-            bash_output
-        Browser
-            navigate
-            click
-            type
-        Git
-            view_pr
-            create_pr
-            list_repos
-        Search
-            grep
-            glob
-            web_search
-        LLM-Backed
-            ask_smart_friend
-            visual_checker
-        Utility
-            message_user
-            TodoWrite
-            think
-            </div>
-        </div>
-
-        <div class="diagram-section">
-            <h2>5. Data Flow Constraints</h2>
-            <div class="info-grid">
-                <div class="info-card">
-                    <h3>Truncation Points</h3>
+        <div class="section">
+            <h2>3. Measured Constraints</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>Truncation</h3>
                     <ul>
-                        <li>File reads - partial view threshold</li>
-                        <li>Shell output - ~30,000 chars</li>
-                        <li>Browser HTML - always stripped</li>
-                        <li>Full content saved to /home/ubuntu/full_outputs/</li>
+                        <li>Shell: ~30,000 characters</li>
+                        <li>Browser HTML: Always stripped</li>
+                        <li>Overflow: /home/ubuntu/full_outputs/</li>
                     </ul>
                 </div>
-                <div class="info-card">
+                <div class="card">
                     <h3>Authentication</h3>
                     <ul>
-                        <li>Git: Proxy URL (git-manager.devin.ai)</li>
+                        <li>Git: Proxy URL rewriting</li>
                         <li>APIs: Environment variables</li>
-                        <li>Secrets: interpolation only</li>
+                        <li>Secrets: Names only</li>
                     </ul>
                 </div>
-                <div class="info-card">
-                    <h3>State Persistence</h3>
+                <div class="card">
+                    <h3>Operator Rules</h3>
                     <ul>
-                        <li>Bash: Per bash_id session</li>
-                        <li>Browser: Per tab_idx</li>
-                        <li>LLM Context: Session-scoped</li>
+                        <li>Edit requires prior Read</li>
+                        <li>Edit requires unique old_string</li>
+                        <li>bash_id maintains session</li>
                     </ul>
                 </div>
-                <div class="info-card">
-                    <h3>Open Questions</h3>
+                <div class="card">
+                    <h3>Unknown</h3>
                     <ul>
-                        <li>Sub-mind model identity?</li>
-                        <li>Context sharing with sub-minds?</li>
-                        <li>True parallelism of tool calls?</li>
+                        <li>Context window size</li>
+                        <li>Truncation strategy</li>
+                        <li>Latency distributions</li>
                     </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>4. Experiments to Run</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>Threshold Mapping</h3>
+                    <ul><li>Generate known-size outputs</li><li>Find exact cutoffs</li></ul>
+                </div>
+                <div class="card">
+                    <h3>Latency Profiling</h3>
+                    <ul><li>Run operators 10+ times</li><li>Compute mean/variance</li></ul>
+                </div>
+                <div class="card">
+                    <h3>Determinism Testing</h3>
+                    <ul><li>Same input 5x</li><li>Compare byte-for-byte</li></ul>
+                </div>
+                <div class="card">
+                    <h3>Parallel Test</h3>
+                    <ul><li>N slow ops in parallel</li><li>Measure wall-clock time</li></ul>
                 </div>
             </div>
         </div>
 
         <p style="text-align: center; margin-top: 30px; color: #666;">
-            <a href="./harness.md">View detailed harness.md documentation</a>
+            <a href="./harness.md">View detailed lab notebook</a>
         </p>
     </div>
-    <script>
-        mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
-    </script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });</script>
 </body>
 </html>
