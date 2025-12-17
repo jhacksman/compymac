@@ -315,27 +315,27 @@ flowchart TB
                                         <li>Injection attempts blocked</li>
                                     </ul>
                                 </div>
-                <div class="card">
-                    <h3>Redaction Test</h3>
-                    <ul>
-                        <li>Fake secret in file</li>
-                        <li>Check if masked</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Concurrency Limits</h3>
-                    <ul>
-                        <li>10 parallel sleep 2</li>
-                        <li>Measure wall time</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Max Input Size</h3>
-                    <ul>
-                        <li>Increase Write content</li>
-                        <li>Find per-tool limits</li>
-                    </ul>
-                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Redaction Test (DONE)</h3>
+                                    <ul>
+                                        <li>No auto-redaction of patterns</li>
+                                        <li>Secrets shown in full</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Concurrency Limits (DONE)</h3>
+                                    <ul>
+                                        <li>10+ parallel calls supported</li>
+                                        <li>No rate limiting observed</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Max Input Size (DONE)</h3>
+                                    <ul>
+                                        <li>At least 1MB for file writes</li>
+                                        <li>No hard limit observed</li>
+                                    </ul>
+                                </div>
                                 <div class="card" style="border-left-color: #2ecc71;">
                                     <h3>Error Envelopes (DONE)</h3>
                                     <ul>
@@ -343,34 +343,34 @@ flowchart TB
                                         <li>No universal error envelope</li>
                                     </ul>
                                 </div>
-                <div class="card">
-                    <h3>DOM Stability</h3>
-                    <ul>
-                        <li>5x browser_view same page</li>
-                        <li>Diff outputs</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Context Scope</h3>
-                    <ul>
-                        <li>Establish fact early</li>
-                        <li>Ask smart friend later</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Latency Profiling</h3>
-                    <ul>
-                        <li>10x each operator</li>
-                        <li>Compute mean/variance</li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Caching Test</h3>
-                    <ul>
-                        <li>Identical queries back-to-back</li>
-                        <li>Compare results</li>
-                    </ul>
-                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>DOM Stability (DONE)</h3>
+                                    <ul>
+                                        <li>Deterministic HTML stripping</li>
+                                        <li>Stable devinid assignment</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Context Scope (DONE)</h3>
+                                    <ul>
+                                        <li>Has conversation history</li>
+                                        <li>Not question-only</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Latency Profiling (DONE)</h3>
+                                    <ul>
+                                        <li>Sub-ms to low-ms local ops</li>
+                                        <li>Harness adds overhead</li>
+                                    </ul>
+                                </div>
+                                <div class="card" style="border-left-color: #2ecc71;">
+                                    <h3>Caching Test (DONE)</h3>
+                                    <ul>
+                                        <li>Consistent results</li>
+                                        <li>Cache or determinism</li>
+                                    </ul>
+                                </div>
                                 <div class="card" style="border-left-color: #2ecc71;">
                                     <h3>Parallel Verification (DONE)</h3>
                                     <ul>
