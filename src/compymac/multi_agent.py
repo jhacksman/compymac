@@ -101,7 +101,8 @@ class ReflectionAction(Enum):
     RETRY_WITH_CHANGES = "retry_with_changes"  # Retry with modified instruction
     GATHER_INFO = "gather_info"  # Run a diagnostic step
     REPLAN = "replan"  # Create a new plan
-    STOP = "stop"  # Task cannot be completed
+    COMPLETE = "complete"  # Goal achieved, workflow complete
+    STOP = "stop"  # Task cannot be completed (failure)
 
 
 @dataclass
@@ -336,7 +337,10 @@ Your job is to recommend one of these actions:
 - RETRY_WITH_CHANGES: The step failed and needs a modified approach
 - GATHER_INFO: We need more information before proceeding
 - REPLAN: The plan is fundamentally wrong and needs revision
-- STOP: The task cannot be completed
+- COMPLETE: The goal has been fully achieved, workflow is done (use this on the LAST step when successful)
+- STOP: The task cannot be completed due to unrecoverable errors
+
+IMPORTANT: Use COMPLETE (not STOP) when the goal is achieved. Use STOP only for failures.
 
 Output your recommendation as JSON:
 {
@@ -678,6 +682,12 @@ class ManagerAgent:
 
         elif reflection.action == ReflectionAction.REPLAN:
             self.state = ManagerState.REPLANNING
+
+        elif reflection.action == ReflectionAction.COMPLETE:
+            # Goal achieved - mark as completed
+            self.state = ManagerState.COMPLETED
+            self.workspace.is_complete = True
+            self.workspace.final_result = self._generate_final_result()
 
         elif reflection.action == ReflectionAction.STOP:
             self.state = ManagerState.FAILED
