@@ -437,6 +437,65 @@ class HarnessSimulator:
         """Clear the event log."""
         self.event_log.clear()
 
+    def validate_schema(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[bool, str | None]:
+        """Validate arguments against tool schema. Returns (is_valid, error_message)."""
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            return False, f"Unknown tool: {tool_name}"
+        return self._validate_schema(tool, arguments, "validation_check")
+
+    def register_tool_from_schema(
+        self,
+        name: str,
+        schema: "ToolSchema",
+        handler: Callable[..., str],
+    ) -> None:
+        """Register a tool with the harness using a ToolSchema."""
+        # Convert to SimulatedTool
+        sim_schema = ToolSchema(
+            name=name,
+            required_params=schema.required_params,
+            optional_params=schema.optional_params,
+            param_types=schema.param_types,
+        )
+        self.register_tool(SimulatedTool(
+            name=name,
+            schema=sim_schema,
+            handler=handler,
+        ))
+
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format schemas for all registered tools."""
+        schemas = []
+        for tool in self._tools.values():
+            properties = {}
+            for param in tool.schema.required_params + tool.schema.optional_params:
+                param_type = tool.schema.param_types.get(param, "string")
+                json_type = "string"
+                if param_type == "number":
+                    json_type = "number"
+                elif param_type == "boolean":
+                    json_type = "boolean"
+                properties[param] = {"type": json_type}
+
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": f"Tool: {tool.name}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": tool.schema.required_params,
+                    },
+                },
+            })
+        return schemas
+
 
 def create_default_simulator() -> HarnessSimulator:
     """
