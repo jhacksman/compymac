@@ -37,8 +37,10 @@ class Message:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to OpenAI API format."""
+        # Handle both Role enum and string values
+        role_value = self.role.value if isinstance(self.role, Role) else self.role
         result: dict[str, Any] = {
-            "role": self.role.value,
+            "role": role_value,
             "content": self.content,
         }
         if self.name is not None:

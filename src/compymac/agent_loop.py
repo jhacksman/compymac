@@ -12,6 +12,7 @@ This module implements the core agent loop that:
 The loop is harness-agnostic - it works with Simulator, LocalHarness, or ReplayHarness.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -102,8 +103,11 @@ class AgentLoop:
             message_count=len(self.state.messages),
         )
 
+        # Convert Message objects to dicts for API serialization
+        messages_for_api = [msg.to_dict() for msg in self.state.messages]
+
         response = self.llm_client.chat(
-            messages=self.state.messages,
+            messages=messages_for_api,
             tools=tools if tools else None,
         )
 
@@ -115,10 +119,25 @@ class AgentLoop:
         )
 
         # Add assistant message to history
+        # Convert ToolCall objects to dicts for serialization
+        tool_calls_as_dicts = None
+        if response.tool_calls:
+            tool_calls_as_dicts = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": tc.arguments if isinstance(tc.arguments, str) else json.dumps(tc.arguments),
+                    }
+                }
+                for tc in response.tool_calls
+            ]
+
         self.state.messages.append(Message(
             role="assistant",
             content=response.content or "",
-            tool_calls=response.tool_calls,
+            tool_calls=tool_calls_as_dicts,
         ))
 
         # If no tool calls, return text response
