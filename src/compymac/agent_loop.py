@@ -105,7 +105,7 @@ class AgentLoop:
 
         # Convert Message objects to dicts for API serialization
         messages_for_api = [msg.to_dict() for msg in self.state.messages]
-        
+
         response = self.llm_client.chat(
             messages=messages_for_api,
             tools=tools if tools else None,
@@ -133,7 +133,7 @@ class AgentLoop:
                 }
                 for tc in response.tool_calls
             ]
-        
+
         self.state.messages.append(Message(
             role="assistant",
             content=response.content or "",
