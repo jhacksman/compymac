@@ -15,10 +15,14 @@ The loop is harness-agnostic - it works with Simulator, LocalHarness, or ReplayH
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from compymac.harness import EventLog, EventType, Harness
 from compymac.llm import LLMClient
 from compymac.types import Message, ToolCall, ToolResult
+
+if TYPE_CHECKING:
+    from compymac.memory import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,9 @@ class AgentConfig:
     max_tool_calls_per_step: int = 10
     system_prompt: str = ""
     stop_on_error: bool = False
+    use_memory: bool = False  # Enable smart memory management
+    memory_compression_threshold: float = 0.80  # Compress when utilization exceeds this
+    memory_keep_recent_turns: int = 4  # Number of recent turns to always keep
 
 
 @dataclass
@@ -65,6 +72,18 @@ class AgentLoop:
         self.config = config or AgentConfig()
         self.state = AgentState()
         self._event_log = self.harness.get_event_log()
+        self._memory_manager: "MemoryManager | None" = None
+
+        # Initialize memory manager if enabled
+        if self.config.use_memory:
+            from compymac.memory import MemoryManager
+            from compymac.config import ContextConfig
+            self._memory_manager = MemoryManager(
+                config=ContextConfig.from_env(),
+                llm_client=llm_client,
+                keep_recent_turns=self.config.memory_keep_recent_turns,
+                compression_threshold=self.config.memory_compression_threshold,
+            )
 
         # Initialize with system prompt if provided
         if self.config.system_prompt:
@@ -103,8 +122,23 @@ class AgentLoop:
             message_count=len(self.state.messages),
         )
 
+        # Process messages through memory manager if enabled
+        messages_to_send = self.state.messages
+        if self._memory_manager:
+            messages_to_send = self._memory_manager.process_messages(self.state.messages)
+            # Update state with compressed messages if compression occurred
+            if len(messages_to_send) < len(self.state.messages):
+                self.state.messages = messages_to_send
+                self._event_log.log_event(
+                    EventType.OUTPUT_TRUNCATION,  # Reuse truncation event type
+                    tool_call_id=f"step_{self.state.step_count}",
+                    original_count=len(self.state.messages),
+                    compressed_count=len(messages_to_send),
+                    memory_state=str(self._memory_manager.get_memory_state().facts.to_dict()),
+                )
+
         # Convert Message objects to dicts for API serialization
-        messages_for_api = [msg.to_dict() for msg in self.state.messages]
+        messages_for_api = [msg.to_dict() for msg in messages_to_send]
 
         response = self.llm_client.chat(
             messages=messages_for_api,
