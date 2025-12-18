@@ -888,11 +888,75 @@ Issued 5 parallel `time sleep 2` commands in a single turn using different shell
 
 ---
 
-## 8. Summary and Next Steps
+## 8. Phase 2 Experiments: Remaining Unknowns
 
-### Completed Experiments (12/12)
+These experiments target the high-impact unknowns identified after completing the initial 12 experiments.
 
-All experiments from the backlog have been completed:
+### 8.1 File Read Truncation (COMPLETED)
+**Goal**: Measure harness-level truncation on file reads
+**Method**: Create 1000-line file, Read it, observe partial view
+**Status**: COMPLETED - 2025-12-18
+
+**Test Run**:
+Created file with 1000 lines (~120,000 characters total). Used Read tool to view it.
+
+**Results**:
+- File has 1000 lines total
+- Read tool showed only 136 lines (partial view)
+- Warning displayed: "Only a partial view of the file was shown"
+- Offset/limit parameters available for pagination
+
+**Key Findings**:
+1. **File Read has line-based truncation**: ~136 lines shown by default
+2. **Pagination supported**: offset/limit parameters allow reading more
+3. **Separate from shell truncation**: This is line-based, not character-based like shell output (20k chars)
+
+**Conclusion**: File Read truncates at approximately **136 lines** by default, with pagination available for larger files.
+
+### 8.2 Recovery/Checkpoint Semantics (COMPLETED)
+**Goal**: Test harness behavior on failures, timeouts, and shell kills
+**Method**: Induce various failure modes and observe harness response
+**Status**: COMPLETED - 2025-12-18
+
+**Tests Run**:
+
+| Test | Method | Result |
+|------|--------|--------|
+| Command timeout | `timeout 1 sleep 10` | Exit code 124, clean handling |
+| Shell kill | `kill_shell` tool | Shell terminated cleanly |
+| Background process | `sleep 30 &` then kill shell | Process orphaned, shell killed |
+
+**Key Findings**:
+1. **No automatic retry**: Harness does not retry failed commands
+2. **Clean timeout handling**: Timeout produces exit code 124, not harness error
+3. **Shell kill is immediate**: kill_shell tool terminates shell without waiting
+4. **No checkpoint/resume observed**: No evidence of tool-call replay or idempotency keys
+
+**Conclusion**: The harness handles failures **gracefully but without retry**. Recovery is manual - the agent must decide to retry. No checkpoint/resume mechanism was observed at the tool level.
+
+### 8.3 Shell Output Truncation Confirmation (COMPLETED)
+**Goal**: Confirm 20k character display limit with larger test
+**Method**: Generate 50k character output, observe truncation
+**Status**: COMPLETED - 2025-12-18
+
+**Test Run**:
+`python3 -c "print('x' * 50000)"`
+
+**Results**:
+- Output: 50,000 characters
+- Truncated by: 30,001 characters
+- Displayed: ~20,000 characters
+- Full output saved to: `/home/ubuntu/full_outputs/`
+
+**Conclusion**: Confirms **20,000 character display limit** for shell output. Truncation message explicitly states the count.
+
+---
+
+## 9. Summary and Next Steps
+
+### Completed Experiments (12/12 + 3 Phase 2)
+
+All experiments from the backlog have been completed, plus 3 Phase 2 experiments:
 
 | Experiment | Key Finding |
 |------------|-------------|
@@ -911,16 +975,17 @@ All experiments from the backlog have been completed:
 
 ### Remaining Unknowns
 
-1. **Context window size**: Exact token limit not measured
+1. **Context window size (tokens)**: Exact token limit not measured (would require many turns)
 2. **Context truncation strategy**: Naive vs summarization unknown
-3. **Recovery mechanisms**: Checkpoint/resume behavior not tested
-4. **Remote database schema**: Not observable from VM
+3. **Remote database schema**: Not observable from VM
+4. **File Read truncation**: **MEASURED** - ~136 lines default, pagination available
+5. **Recovery mechanisms**: **MEASURED** - No auto-retry, manual recovery required
 
 ### Future Experiments
 
-1. Test recovery by killing shell mid-command
-2. Probe context window limits with increasing history
-3. Compare retained content across long sessions
-4. Test higher concurrency limits (20+, 50+, 100+)
+1. Probe context window limits with increasing history over many turns
+2. Compare retained content across long sessions to detect summarization
+3. Test higher concurrency limits (20+, 50+, 100+)
+4. Measure round-trip tool latency through harness (not just local ops)
 
 **Principle**: Every claim should be backed by reproducible observation. Speculation belongs in the "Unknowns" section until tested.
