@@ -72,12 +72,12 @@ class AgentLoop:
         self.config = config or AgentConfig()
         self.state = AgentState()
         self._event_log = self.harness.get_event_log()
-        self._memory_manager: "MemoryManager | None" = None
+        self._memory_manager: "MemoryManager | None" = None  # noqa: UP037
 
         # Initialize memory manager if enabled
         if self.config.use_memory:
-            from compymac.memory import MemoryManager
             from compymac.config import ContextConfig
+            from compymac.memory import MemoryManager
             self._memory_manager = MemoryManager(
                 config=ContextConfig.from_env(),
                 llm_client=llm_client,
