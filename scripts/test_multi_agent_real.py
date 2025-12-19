@@ -32,7 +32,7 @@ def create_llm_client():
     config = LLMConfig(
         base_url="https://api.venice.ai/api/v1",
         api_key=os.environ.get("LLM_API_KEY", ""),
-        model="llama-3.3-70b",
+        model="qwen3-next-80b",
         temperature=0.7,
         max_tokens=2000,
     )
@@ -312,7 +312,7 @@ def main():
     print("=" * 60)
     print("Multi-Agent Architecture Test - Venice.ai Integration")
     print("=" * 60)
-    print(f"Model: llama-3.3-70b")
+    print(f"Model: qwen3-next-80b")
     print(f"Base URL: https://api.venice.ai/api/v1")
     
     results = []
