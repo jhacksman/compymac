@@ -33,8 +33,17 @@ from compymac.parallel import (
     ForkedTraceContext,
     JoinSpan,
     ParallelExecutor,
+    ParallelGroupResult,
+    ParallelStepExecutor,
     ToolConflictModel,
     fork_trace_context,
+)
+from compymac.rollout import (
+    RolloutConfig,
+    RolloutOrchestrator,
+    RolloutResult,
+    RolloutSelectionResult,
+    RolloutStatus,
 )
 from compymac.session import Session
 from compymac.tools import Tool, ToolRegistry, create_mock_tools
@@ -88,6 +97,13 @@ __all__ = [
     "ForkedTraceContext",
     "JoinSpan",
     "ParallelExecutor",
+    "ParallelGroupResult",
+    "ParallelStepExecutor",
     "ToolConflictModel",
     "fork_trace_context",
+    "RolloutConfig",
+    "RolloutOrchestrator",
+    "RolloutResult",
+    "RolloutSelectionResult",
+    "RolloutStatus",
 ]
