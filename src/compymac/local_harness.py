@@ -11,6 +11,7 @@ Supports optional TraceContext for complete execution capture.
 import hashlib
 import json
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -73,16 +74,54 @@ class LocalHarness(Harness):
         self._call_counter = 0
         self._trace_context: TraceContext | None = trace_context
 
+        # Thread-local storage for per-thread trace contexts
+        # This allows parallel execution with independent trace contexts per thread
+        self._thread_local = threading.local()
+
         # Register default tools
         self._register_default_tools()
 
     def set_trace_context(self, trace_context: "TraceContext | None") -> None:
-        """Set the trace context for complete execution capture."""
-        self._trace_context = trace_context
+        """
+        Set the trace context for complete execution capture.
+
+        If called from a worker thread (during parallel execution),
+        sets the thread-local context. Otherwise sets the default context.
+        """
+        # Always set thread-local context for the current thread
+        self._thread_local.trace_context = trace_context
+        # Also update the default context if this is the main setup
+        if not hasattr(self._thread_local, '_is_worker'):
+            self._trace_context = trace_context
 
     def get_trace_context(self) -> "TraceContext | None":
-        """Get the current trace context."""
+        """
+        Get the current trace context.
+
+        Returns the thread-local context if set, otherwise the default context.
+        """
+        # Check for thread-local context first
+        thread_ctx = getattr(self._thread_local, 'trace_context', None)
+        if thread_ctx is not None:
+            return thread_ctx
         return self._trace_context
+
+    def set_thread_local_context(self, trace_context: "TraceContext | None") -> None:
+        """
+        Set a thread-local trace context for parallel execution.
+
+        This is used by ParallelExecutor to give each worker thread
+        its own forked trace context.
+        """
+        self._thread_local.trace_context = trace_context
+        self._thread_local._is_worker = True
+
+    def clear_thread_local_context(self) -> None:
+        """Clear the thread-local trace context after parallel execution."""
+        if hasattr(self._thread_local, 'trace_context'):
+            del self._thread_local.trace_context
+        if hasattr(self._thread_local, '_is_worker'):
+            del self._thread_local._is_worker
 
     def _compute_schema_hash(self, tool: RegisteredTool) -> str:
         """Compute a hash of the tool schema for provenance tracking."""
@@ -302,12 +341,13 @@ class LocalHarness(Harness):
         # Start trace span if tracing is enabled
         span_id: str | None = None
         input_artifact_hash: str | None = None
-        if self._trace_context:
+        trace_ctx = self.get_trace_context()
+        if trace_ctx:
             from compymac.trace_store import SpanKind, ToolProvenance
 
             # Store input as artifact
             input_data = json.dumps(tool_call.arguments, sort_keys=True).encode()
-            input_artifact = self._trace_context.store_artifact(
+            input_artifact = trace_ctx.store_artifact(
                 data=input_data,
                 artifact_type="tool_input",
                 content_type="application/json",
@@ -324,7 +364,7 @@ class LocalHarness(Harness):
             )
 
             # Start span
-            span_id = self._trace_context.start_span(
+            span_id = trace_ctx.start_span(
                 kind=SpanKind.TOOL_CALL,
                 name=f"tool:{tool.name}",
                 actor_id="harness",
@@ -359,9 +399,9 @@ class LocalHarness(Harness):
             )
 
             # End trace span with error if tracing
-            if self._trace_context and span_id:
+            if trace_ctx and span_id:
                 from compymac.trace_store import SpanStatus
-                self._trace_context.end_span(
+                trace_ctx.end_span(
                     status=SpanStatus.ERROR,
                     error_class=type(e).__name__,
                     error_message=str(e),
@@ -414,11 +454,11 @@ class LocalHarness(Harness):
 
         # End trace span with success if tracing
         output_artifact_hash: str | None = None
-        if self._trace_context and span_id:
+        if trace_ctx and span_id:
             from compymac.trace_store import SpanStatus
 
             # Store output as artifact
-            output_artifact = self._trace_context.store_artifact(
+            output_artifact = trace_ctx.store_artifact(
                 data=wrapped.encode(),
                 artifact_type="tool_output",
                 content_type="text/xml",
@@ -426,7 +466,7 @@ class LocalHarness(Harness):
             )
             output_artifact_hash = output_artifact.artifact_hash
 
-            self._trace_context.end_span(
+            trace_ctx.end_span(
                 status=SpanStatus.OK,
                 output_artifact_hash=output_artifact_hash,
             )

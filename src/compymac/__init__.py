@@ -28,6 +28,14 @@ from compymac.browser import (
 from compymac.context import ContextManager
 from compymac.llm import LLMClient
 from compymac.loop import AgentLoop
+from compymac.parallel import (
+    ConflictClass,
+    ForkedTraceContext,
+    JoinSpan,
+    ParallelExecutor,
+    ToolConflictModel,
+    fork_trace_context,
+)
 from compymac.session import Session
 from compymac.tools import Tool, ToolRegistry, create_mock_tools
 from compymac.trace_store import (
@@ -76,4 +84,10 @@ __all__ = [
     "ProvenanceRelation",
     "SummaryEventLog",
     "create_trace_store",
+    "ConflictClass",
+    "ForkedTraceContext",
+    "JoinSpan",
+    "ParallelExecutor",
+    "ToolConflictModel",
+    "fork_trace_context",
 ]
