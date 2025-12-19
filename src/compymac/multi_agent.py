@@ -138,52 +138,52 @@ class ReflectionResult:
 def classify_error(error_message: str) -> ErrorType:
     """
     Classify an error message to determine the appropriate recovery strategy.
-    
+
     Transient errors (retry likely to help):
     - Network timeouts, connection errors
     - Rate limiting
     - Temporary service unavailability
-    
+
     Permanent errors (retry won't help):
     - File not found, permission denied
     - Invalid input, syntax errors
     - Missing dependencies
     """
     error_lower = error_message.lower()
-    
+
     transient_patterns = [
         "timeout", "timed out", "connection", "network",
         "rate limit", "too many requests", "503", "502", "504",
         "temporarily unavailable", "retry", "busy", "overloaded",
     ]
-    
+
     permanent_patterns = [
         "not found", "no such file", "permission denied", "access denied",
         "invalid", "syntax error", "parse error", "type error",
         "missing", "does not exist", "undefined", "unknown",
         "cannot", "unable to", "failed to parse",
     ]
-    
+
     for pattern in transient_patterns:
         if pattern in error_lower:
             return ErrorType.TRANSIENT
-    
+
     for pattern in permanent_patterns:
         if pattern in error_lower:
             return ErrorType.PERMANENT
-    
+
     return ErrorType.UNKNOWN
 
 
 def calculate_backoff_ms(attempt: int, base_ms: int = 1000, max_ms: int = 30000) -> int:
     """
     Calculate exponential backoff delay for retries.
-    
+
     Args:
         attempt: Current attempt number (1-indexed)
         base_ms: Base delay in milliseconds
         max_ms: Maximum delay in milliseconds
-    
+
     Returns:
         Delay in milliseconds
     """
@@ -254,31 +254,31 @@ class Workspace:
     def should_retry(self, step_index: int) -> tuple[bool, int]:
         """
         Determine if a step should be retried based on error history.
-        
+
         Returns:
             Tuple of (should_retry, backoff_ms)
         """
         attempt = self.get_attempt_count(step_index)
         if attempt >= self.max_attempts_per_step:
             return False, 0
-        
+
         error_pattern = self.get_error_pattern(step_index)
         if not error_pattern:
             return True, 0
-        
+
         last_error = error_pattern[-1]
-        
+
         # Don't retry permanent errors
         if last_error == ErrorType.PERMANENT:
             # Unless we've only tried once (might be a fluke)
             if attempt >= 2:
                 return False, 0
-        
+
         # For transient errors, use exponential backoff
         if last_error == ErrorType.TRANSIENT:
             backoff = calculate_backoff_ms(attempt)
             return True, backoff
-        
+
         # For unknown errors, retry with small backoff
         return True, calculate_backoff_ms(attempt, base_ms=500)
 
@@ -826,7 +826,7 @@ class ManagerAgent:
 
         # Extract file paths from artifacts
         if result.artifacts:
-            for key, value in result.artifacts.items():
+            for _key, value in result.artifacts.items():
                 if isinstance(value, str) and ("/" in value or "\\" in value):
                     # Looks like a file path
                     self.workspace.workflow_facts.files_mentioned.add(value)
