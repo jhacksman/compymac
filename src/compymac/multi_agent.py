@@ -9,6 +9,11 @@ This module implements a hierarchical multi-agent system where:
 
 The architecture uses a shared Workspace for state and typed outputs
 for communication between agents.
+
+Supports optional TraceContext for complete execution capture including:
+- Each agent's work (Manager, Planner, Executor, Reflector)
+- State transitions
+- Planning and replanning phases
 """
 
 import json
@@ -16,13 +21,17 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.harness import EventLog, EventType, Harness
 from compymac.llm import LLMClient
 from compymac.memory import MemoryFacts, MemoryManager, MemoryState
 from compymac.types import Message
+
+if TYPE_CHECKING:
+    from compymac.trace_store import TraceContext, TraceStore
 
 logger = logging.getLogger(__name__)
 
@@ -836,6 +845,7 @@ class ExecutorAgent:
     Agent that executes individual steps using the existing AgentLoop.
 
     Unlike other agents, the Executor wraps AgentLoop and has access to tools.
+    Supports optional TraceContext for complete execution capture.
     """
 
     def __init__(
@@ -843,6 +853,7 @@ class ExecutorAgent:
         harness: Harness,
         llm_client: LLMClient,
         config: AgentConfig | None = None,
+        trace_context: "TraceContext | None" = None,
     ):
         self.harness = harness
         self.llm_client = llm_client
@@ -850,6 +861,7 @@ class ExecutorAgent:
             max_steps=20,
             system_prompt="You are an Executor agent. Execute the given step precisely and report the result.",
         )
+        self._trace_context: TraceContext | None = trace_context
 
     def execute_step(
         self,
@@ -858,11 +870,26 @@ class ExecutorAgent:
         modified_instruction: str = "",
     ) -> StepResult:
         """Execute a single step and return the result."""
+        # Start executor span if tracing is enabled
+        executor_span_id: str | None = None
+        if self._trace_context:
+            from compymac.trace_store import SpanKind
+            executor_span_id = self._trace_context.start_span(
+                kind=SpanKind.AGENT_TURN,
+                name=f"executor_step_{step.index}",
+                actor_id="executor",
+                attributes={
+                    "step_index": step.index,
+                    "step_description": step.description[:200],
+                },
+            )
+
         # Create a fresh AgentLoop for this step
         loop = AgentLoop(
             harness=self.harness,
             llm_client=self.llm_client,
             config=self.config,
+            trace_context=self._trace_context,
         )
 
         # Build the execution prompt
@@ -889,6 +916,13 @@ Execute the step using the available tools. When done, summarize what you accomp
                 for word in ["error", "failed", "cannot", "unable"]
             )
 
+            # End executor span with success if tracing
+            if self._trace_context and executor_span_id:
+                from compymac.trace_store import SpanStatus
+                self._trace_context.end_span(
+                    status=SpanStatus.OK if success else SpanStatus.ERROR,
+                )
+
             return StepResult(
                 step_index=step.index,
                 success=success,
@@ -900,6 +934,16 @@ Execute the step using the available tools. When done, summarize what you accomp
 
         except Exception as e:
             logger.error(f"Step execution failed: {e}")
+
+            # End executor span with error if tracing
+            if self._trace_context and executor_span_id:
+                from compymac.trace_store import SpanStatus
+                self._trace_context.end_span(
+                    status=SpanStatus.ERROR,
+                    error_class=type(e).__name__,
+                    error_message=str(e),
+                )
+
             return StepResult(
                 step_index=step.index,
                 success=False,
@@ -915,6 +959,8 @@ class ManagerAgent:
 
     The Manager is the only component that mutates the Workspace directly.
     It drives the workflow: Plan → Execute → Reflect → (repeat or replan).
+
+    Supports optional TraceContext for complete execution capture.
     """
 
     def __init__(
@@ -923,15 +969,29 @@ class ManagerAgent:
         llm_client: LLMClient,
         event_log: EventLog | None = None,
         enable_memory: bool = False,
+        trace_base_path: Path | None = None,
+        trace_context: "TraceContext | None" = None,
     ):
         self.harness = harness
         self.llm_client = llm_client
         self.event_log = event_log or harness.get_event_log()
         self.enable_memory = enable_memory
+        self._trace_context: "TraceContext | None" = trace_context  # noqa: UP037
+        self._trace_store: "TraceStore | None" = None  # noqa: UP037
+
+        # Initialize tracing if base path is configured
+        if trace_base_path and not self._trace_context:
+            from compymac.trace_store import TraceContext, create_trace_store
+            self._trace_store, _ = create_trace_store(trace_base_path)
+            self._trace_context = TraceContext(self._trace_store)
+
+        # Pass trace context to harness if available
+        if self._trace_context:
+            self.harness.set_trace_context(self._trace_context)
 
         # Initialize sub-agents
         self.planner = PlannerAgent(llm_client)
-        self.executor = ExecutorAgent(harness, llm_client)
+        self.executor = ExecutorAgent(harness, llm_client, trace_context=self._trace_context)
         self.reflector = ReflectorAgent(llm_client)
 
         # Initialize memory manager if enabled
