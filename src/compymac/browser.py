@@ -14,6 +14,7 @@ Key features:
 
 import asyncio
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -711,25 +712,46 @@ def create_browser_tools(browser_service: BrowserService) -> list[dict[str, Any]
 
 # Synchronous wrapper for non-async contexts
 class SyncBrowserService:
-    """Synchronous wrapper around BrowserService for non-async code."""
+    """Synchronous wrapper around BrowserService for non-async code.
+
+    Uses a dedicated thread with its own event loop to avoid conflicts
+    with any existing event loop in the calling context.
+    """
 
     def __init__(self, config: BrowserConfig | None = None):
-        self._async_service = BrowserService(config)
+        self._config = config
+        self._async_service: BrowserService | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._started = threading.Event()
 
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        if self._loop is None or self._loop.is_closed():
-            try:
-                self._loop = asyncio.get_event_loop()
-            except RuntimeError:
-                self._loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self._loop)
-        return self._loop
+    def _run_loop(self) -> None:
+        """Run the event loop in a dedicated thread."""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._async_service = BrowserService(self._config)
+        self._started.set()
+        self._loop.run_forever()
+
+    def _ensure_thread(self) -> None:
+        """Ensure the background thread is running."""
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._thread.start()
+            self._started.wait(timeout=10)
 
     def _run(self, coro: Any) -> Any:
-        return self._get_loop().run_until_complete(coro)
+        """Run a coroutine in the background thread's event loop."""
+        self._ensure_thread()
+        if self._loop is None:
+            raise RuntimeError("Event loop not initialized")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=60)
 
     def initialize(self) -> None:
+        self._ensure_thread()
+        if self._async_service is None:
+            raise RuntimeError("BrowserService not initialized in thread")
         self._run(self._async_service.initialize())
 
     def close(self) -> None:

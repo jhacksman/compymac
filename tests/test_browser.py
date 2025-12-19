@@ -221,8 +221,16 @@ class TestSyncBrowserService:
 
     def test_init(self):
         service = SyncBrowserService()
-        assert service._async_service is not None
+        # With thread-based approach, _async_service is None until thread starts
+        assert service._async_service is None
         assert service._loop is None
+        assert service._config is None  # Default config
+        assert service._thread is None  # Thread not started yet
+
+    def test_init_with_config(self):
+        config = BrowserConfig(mode=BrowserMode.HEADFUL)
+        service = SyncBrowserService(config)
+        assert service._config == config
 
     def test_context_manager(self):
         with patch.object(SyncBrowserService, 'initialize') as mock_init:
