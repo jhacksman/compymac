@@ -13,6 +13,7 @@ for communication between agents.
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.harness import EventLog, EventType, Harness
 from compymac.llm import LLMClient
+from compymac.memory import MemoryFacts, MemoryManager, MemoryState
 from compymac.types import Message
 
 logger = logging.getLogger(__name__)
@@ -73,6 +75,13 @@ class PlanStep:
         )
 
 
+class ErrorType(Enum):
+    """Classification of errors for better recovery strategies."""
+    TRANSIENT = "transient"  # Temporary errors (network, timeout) - retry likely to help
+    PERMANENT = "permanent"  # Permanent errors (invalid input, missing file) - retry won't help
+    UNKNOWN = "unknown"  # Cannot classify - use default strategy
+
+
 @dataclass
 class StepResult:
     """Result of executing a step."""
@@ -82,6 +91,8 @@ class StepResult:
     tool_calls_made: int = 0
     artifacts: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    error_type: ErrorType | None = None
+    execution_time_ms: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +102,8 @@ class StepResult:
             "tool_calls_made": self.tool_calls_made,
             "artifacts": self.artifacts,
             "errors": self.errors,
+            "error_type": self.error_type.value if self.error_type else None,
+            "execution_time_ms": self.execution_time_ms,
         }
 
 
@@ -122,6 +135,62 @@ class ReflectionResult:
         }
 
 
+def classify_error(error_message: str) -> ErrorType:
+    """
+    Classify an error message to determine the appropriate recovery strategy.
+
+    Transient errors (retry likely to help):
+    - Network timeouts, connection errors
+    - Rate limiting
+    - Temporary service unavailability
+
+    Permanent errors (retry won't help):
+    - File not found, permission denied
+    - Invalid input, syntax errors
+    - Missing dependencies
+    """
+    error_lower = error_message.lower()
+
+    transient_patterns = [
+        "timeout", "timed out", "connection", "network",
+        "rate limit", "too many requests", "503", "502", "504",
+        "temporarily unavailable", "retry", "busy", "overloaded",
+    ]
+
+    permanent_patterns = [
+        "not found", "no such file", "permission denied", "access denied",
+        "invalid", "syntax error", "parse error", "type error",
+        "missing", "does not exist", "undefined", "unknown",
+        "cannot", "unable to", "failed to parse",
+    ]
+
+    for pattern in transient_patterns:
+        if pattern in error_lower:
+            return ErrorType.TRANSIENT
+
+    for pattern in permanent_patterns:
+        if pattern in error_lower:
+            return ErrorType.PERMANENT
+
+    return ErrorType.UNKNOWN
+
+
+def calculate_backoff_ms(attempt: int, base_ms: int = 1000, max_ms: int = 30000) -> int:
+    """
+    Calculate exponential backoff delay for retries.
+
+    Args:
+        attempt: Current attempt number (1-indexed)
+        base_ms: Base delay in milliseconds
+        max_ms: Maximum delay in milliseconds
+
+    Returns:
+        Delay in milliseconds
+    """
+    delay = base_ms * (2 ** (attempt - 1))
+    return min(delay, max_ms)
+
+
 @dataclass
 class Workspace:
     """
@@ -141,6 +210,14 @@ class Workspace:
     is_complete: bool = False
     final_result: str = ""
     error: str = ""
+    # Memory integration
+    memory_state: MemoryState | None = None
+    workflow_facts: MemoryFacts | None = None
+    # Error tracking for smarter recovery
+    error_history: list[tuple[int, str, ErrorType]] = field(default_factory=list)
+    # Timing metrics
+    total_execution_time_ms: int = 0
+    step_start_time: float = 0.0
 
     def get_current_step(self) -> PlanStep | None:
         """Get the current step to execute."""
@@ -164,6 +241,60 @@ class Workspace:
         self.attempt_counts[step_index] = self.get_attempt_count(step_index) + 1
         return self.attempt_counts[step_index]
 
+    def record_error(self, step_index: int, error_message: str) -> ErrorType:
+        """Record an error and classify it for recovery strategy."""
+        error_type = classify_error(error_message)
+        self.error_history.append((step_index, error_message, error_type))
+        return error_type
+
+    def get_error_pattern(self, step_index: int) -> list[ErrorType]:
+        """Get the pattern of errors for a specific step."""
+        return [et for si, _, et in self.error_history if si == step_index]
+
+    def should_retry(self, step_index: int) -> tuple[bool, int]:
+        """
+        Determine if a step should be retried based on error history.
+
+        Returns:
+            Tuple of (should_retry, backoff_ms)
+        """
+        attempt = self.get_attempt_count(step_index)
+        if attempt >= self.max_attempts_per_step:
+            return False, 0
+
+        error_pattern = self.get_error_pattern(step_index)
+        if not error_pattern:
+            return True, 0
+
+        last_error = error_pattern[-1]
+
+        # Don't retry permanent errors
+        if last_error == ErrorType.PERMANENT:
+            # Unless we've only tried once (might be a fluke)
+            if attempt >= 2:
+                return False, 0
+
+        # For transient errors, use exponential backoff
+        if last_error == ErrorType.TRANSIENT:
+            backoff = calculate_backoff_ms(attempt)
+            return True, backoff
+
+        # For unknown errors, retry with small backoff
+        return True, calculate_backoff_ms(attempt, base_ms=500)
+
+    def start_step_timer(self) -> None:
+        """Start timing a step execution."""
+        self.step_start_time = time.time()
+
+    def stop_step_timer(self) -> int:
+        """Stop timing and return elapsed milliseconds."""
+        if self.step_start_time > 0:
+            elapsed_ms = int((time.time() - self.step_start_time) * 1000)
+            self.total_execution_time_ms += elapsed_ms
+            self.step_start_time = 0.0
+            return elapsed_ms
+        return 0
+
     def to_summary(self) -> str:
         """Generate a summary of the workspace state."""
         lines = [
@@ -174,6 +305,10 @@ class Workspace:
         ]
         if self.constraints:
             lines.append(f"Constraints: {', '.join(self.constraints)}")
+        if self.error_history:
+            lines.append(f"Errors encountered: {len(self.error_history)}")
+        if self.total_execution_time_ms > 0:
+            lines.append(f"Total execution time: {self.total_execution_time_ms}ms")
         return "\n".join(lines)
 
 
@@ -509,15 +644,24 @@ class ManagerAgent:
         harness: Harness,
         llm_client: LLMClient,
         event_log: EventLog | None = None,
+        enable_memory: bool = False,
     ):
         self.harness = harness
         self.llm_client = llm_client
         self.event_log = event_log or harness.get_event_log()
+        self.enable_memory = enable_memory
 
         # Initialize sub-agents
         self.planner = PlannerAgent(llm_client)
         self.executor = ExecutorAgent(harness, llm_client)
         self.reflector = ReflectorAgent(llm_client)
+
+        # Initialize memory manager if enabled
+        self.memory_manager: MemoryManager | None = None
+        if enable_memory:
+            self.memory_manager = MemoryManager(
+                llm_client=llm_client,
+            )
 
         # State
         self.workspace = Workspace()
@@ -541,6 +685,11 @@ class ManagerAgent:
         self.workspace.goal = goal
         self.workspace.constraints = constraints or []
         self.state = ManagerState.INITIAL
+
+        # Initialize memory state if memory is enabled
+        if self.memory_manager:
+            self.workspace.memory_state = self.memory_manager.get_state()
+            self.workspace.workflow_facts = MemoryFacts()
 
         self._log_event("workflow_start", goal=goal)
 
@@ -626,19 +775,78 @@ class ManagerAgent:
         # Increment attempt count
         attempt = self.workspace.increment_attempt(step.index)
 
+        # Check if we should apply backoff before retrying
+        if attempt > 1:
+            should_retry, backoff_ms = self.workspace.should_retry(step.index)
+            if not should_retry:
+                # Skip to replanning if we shouldn't retry
+                self.state = ManagerState.REPLANNING
+                return
+            if backoff_ms > 0:
+                self._log_event("backoff_wait", backoff_ms=backoff_ms, attempt=attempt)
+                time.sleep(backoff_ms / 1000.0)
+
+        # Start timing the step execution
+        self.workspace.start_step_timer()
+
         # Execute the step
         result = self.executor.execute_step(step, self.workspace)
+
+        # Stop timing and record execution time
+        execution_time_ms = self.workspace.stop_step_timer()
+        result.execution_time_ms = execution_time_ms
+
+        # Record any errors for classification
+        if not result.success and result.errors:
+            for error in result.errors:
+                error_type = self.workspace.record_error(step.index, error)
+                result.error_type = error_type
+
         self.workspace.step_results.append(result)
+
+        # Extract facts from the result for memory
+        self._extract_facts_from_result(result)
 
         self._log_event(
             "step_result",
             step_index=step.index,
             success=result.success,
             attempt=attempt,
+            execution_time_ms=execution_time_ms,
+            error_type=result.error_type.value if result.error_type else None,
         )
 
         # Transition to reflecting
         self.state = ManagerState.REFLECTING
+
+    def _extract_facts_from_result(self, result: StepResult) -> None:
+        """Extract facts from a step result and store in workflow memory."""
+        if not self.workspace.workflow_facts:
+            return
+
+        # Extract file paths from artifacts
+        if result.artifacts:
+            for _key, value in result.artifacts.items():
+                if isinstance(value, str) and ("/" in value or "\\" in value):
+                    # Looks like a file path
+                    self.workspace.workflow_facts.files_mentioned.add(value)
+
+        # Extract errors
+        if result.errors:
+            for error in result.errors:
+                self.workspace.workflow_facts.errors_seen.append(error)
+
+        # Extract commands from summary (simple heuristic)
+        summary_lower = result.summary.lower()
+        if "ran" in summary_lower or "executed" in summary_lower:
+            # Try to extract command-like patterns
+            words = result.summary.split()
+            for i, word in enumerate(words):
+                if word in ("ran", "executed", "running") and i + 1 < len(words):
+                    # Next word might be a command
+                    cmd = words[i + 1].strip("'\"")
+                    if cmd and not cmd.startswith("-"):
+                        self.workspace.workflow_facts.commands_run.append(cmd)
 
     def _do_reflecting(self) -> None:
         """Reflect on the last step result."""
@@ -734,13 +942,27 @@ class ManagerAgent:
         lines = [
             f"Goal achieved: {self.workspace.goal}",
             f"Steps completed: {successful_steps}/{total_steps}",
-            "",
-            "Summary:",
         ]
+
+        # Add timing metrics
+        if self.workspace.total_execution_time_ms > 0:
+            total_sec = self.workspace.total_execution_time_ms / 1000.0
+            lines.append(f"Total execution time: {total_sec:.2f}s")
+
+        # Add error summary
+        if self.workspace.error_history:
+            error_count = len(self.workspace.error_history)
+            transient = sum(1 for _, _, et in self.workspace.error_history if et == ErrorType.TRANSIENT)
+            permanent = sum(1 for _, _, et in self.workspace.error_history if et == ErrorType.PERMANENT)
+            lines.append(f"Errors encountered: {error_count} (transient: {transient}, permanent: {permanent})")
+
+        lines.append("")
+        lines.append("Summary:")
 
         for result in self.workspace.step_results:
             status = "OK" if result.success else "FAILED"
-            lines.append(f"  Step {result.step_index + 1} [{status}]: {result.summary[:100]}")
+            time_str = f" ({result.execution_time_ms}ms)" if result.execution_time_ms > 0 else ""
+            lines.append(f"  Step {result.step_index + 1} [{status}]{time_str}: {result.summary[:100]}")
 
         return "\n".join(lines)
 
