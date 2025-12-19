@@ -9,6 +9,8 @@ from compymac.multi_agent import (
     ManagerState,
     PlannerAgent,
     PlanStep,
+    PlanValidationResult,
+    PlanValidator,
     ReflectionAction,
     ReflectionResult,
     ReflectorAgent,
@@ -293,22 +295,23 @@ class TestPlannerAgent:
   ]
 }'''
         client = MockLLMClient([json_response])
-        planner = PlannerAgent(client)
+        planner = PlannerAgent(client, enable_validation=False)
         ws = Workspace(goal="Test goal")
 
-        plan = planner.create_plan(ws)
+        plan, validation_result = planner.create_plan(ws)
 
         assert len(plan) == 2
         assert plan[0].description == "First step"
         assert plan[1].description == "Second step"
         assert plan[1].dependencies == [0]
+        assert validation_result is None  # Validation disabled
 
     def test_create_plan_fallback_on_invalid_json(self):
         client = MockLLMClient(["This is not JSON, just a description"])
-        planner = PlannerAgent(client)
+        planner = PlannerAgent(client, enable_validation=False)
         ws = Workspace(goal="Test goal")
 
-        plan = planner.create_plan(ws)
+        plan, validation_result = planner.create_plan(ws)
 
         # Should create a single fallback step
         assert len(plan) == 1
@@ -326,15 +329,16 @@ class TestPlannerAgent:
   ]
 }'''
         client = MockLLMClient([json_response])
-        planner = PlannerAgent(client)
+        planner = PlannerAgent(client, enable_validation=False)
         ws = Workspace(goal="Test goal")
         ws.plan = [PlanStep(index=0, description="Old step", expected_outcome="")]
         ws.current_step_index = 0
 
-        new_steps = planner.revise_plan(ws, "Previous approach failed")
+        new_steps, validation_result = planner.revise_plan(ws, "Previous approach failed")
 
         assert len(new_steps) == 1
         assert new_steps[0].description == "New approach"
+        assert validation_result is None  # Validation disabled
 
 
 class TestReflectorAgent:
@@ -868,3 +872,294 @@ class TestManagerAgentWithMemory:
         manager = ManagerAgent(harness, client, enable_memory=True)
         assert manager.memory_manager is not None
         assert manager.enable_memory is True
+
+
+class TestPlanStepEnhanced:
+    """Tests for enhanced PlanStep with priority and parallel execution hints."""
+
+    def test_to_dict_with_new_fields(self):
+        """Test PlanStep.to_dict includes new fields."""
+        step = PlanStep(
+            index=0,
+            description="Test step",
+            expected_outcome="Success",
+            tools_hint=["tool1"],
+            dependencies=[],
+            priority=5,
+            can_parallelize=True,
+            estimated_complexity="high",
+        )
+        result = step.to_dict()
+        assert result["priority"] == 5
+        assert result["can_parallelize"] is True
+        assert result["estimated_complexity"] == "high"
+
+    def test_from_dict_with_new_fields(self):
+        """Test PlanStep.from_dict parses new fields."""
+        data = {
+            "index": 1,
+            "description": "Another step",
+            "expected_outcome": "Done",
+            "tools_hint": ["tool2"],
+            "dependencies": [0],
+            "priority": 3,
+            "can_parallelize": True,
+            "estimated_complexity": "low",
+        }
+        step = PlanStep.from_dict(data)
+        assert step.priority == 3
+        assert step.can_parallelize is True
+        assert step.estimated_complexity == "low"
+
+    def test_from_dict_defaults_new_fields(self):
+        """Test PlanStep.from_dict uses defaults for missing new fields."""
+        data = {
+            "index": 0,
+            "description": "Minimal step",
+        }
+        step = PlanStep.from_dict(data)
+        assert step.priority == 0
+        assert step.can_parallelize is False
+        assert step.estimated_complexity == "medium"
+
+
+class TestPlanValidationResult:
+    """Tests for PlanValidationResult dataclass."""
+
+    def test_valid_result(self):
+        """Test creating a valid result."""
+        result = PlanValidationResult(
+            is_valid=True,
+            errors=[],
+            warnings=[],
+            parallel_groups=[[0], [1, 2], [3]],
+        )
+        assert result.is_valid is True
+        assert len(result.errors) == 0
+        assert len(result.parallel_groups) == 3
+
+    def test_invalid_result(self):
+        """Test creating an invalid result."""
+        result = PlanValidationResult(
+            is_valid=False,
+            errors=["Circular dependency detected"],
+            warnings=["Constraint may not be addressed"],
+        )
+        assert result.is_valid is False
+        assert len(result.errors) == 1
+        assert len(result.warnings) == 1
+
+
+class TestPlanValidatorDependencies:
+    """Tests for PlanValidator dependency validation."""
+
+    def test_valid_dependencies(self):
+        """Test validation of valid dependencies."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[]),
+            PlanStep(index=1, description="Step 1", expected_outcome="Done", dependencies=[0]),
+            PlanStep(index=2, description="Step 2", expected_outcome="Done", dependencies=[0, 1]),
+        ]
+        is_valid, errors = PlanValidator.validate_dependencies(steps)
+        assert is_valid is True
+        assert len(errors) == 0
+
+    def test_invalid_dependency_nonexistent_step(self):
+        """Test detection of dependency on non-existent step."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[]),
+            PlanStep(index=1, description="Step 1", expected_outcome="Done", dependencies=[5]),  # Step 5 doesn't exist
+        ]
+        is_valid, errors = PlanValidator.validate_dependencies(steps)
+        assert is_valid is False
+        assert any("non-existent step 5" in e for e in errors)
+
+    def test_invalid_forward_dependency(self):
+        """Test detection of forward dependency."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[1]),  # Forward dependency
+            PlanStep(index=1, description="Step 1", expected_outcome="Done", dependencies=[]),
+        ]
+        is_valid, errors = PlanValidator.validate_dependencies(steps)
+        assert is_valid is False
+        assert any("forward dependency" in e for e in errors)
+
+    def test_no_steps(self):
+        """Test validation with empty step list."""
+        is_valid, errors = PlanValidator.validate_dependencies([])
+        assert is_valid is True
+        assert len(errors) == 0
+
+
+class TestPlanValidatorParallelGroups:
+    """Tests for PlanValidator parallel group detection."""
+
+    def test_all_sequential(self):
+        """Test with all sequential steps (no parallelization)."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[], can_parallelize=False),
+            PlanStep(index=1, description="Step 1", expected_outcome="Done", dependencies=[0], can_parallelize=False),
+            PlanStep(index=2, description="Step 2", expected_outcome="Done", dependencies=[1], can_parallelize=False),
+        ]
+        groups = PlanValidator.find_parallel_groups(steps)
+        # Each step should be in its own group
+        assert len(groups) == 3
+        assert all(len(g) == 1 for g in groups)
+
+    def test_parallel_independent_steps(self):
+        """Test detection of parallel independent steps."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[], can_parallelize=True),
+            PlanStep(index=1, description="Step 1", expected_outcome="Done", dependencies=[], can_parallelize=True),
+            PlanStep(index=2, description="Step 2", expected_outcome="Done", dependencies=[0, 1], can_parallelize=False),
+        ]
+        groups = PlanValidator.find_parallel_groups(steps)
+        # Steps 0 and 1 should be in a parallel group
+        assert any(len(g) == 2 and 0 in g and 1 in g for g in groups)
+
+    def test_empty_steps(self):
+        """Test with empty step list."""
+        groups = PlanValidator.find_parallel_groups([])
+        assert groups == []
+
+    def test_single_step(self):
+        """Test with single step."""
+        steps = [
+            PlanStep(index=0, description="Step 0", expected_outcome="Done", dependencies=[], can_parallelize=True),
+        ]
+        groups = PlanValidator.find_parallel_groups(steps)
+        assert len(groups) == 1
+        assert groups[0] == [0]
+
+
+class TestPlanValidatorConstraints:
+    """Tests for PlanValidator constraint checking."""
+
+    def test_constraint_addressed(self):
+        """Test that addressed constraints don't generate warnings."""
+        steps = [
+            PlanStep(index=0, description="Create backup of database", expected_outcome="Backup created"),
+            PlanStep(index=1, description="Run migration", expected_outcome="Migration complete"),
+        ]
+        constraints = ["Must create backup before migration"]
+        all_addressed, warnings = PlanValidator.check_constraints(steps, constraints)
+        assert all_addressed is True
+        assert len(warnings) == 0
+
+    def test_constraint_not_addressed(self):
+        """Test that unaddressed constraints generate warnings."""
+        steps = [
+            PlanStep(index=0, description="Run migration", expected_outcome="Migration complete"),
+        ]
+        constraints = ["Must notify users before deployment"]
+        all_addressed, warnings = PlanValidator.check_constraints(steps, constraints)
+        assert all_addressed is False
+        assert len(warnings) == 1
+        assert "notify" in warnings[0].lower() or "users" in warnings[0].lower()
+
+    def test_empty_constraints(self):
+        """Test with no constraints."""
+        steps = [
+            PlanStep(index=0, description="Do something", expected_outcome="Done"),
+        ]
+        all_addressed, warnings = PlanValidator.check_constraints(steps, [])
+        assert all_addressed is True
+        assert len(warnings) == 0
+
+
+class TestPlanValidatorFullValidation:
+    """Tests for PlanValidator.validate_plan full validation."""
+
+    def test_valid_plan(self):
+        """Test validation of a valid plan."""
+        steps = [
+            PlanStep(index=0, description="Read config file", expected_outcome="Config loaded", dependencies=[]),
+            PlanStep(index=1, description="Parse config", expected_outcome="Config parsed", dependencies=[0]),
+        ]
+        result = PlanValidator.validate_plan(steps)
+        assert result.is_valid is True
+        assert len(result.errors) == 0
+
+    def test_empty_plan(self):
+        """Test validation of empty plan."""
+        result = PlanValidator.validate_plan([])
+        assert result.is_valid is False
+        assert any("no steps" in e.lower() for e in result.errors)
+
+    def test_duplicate_indices(self):
+        """Test detection of duplicate step indices."""
+        steps = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done"),
+            PlanStep(index=0, description="Step B", expected_outcome="Done"),  # Duplicate index
+        ]
+        result = PlanValidator.validate_plan(steps)
+        assert result.is_valid is False
+        assert any("duplicate" in e.lower() for e in result.errors)
+
+    def test_validation_with_constraints(self):
+        """Test validation includes constraint checking."""
+        steps = [
+            PlanStep(index=0, description="Deploy application", expected_outcome="Deployed"),
+        ]
+        constraints = ["Must run tests before deployment"]
+        result = PlanValidator.validate_plan(steps, constraints)
+        # Plan is structurally valid but has constraint warnings
+        assert result.is_valid is True  # No structural errors
+        assert len(result.warnings) > 0  # But has constraint warnings
+
+
+class TestPlannerAgentWithValidation:
+    """Tests for PlannerAgent with validation enabled."""
+
+    def test_create_plan_returns_validation_result(self):
+        """Test that create_plan returns validation result when enabled."""
+        json_response = """{
+            "steps": [
+                {"index": 0, "description": "Step 1", "expected_outcome": "Done", "dependencies": []},
+                {"index": 1, "description": "Step 2", "expected_outcome": "Done", "dependencies": [0]}
+            ]
+        }"""
+        client = MockLLMClient([json_response])
+        planner = PlannerAgent(client, enable_validation=True)
+
+        workspace = Workspace(goal="Test goal")
+        steps, validation_result = planner.create_plan(workspace)
+
+        assert len(steps) == 2
+        assert validation_result is not None
+        assert validation_result.is_valid is True
+
+    def test_create_plan_without_validation(self):
+        """Test that create_plan returns None validation result when disabled."""
+        json_response = """{
+            "steps": [
+                {"index": 0, "description": "Step 1", "expected_outcome": "Done"}
+            ]
+        }"""
+        client = MockLLMClient([json_response])
+        planner = PlannerAgent(client, enable_validation=False)
+
+        workspace = Workspace(goal="Test goal")
+        steps, validation_result = planner.create_plan(workspace)
+
+        assert len(steps) == 1
+        assert validation_result is None
+
+    def test_revise_plan_returns_validation_result(self):
+        """Test that revise_plan returns validation result."""
+        json_response = """{
+            "steps": [
+                {"index": 0, "description": "Revised step", "expected_outcome": "Done"}
+            ]
+        }"""
+        client = MockLLMClient([json_response])
+        planner = PlannerAgent(client, enable_validation=True)
+
+        workspace = Workspace(goal="Test goal")
+        workspace.plan = [PlanStep(index=0, description="Original", expected_outcome="Done")]
+        workspace.current_step_index = 0
+
+        steps, validation_result = planner.revise_plan(workspace, "Need revision")
+
+        assert len(steps) == 1
+        assert validation_result is not None

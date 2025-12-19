@@ -54,6 +54,9 @@ class PlanStep:
     expected_outcome: str
     tools_hint: list[str] = field(default_factory=list)
     dependencies: list[int] = field(default_factory=list)
+    priority: int = 0  # Higher priority = execute first among parallel steps
+    can_parallelize: bool = False  # Whether this step can run in parallel with others
+    estimated_complexity: str = "medium"  # low, medium, high - hint for scheduling
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +65,9 @@ class PlanStep:
             "expected_outcome": self.expected_outcome,
             "tools_hint": self.tools_hint,
             "dependencies": self.dependencies,
+            "priority": self.priority,
+            "can_parallelize": self.can_parallelize,
+            "estimated_complexity": self.estimated_complexity,
         }
 
     @classmethod
@@ -72,6 +78,9 @@ class PlanStep:
             expected_outcome=data.get("expected_outcome", ""),
             tools_hint=data.get("tools_hint", []),
             dependencies=data.get("dependencies", []),
+            priority=data.get("priority", 0),
+            can_parallelize=data.get("can_parallelize", False),
+            estimated_complexity=data.get("estimated_complexity", "medium"),
         )
 
 
@@ -312,6 +321,204 @@ class Workspace:
         return "\n".join(lines)
 
 
+@dataclass
+class PlanValidationResult:
+    """Result of plan validation."""
+    is_valid: bool
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    parallel_groups: list[list[int]] = field(default_factory=list)  # Groups of step indices that can run in parallel
+
+
+class PlanValidator:
+    """
+    Validates and analyzes execution plans.
+
+    Provides:
+    - Dependency validation (valid indices, no cycles)
+    - Parallel step detection (find independent steps)
+    - Constraint checking (ensure constraints are addressed)
+    """
+
+    @staticmethod
+    def validate_dependencies(steps: list[PlanStep]) -> tuple[bool, list[str]]:
+        """
+        Validate that all dependencies reference valid step indices and there are no cycles.
+
+        Returns:
+            Tuple of (is_valid, list of error messages)
+        """
+        errors = []
+        step_indices = {s.index for s in steps}
+
+        for step in steps:
+            for dep in step.dependencies:
+                if dep not in step_indices:
+                    errors.append(f"Step {step.index} depends on non-existent step {dep}")
+                if dep >= step.index:
+                    errors.append(f"Step {step.index} depends on step {dep} which comes after it (forward dependency)")
+
+        # Check for cycles using DFS
+        def has_cycle(step_index: int, visited: set[int], rec_stack: set[int]) -> bool:
+            visited.add(step_index)
+            rec_stack.add(step_index)
+
+            step = next((s for s in steps if s.index == step_index), None)
+            if step:
+                for dep in step.dependencies:
+                    if dep not in visited:
+                        if has_cycle(dep, visited, rec_stack):
+                            return True
+                    elif dep in rec_stack:
+                        return True
+
+            rec_stack.remove(step_index)
+            return False
+
+        visited: set[int] = set()
+        for step in steps:
+            if step.index not in visited:
+                if has_cycle(step.index, visited, set()):
+                    errors.append(f"Circular dependency detected involving step {step.index}")
+
+        return len(errors) == 0, errors
+
+    @staticmethod
+    def find_parallel_groups(steps: list[PlanStep]) -> list[list[int]]:
+        """
+        Find groups of steps that can potentially run in parallel.
+
+        Steps can run in parallel if:
+        1. They have no dependencies on each other
+        2. They are marked as can_parallelize=True
+        3. Their dependencies are all satisfied at the same point
+
+        Returns:
+            List of groups, where each group is a list of step indices that can run together
+        """
+        if not steps:
+            return []
+
+        groups: list[list[int]] = []
+        processed: set[int] = set()
+
+        # Find steps at each "level" (steps whose dependencies are all in previous levels)
+        while len(processed) < len(steps):
+            # Find all steps whose dependencies are all processed
+            ready = []
+            for step in steps:
+                if step.index not in processed:
+                    if all(d in processed for d in step.dependencies):
+                        ready.append(step.index)
+
+            if not ready:
+                # No progress possible - remaining steps have unresolvable dependencies
+                break
+
+            # Group ready steps that can parallelize
+            parallel_group = []
+            sequential = []
+
+            for idx in ready:
+                step = next(s for s in steps if s.index == idx)
+                if step.can_parallelize and len(ready) > 1:
+                    parallel_group.append(idx)
+                else:
+                    sequential.append(idx)
+
+            # Add parallel group if it has multiple steps
+            if len(parallel_group) > 1:
+                groups.append(parallel_group)
+                processed.update(parallel_group)
+            elif parallel_group:
+                # Single parallelizable step - treat as sequential
+                sequential.extend(parallel_group)
+
+            # Add sequential steps as individual groups
+            for idx in sequential:
+                groups.append([idx])
+                processed.add(idx)
+
+        return groups
+
+    @staticmethod
+    def check_constraints(
+        steps: list[PlanStep],
+        constraints: list[str],
+    ) -> tuple[bool, list[str]]:
+        """
+        Check if the plan addresses the given constraints.
+
+        This is a heuristic check - it looks for constraint keywords in step descriptions.
+
+        Returns:
+            Tuple of (all_addressed, list of warnings for unaddressed constraints)
+        """
+        warnings = []
+
+        for constraint in constraints:
+            # Extract key words from constraint (simple heuristic)
+            constraint_lower = constraint.lower()
+            key_words = [w for w in constraint_lower.split() if len(w) > 3]
+
+            # Check if any step mentions the constraint
+            addressed = False
+            for step in steps:
+                step_text = f"{step.description} {step.expected_outcome}".lower()
+                if any(word in step_text for word in key_words):
+                    addressed = True
+                    break
+
+            if not addressed:
+                warnings.append(f"Constraint may not be addressed: '{constraint}'")
+
+        return len(warnings) == 0, warnings
+
+    @classmethod
+    def validate_plan(
+        cls,
+        steps: list[PlanStep],
+        constraints: list[str] | None = None,
+    ) -> PlanValidationResult:
+        """
+        Perform full validation of a plan.
+
+        Returns:
+            PlanValidationResult with validation status, errors, warnings, and parallel groups
+        """
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        # Basic validation
+        if not steps:
+            errors.append("Plan has no steps")
+            return PlanValidationResult(is_valid=False, errors=errors)
+
+        # Check for duplicate indices
+        indices = [s.index for s in steps]
+        if len(indices) != len(set(indices)):
+            errors.append("Plan has duplicate step indices")
+
+        # Validate dependencies
+        deps_valid, dep_errors = cls.validate_dependencies(steps)
+        errors.extend(dep_errors)
+
+        # Check constraints if provided
+        if constraints:
+            _, constraint_warnings = cls.check_constraints(steps, constraints)
+            warnings.extend(constraint_warnings)
+
+        # Find parallel groups
+        parallel_groups = cls.find_parallel_groups(steps)
+
+        return PlanValidationResult(
+            is_valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings,
+            parallel_groups=parallel_groups,
+        )
+
+
 class BaseAgent:
     """Base class for all agents with LLM chat capabilities."""
 
@@ -346,12 +553,25 @@ class BaseAgent:
             self.messages.append(Message(role="system", content=self.system_prompt))
 
 
-PLANNER_SYSTEM_PROMPT = """You are a Planner agent. Your job is to break down goals into clear, executable steps.
+PLANNER_SYSTEM_PROMPT = """You are a Planner agent. Your job is to break down goals into clear, executable steps with proper dependency analysis.
 
 When given a goal, create a plan with numbered steps. Each step should be:
 - Specific and actionable
 - Have a clear expected outcome
 - List any tools that might be needed
+- Specify dependencies on previous steps (by index)
+- Indicate if the step can run in parallel with other independent steps
+
+DEPENDENCY RULES:
+- A step's dependencies array should list indices of steps that MUST complete before this step can start
+- Dependencies must reference earlier steps (lower indices) - no forward dependencies
+- Steps with no dependencies can potentially run in parallel if marked as can_parallelize=true
+- Consider data flow: if step B uses output from step A, B depends on A
+
+PARALLEL EXECUTION:
+- Mark can_parallelize=true for steps that are independent and could run concurrently
+- Examples of parallelizable steps: reading multiple files, making independent API calls
+- Examples of non-parallelizable steps: sequential file modifications, operations with side effects
 
 Output your plan as JSON in this format:
 {
@@ -361,26 +581,48 @@ Output your plan as JSON in this format:
       "description": "What to do",
       "expected_outcome": "What success looks like",
       "tools_hint": ["tool1", "tool2"],
-      "dependencies": []
+      "dependencies": [],
+      "can_parallelize": false,
+      "priority": 0,
+      "estimated_complexity": "medium"
     }
   ]
 }
+
+Priority: Higher numbers = execute first among parallel steps (0-10 scale)
+Estimated complexity: "low", "medium", or "high" - helps with scheduling
 
 Keep plans concise - prefer fewer, well-defined steps over many small ones."""
 
 
 class PlannerAgent(BaseAgent):
-    """Agent that creates plans from goals."""
+    """Agent that creates plans from goals with validation and dependency analysis."""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, enable_validation: bool = True):
         super().__init__(
             role=AgentRole.PLANNER,
             llm_client=llm_client,
             system_prompt=PLANNER_SYSTEM_PROMPT,
         )
+        self.enable_validation = enable_validation
 
-    def create_plan(self, workspace: Workspace) -> list[PlanStep]:
-        """Create a plan for the given goal."""
+    def create_plan(
+        self,
+        workspace: Workspace,
+        validate: bool | None = None,
+    ) -> tuple[list[PlanStep], PlanValidationResult | None]:
+        """
+        Create a plan for the given goal.
+
+        Args:
+            workspace: The workspace containing goal and constraints
+            validate: Whether to validate the plan (defaults to self.enable_validation)
+
+        Returns:
+            Tuple of (steps, validation_result). validation_result is None if validation disabled.
+        """
+        should_validate = validate if validate is not None else self.enable_validation
+
         prompt = f"""Create a plan for this goal:
 
 Goal: {workspace.goal}
@@ -389,11 +631,34 @@ Constraints: {', '.join(workspace.constraints) if workspace.constraints else 'No
 
 Previous context: {workspace.to_summary() if workspace.step_results else 'Starting fresh'}
 
+Remember to:
+- Specify dependencies between steps (which steps must complete before others)
+- Mark steps that can run in parallel with can_parallelize=true
+- Set priority for parallel steps (higher = execute first)
+
 Output your plan as JSON."""
 
         response = self._chat(prompt)
+        steps = self._parse_plan_response(response)
 
-        # Parse the JSON response
+        # Validate if enabled
+        validation_result = None
+        if should_validate and steps:
+            validation_result = PlanValidator.validate_plan(steps, workspace.constraints)
+
+            # Log validation results
+            if validation_result.errors:
+                logger.warning(f"Plan validation errors: {validation_result.errors}")
+            if validation_result.warnings:
+                logger.info(f"Plan validation warnings: {validation_result.warnings}")
+            if validation_result.parallel_groups:
+                parallel_count = sum(1 for g in validation_result.parallel_groups if len(g) > 1)
+                logger.info(f"Found {parallel_count} parallel execution groups")
+
+        return steps, validation_result
+
+    def _parse_plan_response(self, response: str) -> list[PlanStep]:
+        """Parse the LLM response into PlanStep objects."""
         try:
             # Find JSON in the response
             json_start = response.find("{")
@@ -417,8 +682,21 @@ Output your plan as JSON."""
         self,
         workspace: Workspace,
         reason: str,
-    ) -> list[PlanStep]:
-        """Revise the plan based on feedback."""
+        validate: bool | None = None,
+    ) -> tuple[list[PlanStep], PlanValidationResult | None]:
+        """
+        Revise the plan based on feedback.
+
+        Args:
+            workspace: The workspace containing current state
+            reason: Reason for revision
+            validate: Whether to validate the plan (defaults to self.enable_validation)
+
+        Returns:
+            Tuple of (steps, validation_result). validation_result is None if validation disabled.
+        """
+        should_validate = validate if validate is not None else self.enable_validation
+
         prompt = f"""The current plan needs revision.
 
 Goal: {workspace.goal}
@@ -428,25 +706,25 @@ Reason for revision: {reason}
 Previous results:
 {self._format_results(workspace.step_results[-3:])}
 
-Create a revised plan starting from the current point. Output as JSON."""
+Create a revised plan starting from the current point.
+Remember to specify dependencies and mark parallelizable steps.
+Output as JSON."""
 
         response = self._chat(prompt)
+        steps = self._parse_plan_response(response)
 
-        try:
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                data = json.loads(json_str)
-                steps = [PlanStep.from_dict(s) for s in data.get("steps", [])]
-                # Renumber steps starting from current index
-                for i, step in enumerate(steps):
-                    step.index = workspace.current_step_index + i
-                return steps
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to parse revised plan JSON: {e}")
+        # Renumber steps starting from current index
+        for i, step in enumerate(steps):
+            step.index = workspace.current_step_index + i
 
-        return []
+        # Validate if enabled
+        validation_result = None
+        if should_validate and steps:
+            validation_result = PlanValidator.validate_plan(steps, workspace.constraints)
+            if validation_result.errors:
+                logger.warning(f"Revised plan validation errors: {validation_result.errors}")
+
+        return steps, validation_result
 
     def _format_results(self, results: list[StepResult]) -> str:
         """Format step results for the prompt."""
@@ -738,12 +1016,32 @@ class ManagerAgent:
         """Execute the planning phase."""
         self._log_event("planning_start")
 
-        plan = self.planner.create_plan(self.workspace)
+        plan, validation_result = self.planner.create_plan(self.workspace)
 
         if not plan:
             self.state = ManagerState.FAILED
             self.workspace.error = "Planner failed to create a plan"
             return
+
+        # Log validation results
+        if validation_result:
+            if validation_result.errors:
+                self._log_event(
+                    "plan_validation_errors",
+                    errors=validation_result.errors,
+                )
+            if validation_result.warnings:
+                self._log_event(
+                    "plan_validation_warnings",
+                    warnings=validation_result.warnings,
+                )
+            if validation_result.parallel_groups:
+                parallel_count = sum(1 for g in validation_result.parallel_groups if len(g) > 1)
+                self._log_event(
+                    "plan_parallel_groups",
+                    parallel_group_count=parallel_count,
+                    groups=validation_result.parallel_groups,
+                )
 
         self.workspace.plan = plan
         self.workspace.current_step_index = 0
@@ -753,6 +1051,8 @@ class ManagerAgent:
             "planning_complete",
             step_count=len(plan),
             steps=[s.description[:100] for s in plan],
+            has_validation=validation_result is not None,
+            is_valid=validation_result.is_valid if validation_result else None,
         )
 
     def _do_executing(self) -> None:
@@ -916,12 +1216,19 @@ class ManagerAgent:
             if last_result.errors:
                 reason = f"Errors encountered: {', '.join(last_result.errors[:3])}"
 
-        new_steps = self.planner.revise_plan(self.workspace, reason)
+        new_steps, validation_result = self.planner.revise_plan(self.workspace, reason)
 
         if not new_steps:
             self.state = ManagerState.FAILED
             self.workspace.error = "Replanning failed to produce new steps"
             return
+
+        # Log validation results for revised plan
+        if validation_result and validation_result.errors:
+            self._log_event(
+                "revised_plan_validation_errors",
+                errors=validation_result.errors,
+            )
 
         # Replace remaining steps with new plan
         completed_steps = self.workspace.plan[:self.workspace.current_step_index]
@@ -930,6 +1237,7 @@ class ManagerAgent:
         self._log_event(
             "replanning_complete",
             new_step_count=len(new_steps),
+            is_valid=validation_result.is_valid if validation_result else None,
         )
 
         self.state = ManagerState.EXECUTING
