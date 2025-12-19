@@ -16,6 +16,15 @@ constraints that must be understood before they can be improved.
 
 __version__ = "0.1.0"
 
+from compymac.browser import (
+    BrowserAction,
+    BrowserConfig,
+    BrowserEngine,
+    BrowserMode,
+    BrowserService,
+    SyncBrowserService,
+    create_browser_tools,
+)
 from compymac.context import ContextManager
 from compymac.llm import LLMClient
 from compymac.loop import AgentLoop
@@ -30,4 +39,11 @@ __all__ = [
     "Tool",
     "AgentLoop",
     "create_mock_tools",
+    "BrowserService",
+    "SyncBrowserService",
+    "BrowserConfig",
+    "BrowserMode",
+    "BrowserEngine",
+    "BrowserAction",
+    "create_browser_tools",
 ]
