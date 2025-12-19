@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.25.0",
+    "playwright>=1.40.0",
 ]
 
 [project.optional-dependencies]
