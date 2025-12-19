@@ -3,6 +3,7 @@
 from compymac.multi_agent import (
     AgentRole,
     BaseAgent,
+    ErrorType,
     ExecutorAgent,
     ManagerAgent,
     ManagerState,
@@ -13,6 +14,8 @@ from compymac.multi_agent import (
     ReflectorAgent,
     StepResult,
     Workspace,
+    calculate_backoff_ms,
+    classify_error,
 )
 
 
@@ -660,3 +663,208 @@ class TestManagerAgentIntegration:
         assert manager.state == ManagerState.COMPLETED
         # Should have 2 attempts for step 0
         assert manager.workspace.get_attempt_count(0) == 2
+
+
+class TestErrorType:
+    """Tests for ErrorType enum."""
+
+    def test_all_error_types_exist(self):
+        assert ErrorType.TRANSIENT.value == "transient"
+        assert ErrorType.PERMANENT.value == "permanent"
+        assert ErrorType.UNKNOWN.value == "unknown"
+
+
+class TestClassifyError:
+    """Tests for the classify_error function."""
+
+    def test_transient_errors(self):
+        """Test that transient errors are correctly classified."""
+        transient_messages = [
+            "Connection timeout after 30 seconds",
+            "Network error: connection refused",
+            "Rate limit exceeded, please retry",
+            "503 Service Unavailable",
+            "Server is temporarily unavailable",
+        ]
+        for msg in transient_messages:
+            assert classify_error(msg) == ErrorType.TRANSIENT, f"Expected TRANSIENT for: {msg}"
+
+    def test_permanent_errors(self):
+        """Test that permanent errors are correctly classified."""
+        permanent_messages = [
+            "File not found: /path/to/file.txt",
+            "Permission denied: cannot access directory",
+            "Invalid syntax in configuration file",
+            "Type error: expected string, got int",
+            "Missing required dependency: numpy",
+        ]
+        for msg in permanent_messages:
+            assert classify_error(msg) == ErrorType.PERMANENT, f"Expected PERMANENT for: {msg}"
+
+    def test_unknown_errors(self):
+        """Test that unclassifiable errors return UNKNOWN."""
+        unknown_messages = [
+            "Something went wrong",
+            "Unexpected result",
+            "Operation completed with warnings",
+        ]
+        for msg in unknown_messages:
+            assert classify_error(msg) == ErrorType.UNKNOWN, f"Expected UNKNOWN for: {msg}"
+
+
+class TestCalculateBackoff:
+    """Tests for the calculate_backoff_ms function."""
+
+    def test_first_attempt(self):
+        """First attempt should have base delay."""
+        assert calculate_backoff_ms(1) == 1000
+
+    def test_exponential_growth(self):
+        """Backoff should grow exponentially."""
+        assert calculate_backoff_ms(1) == 1000
+        assert calculate_backoff_ms(2) == 2000
+        assert calculate_backoff_ms(3) == 4000
+        assert calculate_backoff_ms(4) == 8000
+
+    def test_max_cap(self):
+        """Backoff should be capped at max_ms."""
+        assert calculate_backoff_ms(10, max_ms=30000) == 30000
+        assert calculate_backoff_ms(100, max_ms=30000) == 30000
+
+    def test_custom_base(self):
+        """Custom base delay should work."""
+        assert calculate_backoff_ms(1, base_ms=500) == 500
+        assert calculate_backoff_ms(2, base_ms=500) == 1000
+
+
+class TestWorkspaceErrorRecovery:
+    """Tests for Workspace error recovery features."""
+
+    def test_record_error(self):
+        """Test error recording and classification."""
+        workspace = Workspace()
+        error_type = workspace.record_error(0, "Connection timeout")
+        assert error_type == ErrorType.TRANSIENT
+        assert len(workspace.error_history) == 1
+        assert workspace.error_history[0] == (0, "Connection timeout", ErrorType.TRANSIENT)
+
+    def test_get_error_pattern(self):
+        """Test getting error pattern for a step."""
+        workspace = Workspace()
+        workspace.record_error(0, "Connection timeout")
+        workspace.record_error(0, "Network error")
+        workspace.record_error(1, "File not found")
+
+        pattern = workspace.get_error_pattern(0)
+        assert len(pattern) == 2
+        assert pattern[0] == ErrorType.TRANSIENT
+        assert pattern[1] == ErrorType.TRANSIENT
+
+        pattern = workspace.get_error_pattern(1)
+        assert len(pattern) == 1
+        assert pattern[0] == ErrorType.PERMANENT
+
+    def test_should_retry_no_errors(self):
+        """Test should_retry with no errors."""
+        workspace = Workspace()
+        workspace.increment_attempt(0)
+        should_retry, backoff = workspace.should_retry(0)
+        assert should_retry is True
+        assert backoff == 0
+
+    def test_should_retry_transient_error(self):
+        """Test should_retry with transient error."""
+        workspace = Workspace()
+        workspace.increment_attempt(0)
+        workspace.record_error(0, "Connection timeout")
+        should_retry, backoff = workspace.should_retry(0)
+        assert should_retry is True
+        assert backoff > 0  # Should have backoff for transient errors
+
+    def test_should_retry_permanent_error(self):
+        """Test should_retry with permanent error after multiple attempts."""
+        workspace = Workspace()
+        workspace.increment_attempt(0)
+        workspace.increment_attempt(0)
+        workspace.record_error(0, "File not found")
+        should_retry, backoff = workspace.should_retry(0)
+        assert should_retry is False  # Should not retry permanent errors after 2 attempts
+
+    def test_should_retry_max_attempts(self):
+        """Test should_retry at max attempts."""
+        workspace = Workspace()
+        workspace.max_attempts_per_step = 3
+        workspace.increment_attempt(0)
+        workspace.increment_attempt(0)
+        workspace.increment_attempt(0)
+        should_retry, backoff = workspace.should_retry(0)
+        assert should_retry is False
+
+
+class TestWorkspaceTiming:
+    """Tests for Workspace timing features."""
+
+    def test_step_timer(self):
+        """Test step timing."""
+        import time
+        workspace = Workspace()
+        workspace.start_step_timer()
+        time.sleep(0.01)  # 10ms
+        elapsed = workspace.stop_step_timer()
+        assert elapsed >= 10  # At least 10ms
+        assert workspace.total_execution_time_ms >= 10
+
+    def test_stop_timer_without_start(self):
+        """Test stopping timer without starting."""
+        workspace = Workspace()
+        elapsed = workspace.stop_step_timer()
+        assert elapsed == 0
+
+
+class TestStepResultWithErrorType:
+    """Tests for StepResult with error type."""
+
+    def test_to_dict_with_error_type(self):
+        """Test StepResult.to_dict includes error_type."""
+        result = StepResult(
+            step_index=0,
+            success=False,
+            summary="Failed",
+            errors=["Connection timeout"],
+            error_type=ErrorType.TRANSIENT,
+            execution_time_ms=1500,
+        )
+        d = result.to_dict()
+        assert d["error_type"] == "transient"
+        assert d["execution_time_ms"] == 1500
+
+    def test_to_dict_without_error_type(self):
+        """Test StepResult.to_dict with no error_type."""
+        result = StepResult(
+            step_index=0,
+            success=True,
+            summary="Success",
+        )
+        d = result.to_dict()
+        assert d["error_type"] is None
+        assert d["execution_time_ms"] == 0
+
+
+class TestManagerAgentWithMemory:
+    """Tests for ManagerAgent with memory enabled."""
+
+    def test_init_with_memory_disabled(self):
+        """Test ManagerAgent initialization with memory disabled."""
+        harness = MockHarness()
+        client = MockLLMClient()
+        manager = ManagerAgent(harness, client, enable_memory=False)
+        assert manager.memory_manager is None
+        assert manager.enable_memory is False
+
+    def test_init_with_memory_enabled(self):
+        """Test ManagerAgent initialization with memory enabled."""
+        harness = MockHarness()
+        client = MockLLMClient()
+        manager = ManagerAgent(harness, client, enable_memory=True)
+        assert manager.memory_manager is not None
+        assert manager.enable_memory is True
