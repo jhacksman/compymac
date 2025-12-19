@@ -30,6 +30,22 @@ from compymac.llm import LLMClient
 from compymac.loop import AgentLoop
 from compymac.session import Session
 from compymac.tools import Tool, ToolRegistry, create_mock_tools
+from compymac.trace_store import (
+    Artifact,
+    ArtifactStore,
+    ProvenanceRelation,
+    Span,
+    SpanKind,
+    SpanStatus,
+    SummaryEventLog,
+    ToolProvenance,
+    TraceContext,
+    TraceEvent,
+    TraceEventType,
+    TraceStore,
+    VideoMetadata,
+    create_trace_store,
+)
 
 __all__ = [
     "Session",
@@ -46,4 +62,18 @@ __all__ = [
     "BrowserEngine",
     "BrowserAction",
     "create_browser_tools",
+    "TraceStore",
+    "ArtifactStore",
+    "TraceContext",
+    "TraceEvent",
+    "TraceEventType",
+    "Span",
+    "SpanKind",
+    "SpanStatus",
+    "Artifact",
+    "ToolProvenance",
+    "VideoMetadata",
+    "ProvenanceRelation",
+    "SummaryEventLog",
+    "create_trace_store",
 ]
