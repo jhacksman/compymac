@@ -13,6 +13,8 @@ Key design decisions:
 - All parallel spans link to a common parent for proper trace reconstruction
 """
 
+from __future__ import annotations
+
 import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,6 +33,7 @@ from compymac.types import ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from compymac.local_harness import LocalHarness
+    from compymac.multi_agent import ExecutorAgent, PlanStep, StepResult, Workspace
 
 
 class ConflictClass(Enum):
@@ -292,7 +295,7 @@ class ParallelExecutor:
 
     def __init__(
         self,
-        harness: "LocalHarness",
+        harness: LocalHarness,
         trace_context: TraceContext | None = None,
         max_workers: int = 4,
         conflict_model: ToolConflictModel | None = None,
@@ -442,7 +445,7 @@ class JoinSpan:
         """Add a child span ID to link."""
         self._child_span_ids.append(span_id)
 
-    def __enter__(self) -> "JoinSpan":
+    def __enter__(self) -> JoinSpan:
         """Start the JOIN span."""
         self._span_id = self.trace_context.start_span(
             kind=SpanKind.REASONING,
@@ -475,3 +478,199 @@ class JoinSpan:
             )
         else:
             self.trace_context.end_span(status=SpanStatus.OK)
+
+
+# Type imports for ParallelStepExecutor
+if TYPE_CHECKING:
+    from compymac.multi_agent import ExecutorAgent, PlanStep, StepResult, Workspace
+
+
+class ParallelStepExecutor:
+    """
+    Executor for parallel plan steps.
+
+    Uses ThreadPoolExecutor to run multiple plan steps in parallel when
+    they have no dependencies on each other. Each parallel step gets its
+    own forked trace context to maintain proper parent-child relationships.
+    """
+
+    def __init__(
+        self,
+        executor_agent: ExecutorAgent,
+        trace_context: TraceContext | None = None,
+        max_workers: int = 4,
+    ):
+        """
+        Initialize the parallel step executor.
+
+        Args:
+            executor_agent: The ExecutorAgent to use for step execution
+            trace_context: Optional trace context for execution capture
+            max_workers: Maximum number of parallel workers (default: 4)
+        """
+        self.executor_agent = executor_agent
+        self.trace_context = trace_context
+        self.max_workers = max_workers
+
+    def execute_parallel_group(
+        self,
+        steps: list[PlanStep],
+        workspace: Workspace,
+        parent_span_id: str | None = None,
+    ) -> list[StepResult]:
+        """
+        Execute a group of steps in parallel.
+
+        All steps in the group are assumed to have no dependencies on each other
+        and can safely run concurrently.
+
+        Args:
+            steps: List of PlanStep objects to execute in parallel
+            workspace: The shared workspace (read-only during parallel execution)
+            parent_span_id: Parent span ID for trace context
+
+        Returns:
+            List of StepResult objects in the same order as input steps
+        """
+        if not steps:
+            return []
+
+        if len(steps) == 1:
+            # Single step, execute directly
+            return [self._execute_step_with_context(steps[0], workspace, parent_span_id)]
+
+        # Multiple steps, execute in parallel
+        results: list[StepResult | None] = [None] * len(steps)
+
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(steps))) as executor:
+            # Submit all tasks
+            future_to_index = {
+                executor.submit(
+                    self._execute_step_with_context,
+                    step,
+                    workspace,
+                    parent_span_id,
+                ): i
+                for i, step in enumerate(steps)
+            }
+
+            # Collect results
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    results[index] = future.result()
+                except Exception as e:
+                    # Create error result for failed step
+                    from compymac.multi_agent import StepResult
+                    results[index] = StepResult(
+                        step_index=steps[index].index,
+                        success=False,
+                        summary=f"Parallel execution failed: {e}",
+                        errors=[str(e)],
+                    )
+
+        return results  # type: ignore
+
+    def _execute_step_with_context(
+        self,
+        step: PlanStep,
+        workspace: Workspace,
+        parent_span_id: str | None,
+    ) -> StepResult:
+        """Execute a single step with proper trace context handling."""
+        if self.trace_context is None:
+            # No tracing, execute directly
+            return self.executor_agent.execute_step(step, workspace)
+
+        # Create forked context for this step
+        forked_ctx = fork_trace_context(self.trace_context, parent_span_id)
+
+        # Start a span for this parallel step
+        forked_ctx.start_span(
+            kind=SpanKind.AGENT_TURN,
+            name=f"parallel_step_{step.index}",
+            actor_id="parallel_executor",
+            attributes={
+                "step_index": step.index,
+                "step_description": step.description[:200],
+                "parallel": True,
+            },
+        )
+
+        try:
+            # Execute the step
+            # Note: We need to temporarily set the executor's trace context
+            # to our forked context for proper nested span tracking
+            original_ctx = self.executor_agent._trace_context
+            self.executor_agent._trace_context = forked_ctx  # type: ignore
+
+            try:
+                result = self.executor_agent.execute_step(step, workspace)
+            finally:
+                # Restore original context
+                self.executor_agent._trace_context = original_ctx
+
+            # End the parallel step span
+            forked_ctx.end_span(
+                status=SpanStatus.OK if result.success else SpanStatus.ERROR,
+            )
+
+            return result
+
+        except Exception as e:
+            # End span with error
+            forked_ctx.end_span(
+                status=SpanStatus.ERROR,
+                error_class=type(e).__name__,
+                error_message=str(e),
+            )
+            raise
+
+
+class ParallelGroupResult:
+    """
+    Result of executing a parallel group of steps.
+
+    Aggregates results from multiple steps executed in parallel,
+    providing summary statistics and access to individual results.
+    """
+
+    def __init__(self, step_results: list[StepResult]):
+        self.step_results = step_results
+
+    @property
+    def all_success(self) -> bool:
+        """Check if all steps succeeded."""
+        return all(r.success for r in self.step_results)
+
+    @property
+    def any_success(self) -> bool:
+        """Check if any step succeeded."""
+        return any(r.success for r in self.step_results)
+
+    @property
+    def success_count(self) -> int:
+        """Count of successful steps."""
+        return sum(1 for r in self.step_results if r.success)
+
+    @property
+    def failure_count(self) -> int:
+        """Count of failed steps."""
+        return sum(1 for r in self.step_results if not r.success)
+
+    @property
+    def failed_steps(self) -> list[StepResult]:
+        """Get list of failed step results."""
+        return [r for r in self.step_results if not r.success]
+
+    @property
+    def successful_steps(self) -> list[StepResult]:
+        """Get list of successful step results."""
+        return [r for r in self.step_results if r.success]
+
+    def get_result(self, step_index: int) -> StepResult | None:
+        """Get result for a specific step index."""
+        for r in self.step_results:
+            if r.step_index == step_index:
+                return r
+        return None
