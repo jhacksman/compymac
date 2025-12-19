@@ -4,14 +4,18 @@ LocalHarness - Real tool execution with measured harness constraints.
 This harness executes real file I/O and shell commands while applying
 the same truncation, envelope, and validation rules as the Devin harness.
 It produces identical event logs for debugging and replay.
+
+Supports optional TraceContext for complete execution capture.
 """
 
+import hashlib
+import json
 import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from compymac.harness import (
     EventLog,
@@ -28,6 +32,9 @@ from compymac.harness_spec import (
     truncate_output,
 )
 from compymac.types import ToolCall, ToolResult
+
+if TYPE_CHECKING:
+    from compymac.trace_store import TraceContext
 
 
 @dataclass
@@ -48,12 +55,14 @@ class LocalHarness(Harness):
     - Applies truncation rules matching measured limits
     - Wraps results in XML envelopes
     - Logs all events for debugging/replay
+    - Optionally records complete traces via TraceContext
     """
 
     def __init__(
         self,
         config: HarnessConfig | None = None,
         full_output_dir: Path | None = None,
+        trace_context: "TraceContext | None" = None,
     ):
         self.config = config or HarnessConfig()
         self.full_output_dir = full_output_dir or Path("/tmp/local_harness_outputs")
@@ -62,9 +71,28 @@ class LocalHarness(Harness):
         self._event_log = EventLog()
         self._tools: dict[str, RegisteredTool] = {}
         self._call_counter = 0
+        self._trace_context: TraceContext | None = trace_context
 
         # Register default tools
         self._register_default_tools()
+
+    def set_trace_context(self, trace_context: "TraceContext | None") -> None:
+        """Set the trace context for complete execution capture."""
+        self._trace_context = trace_context
+
+    def get_trace_context(self) -> "TraceContext | None":
+        """Get the current trace context."""
+        return self._trace_context
+
+    def _compute_schema_hash(self, tool: RegisteredTool) -> str:
+        """Compute a hash of the tool schema for provenance tracking."""
+        schema_data = json.dumps({
+            "name": tool.schema.name,
+            "required_params": tool.schema.required_params,
+            "optional_params": tool.schema.optional_params,
+            "param_types": tool.schema.param_types,
+        }, sort_keys=True)
+        return hashlib.sha256(schema_data.encode()).hexdigest()[:16]
 
     def _generate_call_id(self) -> str:
         self._call_counter += 1
@@ -224,7 +252,7 @@ class LocalHarness(Harness):
         return True, None
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
-        """Execute a single tool call."""
+        """Execute a single tool call with optional trace capture."""
         call_id = tool_call.id or self._generate_call_id()
 
         # Log receipt
@@ -271,6 +299,44 @@ class LocalHarness(Harness):
         self._event_log.log_event(EventType.TOOL_DISPATCH, call_id, tool_name=tool.name)
         self._event_log.log_event(EventType.TOOL_EXECUTION_START, call_id)
 
+        # Start trace span if tracing is enabled
+        span_id: str | None = None
+        input_artifact_hash: str | None = None
+        if self._trace_context:
+            from compymac.trace_store import SpanKind, ToolProvenance
+
+            # Store input as artifact
+            input_data = json.dumps(tool_call.arguments, sort_keys=True).encode()
+            input_artifact = self._trace_context.store_artifact(
+                data=input_data,
+                artifact_type="tool_input",
+                content_type="application/json",
+                metadata={"tool_name": tool_call.name, "call_id": call_id},
+            )
+            input_artifact_hash = input_artifact.artifact_hash
+
+            # Create tool provenance
+            tool_provenance = ToolProvenance(
+                tool_name=tool.name,
+                schema_hash=self._compute_schema_hash(tool),
+                impl_version="1.0.0",
+                external_fingerprint={},
+            )
+
+            # Start span
+            span_id = self._trace_context.start_span(
+                kind=SpanKind.TOOL_CALL,
+                name=f"tool:{tool.name}",
+                actor_id="harness",
+                attributes={
+                    "tool_name": tool.name,
+                    "call_id": call_id,
+                    "envelope_type": tool.envelope_type,
+                },
+                tool_provenance=tool_provenance,
+                input_artifact_hash=input_artifact_hash,
+            )
+
         start_time = time.time()
         try:
             result = tool.handler(**tool_call.arguments)
@@ -291,6 +357,15 @@ class LocalHarness(Harness):
                 error=str(e),
                 elapsed_seconds=elapsed,
             )
+
+            # End trace span with error if tracing
+            if self._trace_context and span_id:
+                from compymac.trace_store import SpanStatus
+                self._trace_context.end_span(
+                    status=SpanStatus.ERROR,
+                    error_class=type(e).__name__,
+                    error_message=str(e),
+                )
 
             error_envelope = create_error_envelope(str(e))
             return ToolResult(
@@ -336,6 +411,25 @@ class LocalHarness(Harness):
             call_id,
             result_length=len(wrapped),
         )
+
+        # End trace span with success if tracing
+        output_artifact_hash: str | None = None
+        if self._trace_context and span_id:
+            from compymac.trace_store import SpanStatus
+
+            # Store output as artifact
+            output_artifact = self._trace_context.store_artifact(
+                data=wrapped.encode(),
+                artifact_type="tool_output",
+                content_type="text/xml",
+                metadata={"tool_name": tool.name, "call_id": call_id},
+            )
+            output_artifact_hash = output_artifact.artifact_hash
+
+            self._trace_context.end_span(
+                status=SpanStatus.OK,
+                output_artifact_hash=output_artifact_hash,
+            )
 
         return ToolResult(
             tool_call_id=call_id,

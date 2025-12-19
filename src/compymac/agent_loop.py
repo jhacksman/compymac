@@ -10,11 +10,17 @@ This module implements the core agent loop that:
 6. Repeats until task complete or max steps reached
 
 The loop is harness-agnostic - it works with Simulator, LocalHarness, or ReplayHarness.
+
+Supports optional TraceContext for complete execution capture including:
+- Every main loop iteration (even pure reasoning with no tools)
+- Every LLM request/response
+- Every tool call (delegated to Harness)
 """
 
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from compymac.harness import EventLog, EventType, Harness
@@ -23,6 +29,7 @@ from compymac.types import Message, ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from compymac.memory import MemoryManager
+    from compymac.trace_store import TraceContext, TraceStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,7 @@ class AgentConfig:
     use_memory: bool = False  # Enable smart memory management
     memory_compression_threshold: float = 0.80  # Compress when utilization exceeds this
     memory_keep_recent_turns: int = 4  # Number of recent turns to always keep
+    trace_base_path: Path | None = None  # Base path for trace storage (enables tracing if set)
 
 
 @dataclass
@@ -66,6 +74,7 @@ class AgentLoop:
         harness: Harness,
         llm_client: LLMClient,
         config: AgentConfig | None = None,
+        trace_context: "TraceContext | None" = None,
     ):
         self.harness = harness
         self.llm_client = llm_client
@@ -73,6 +82,18 @@ class AgentLoop:
         self.state = AgentState()
         self._event_log = self.harness.get_event_log()
         self._memory_manager: "MemoryManager | None" = None  # noqa: UP037
+        self._trace_context: "TraceContext | None" = trace_context  # noqa: UP037
+        self._trace_store: "TraceStore | None" = None  # noqa: UP037
+
+        # Initialize tracing if base path is configured
+        if self.config.trace_base_path and not self._trace_context:
+            from compymac.trace_store import TraceContext, create_trace_store
+            self._trace_store, _ = create_trace_store(self.config.trace_base_path)
+            self._trace_context = TraceContext(self._trace_store)
+
+        # Pass trace context to harness if available
+        if self._trace_context:
+            self.harness.set_trace_context(self._trace_context)
 
         # Initialize memory manager if enabled
         if self.config.use_memory:
@@ -98,7 +119,7 @@ class AgentLoop:
 
     def run_step(self) -> tuple[str | None, list[ToolResult]]:
         """
-        Run a single step of the agent loop.
+        Run a single step of the agent loop with optional trace capture.
 
         Returns (text_response, tool_results).
         - If LLM returns text: (text, [])
@@ -111,6 +132,20 @@ class AgentLoop:
             tool_call_id=f"step_{self.state.step_count}",
             step=self.state.step_count,
         )
+
+        # Start agent turn span if tracing is enabled
+        turn_span_id: str | None = None
+        if self._trace_context:
+            from compymac.trace_store import SpanKind
+            turn_span_id = self._trace_context.start_span(
+                kind=SpanKind.AGENT_TURN,
+                name=f"agent_turn_{self.state.step_count}",
+                actor_id="agent_loop",
+                attributes={
+                    "step_count": self.state.step_count,
+                    "message_count": len(self.state.messages),
+                },
+            )
 
         # Get tool schemas from harness
         tools = self.harness.get_tool_schemas()
@@ -140,10 +175,64 @@ class AgentLoop:
         # Convert Message objects to dicts for API serialization
         messages_for_api = [msg.to_dict() for msg in messages_to_send]
 
+        # Start LLM call span if tracing is enabled
+        llm_span_id: str | None = None
+        llm_input_artifact_hash: str | None = None
+        if self._trace_context:
+            from compymac.trace_store import SpanKind
+
+            # Store LLM input as artifact
+            llm_input_data = json.dumps({
+                "messages": messages_for_api,
+                "tools": tools,
+            }).encode()
+            llm_input_artifact = self._trace_context.store_artifact(
+                data=llm_input_data,
+                artifact_type="llm_input",
+                content_type="application/json",
+                metadata={"step": self.state.step_count},
+            )
+            llm_input_artifact_hash = llm_input_artifact.artifact_hash
+
+            llm_span_id = self._trace_context.start_span(
+                kind=SpanKind.LLM_CALL,
+                name="llm_chat",
+                actor_id="llm_client",
+                attributes={
+                    "message_count": len(messages_for_api),
+                    "has_tools": bool(tools),
+                },
+                input_artifact_hash=llm_input_artifact_hash,
+            )
+
         response = self.llm_client.chat(
             messages=messages_for_api,
             tools=tools if tools else None,
         )
+
+        # End LLM call span if tracing is enabled
+        if self._trace_context and llm_span_id:
+            from compymac.trace_store import SpanStatus
+
+            # Store LLM output as artifact
+            llm_output_data = json.dumps({
+                "content": response.content,
+                "tool_calls": [
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    for tc in (response.tool_calls or [])
+                ],
+            }).encode()
+            llm_output_artifact = self._trace_context.store_artifact(
+                data=llm_output_data,
+                artifact_type="llm_output",
+                content_type="application/json",
+                metadata={"step": self.state.step_count},
+            )
+
+            self._trace_context.end_span(
+                status=SpanStatus.OK,
+                output_artifact_hash=llm_output_artifact.artifact_hash,
+            )
 
         self._event_log.log_event(
             EventType.LLM_RESPONSE,
@@ -174,16 +263,24 @@ class AgentLoop:
             tool_calls=tool_calls_as_dicts,
         ))
 
-        # If no tool calls, return text response
+        # If no tool calls, this is a reasoning step - end turn span and return
         if not response.tool_calls:
             self._event_log.log_event(
                 EventType.AGENT_TURN_END,
                 tool_call_id=f"step_{self.state.step_count}",
                 has_tool_calls=False,
             )
+
+            # End agent turn span if tracing is enabled
+            if self._trace_context and turn_span_id:
+                from compymac.trace_store import SpanStatus
+                self._trace_context.end_span(
+                    status=SpanStatus.OK,
+                )
+
             return response.content, []
 
-        # Execute tool calls through harness
+        # Execute tool calls through harness (harness handles its own tracing)
         tool_results = []
         for tool_call in response.tool_calls:
             self.state.tool_call_count += 1
@@ -209,6 +306,13 @@ class AgentLoop:
             has_tool_calls=True,
             tool_call_count=len(tool_results),
         )
+
+        # End agent turn span if tracing is enabled
+        if self._trace_context and turn_span_id:
+            from compymac.trace_store import SpanStatus
+            self._trace_context.end_span(
+                status=SpanStatus.OK,
+            )
 
         return None, tool_results
 

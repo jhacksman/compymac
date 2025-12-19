@@ -7,6 +7,7 @@ real local implementations must satisfy. This enables:
 - Real execution via LocalHarness
 - Trace replay via ReplayHarness
 - Consistent event logging across all implementations
+- Complete execution tracing via TraceStore integration
 """
 
 from abc import ABC, abstractmethod
@@ -15,9 +16,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from compymac.types import ToolCall, ToolResult
+
+if TYPE_CHECKING:
+    from compymac.trace_store import TraceContext
 
 
 class EventType(Enum):
@@ -121,6 +125,8 @@ class Harness(ABC):
 
     All harness implementations (Simulator, Local, Replay) must implement
     this interface to ensure consistent behavior and event logging.
+
+    Optionally supports TraceContext for complete execution capture.
     """
 
     @abstractmethod
@@ -162,6 +168,19 @@ class Harness(ABC):
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         """Get OpenAI-format schemas for all registered tools."""
         ...
+
+    def set_trace_context(self, trace_context: "TraceContext | None") -> None:  # noqa: B027
+        """
+        Set the trace context for complete execution capture.
+
+        When set, all tool executions will be recorded as spans in the trace.
+        This is optional - harness works without tracing.
+        """
+        pass  # Default no-op, subclasses can override
+
+    def get_trace_context(self) -> "TraceContext | None":
+        """Get the current trace context, if any."""
+        return None  # Default returns None
 
 
 class HarnessConfig:
