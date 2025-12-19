@@ -1034,7 +1034,7 @@ class ManagerAgent:
 
         # Initialize memory state if memory is enabled
         if self.memory_manager:
-            self.workspace.memory_state = self.memory_manager.get_state()
+            self.workspace.memory_state = self.memory_manager.get_memory_state()
             self.workspace.workflow_facts = MemoryFacts()
 
         self._log_event("workflow_start", goal=goal)
