@@ -31,6 +31,7 @@ from compymac.memory import MemoryFacts, MemoryManager, MemoryState
 from compymac.types import Message
 
 if TYPE_CHECKING:
+    from compymac.parallel import ParallelStepExecutor
     from compymac.trace_store import TraceContext, TraceStore
 
 logger = logging.getLogger(__name__)
@@ -1005,6 +1006,13 @@ class ManagerAgent:
         self.workspace = Workspace()
         self.state = ManagerState.INITIAL
 
+        # Parallel execution state
+        self._parallel_groups: list[list[int]] = []  # Groups of step indices
+        self._current_group_index: int = 0  # Which group we're executing
+        self._parallel_step_executor: ParallelStepExecutor | None = None
+        self._enable_parallel_execution: bool = True  # Can be disabled for testing
+        self._last_group_results: list[StepResult] = []  # Results from last executed group
+
     def _log_event(self, event_type: str, **data: Any) -> None:
         """Log a manager event."""
         self.event_log.log_event(
@@ -1107,74 +1115,130 @@ class ManagerAgent:
         self.workspace.current_step_index = 0
         self.state = ManagerState.EXECUTING
 
+        # Store parallel groups for parallel execution
+        if validation_result and validation_result.parallel_groups:
+            self._parallel_groups = validation_result.parallel_groups
+        else:
+            # Default: each step is its own group (sequential execution)
+            self._parallel_groups = [[s.index] for s in plan]
+        self._current_group_index = 0
+
+        # Initialize parallel step executor if we have parallel groups
+        if self._enable_parallel_execution and any(len(g) > 1 for g in self._parallel_groups):
+            from compymac.parallel import ParallelStepExecutor
+            self._parallel_step_executor = ParallelStepExecutor(
+                executor_agent=self.executor,
+                trace_context=self._trace_context,
+                max_workers=4,
+            )
+
         self._log_event(
             "planning_complete",
             step_count=len(plan),
             steps=[s.description[:100] for s in plan],
             has_validation=validation_result is not None,
             is_valid=validation_result.is_valid if validation_result else None,
+            parallel_groups=self._parallel_groups,
         )
 
     def _do_executing(self) -> None:
-        """Execute the current step."""
-        step = self.workspace.get_current_step()
-
-        if step is None:
-            # All steps completed
+        """Execute the current step or parallel group."""
+        # Check if we've completed all groups
+        if self._current_group_index >= len(self._parallel_groups):
             self.state = ManagerState.COMPLETED
             self.workspace.is_complete = True
             self.workspace.final_result = self._generate_final_result()
             return
 
+        # Get the current group of step indices
+        current_group = self._parallel_groups[self._current_group_index]
+
+        # Get the actual PlanStep objects for this group
+        steps_in_group = [
+            step for step in self.workspace.plan
+            if step.index in current_group
+        ]
+
+        if not steps_in_group:
+            # No steps in this group, move to next
+            self._current_group_index += 1
+            return
+
+        is_parallel = len(steps_in_group) > 1
+
         self._log_event(
-            "executing_step",
-            step_index=step.index,
-            description=step.description[:100],
+            "executing_group",
+            group_index=self._current_group_index,
+            step_indices=current_group,
+            is_parallel=is_parallel,
         )
 
-        # Increment attempt count
-        attempt = self.workspace.increment_attempt(step.index)
-
-        # Check if we should apply backoff before retrying
-        if attempt > 1:
-            should_retry, backoff_ms = self.workspace.should_retry(step.index)
-            if not should_retry:
-                # Skip to replanning if we shouldn't retry
-                self.state = ManagerState.REPLANNING
-                return
-            if backoff_ms > 0:
-                self._log_event("backoff_wait", backoff_ms=backoff_ms, attempt=attempt)
-                time.sleep(backoff_ms / 1000.0)
-
-        # Start timing the step execution
+        # Start timing the group execution
         self.workspace.start_step_timer()
 
-        # Execute the step
-        result = self.executor.execute_step(step, self.workspace)
+        if is_parallel and self._parallel_step_executor:
+            # Execute steps in parallel
+            results = self._parallel_step_executor.execute_parallel_group(
+                steps_in_group,
+                self.workspace,
+                parent_span_id=self._trace_context.current_span_id if self._trace_context else None,
+            )
+        else:
+            # Execute steps sequentially (single step or no parallel executor)
+            results = []
+            for step in steps_in_group:
+                # Increment attempt count
+                attempt = self.workspace.increment_attempt(step.index)
+
+                # Check if we should apply backoff before retrying
+                if attempt > 1:
+                    should_retry, backoff_ms = self.workspace.should_retry(step.index)
+                    if not should_retry:
+                        # Skip to replanning if we shouldn't retry
+                        self.state = ManagerState.REPLANNING
+                        return
+                    if backoff_ms > 0:
+                        self._log_event("backoff_wait", backoff_ms=backoff_ms, attempt=attempt)
+                        time.sleep(backoff_ms / 1000.0)
+
+                result = self.executor.execute_step(step, self.workspace)
+                results.append(result)
 
         # Stop timing and record execution time
         execution_time_ms = self.workspace.stop_step_timer()
-        result.execution_time_ms = execution_time_ms
 
-        # Record any errors for classification
-        if not result.success and result.errors:
-            for error in result.errors:
-                error_type = self.workspace.record_error(step.index, error)
-                result.error_type = error_type
+        # Process results
+        for result in results:
+            result.execution_time_ms = execution_time_ms // len(results)  # Distribute time
 
-        self.workspace.step_results.append(result)
+            # Record any errors for classification
+            if not result.success and result.errors:
+                for error in result.errors:
+                    error_type = self.workspace.record_error(result.step_index, error)
+                    result.error_type = error_type
 
-        # Extract facts from the result for memory
-        self._extract_facts_from_result(result)
+            self.workspace.step_results.append(result)
 
-        self._log_event(
-            "step_result",
-            step_index=step.index,
-            success=result.success,
-            attempt=attempt,
-            execution_time_ms=execution_time_ms,
-            error_type=result.error_type.value if result.error_type else None,
-        )
+            # Extract facts from the result for memory
+            self._extract_facts_from_result(result)
+
+        # Log results
+        for result in results:
+            self._log_event(
+                "step_result",
+                step_index=result.step_index,
+                success=result.success,
+                execution_time_ms=result.execution_time_ms,
+                error_type=result.error_type.value if result.error_type else None,
+                parallel=is_parallel,
+            )
+
+        # Store results for reflection (we'll reflect on the whole group)
+        self._last_group_results = results
+
+        # Update workspace current_step_index to the last step in the group
+        max_step_index = max(s.index for s in steps_in_group)
+        self.workspace.current_step_index = max_step_index
 
         # Transition to reflecting
         self.state = ManagerState.REFLECTING
@@ -1209,35 +1273,59 @@ class ManagerAgent:
                         self.workspace.workflow_facts.commands_run.append(cmd)
 
     def _do_reflecting(self) -> None:
-        """Reflect on the last step result."""
-        if not self.workspace.step_results:
-            self.state = ManagerState.FAILED
-            self.workspace.error = "No step results to reflect on"
-            return
+        """Reflect on the last step result or parallel group results."""
+        if not self._last_group_results:
+            # Fall back to workspace step_results if no group results
+            if not self.workspace.step_results:
+                self.state = ManagerState.FAILED
+                self.workspace.error = "No step results to reflect on"
+                return
+            self._last_group_results = [self.workspace.step_results[-1]]
 
-        last_result = self.workspace.step_results[-1]
-        step = self.workspace.plan[last_result.step_index]
+        # For parallel groups, we need to aggregate results
+        is_parallel_group = len(self._last_group_results) > 1
+        all_success = all(r.success for r in self._last_group_results)
+        any_success = any(r.success for r in self._last_group_results)
+        failed_results = [r for r in self._last_group_results if not r.success]
 
-        self._log_event("reflecting_start", step_index=step.index)
+        self._log_event(
+            "reflecting_start",
+            group_size=len(self._last_group_results),
+            is_parallel=is_parallel_group,
+            all_success=all_success,
+            any_success=any_success,
+        )
 
-        reflection = self.reflector.reflect(self.workspace, step, last_result)
+        # For parallel groups, reflect on the first failed result (if any) or the first result
+        if failed_results:
+            result_to_reflect = failed_results[0]
+        else:
+            result_to_reflect = self._last_group_results[0]
+
+        step = self.workspace.plan[result_to_reflect.step_index]
+        reflection = self.reflector.reflect(self.workspace, step, result_to_reflect)
 
         self._log_event(
             "reflection_result",
             action=reflection.action.value,
             reasoning=reflection.reasoning[:200],
+            reflected_on_step=result_to_reflect.step_index,
         )
 
         # Handle the reflection action
         if reflection.action == ReflectionAction.CONTINUE:
-            self.workspace.current_step_index += 1
+            # Move to next group
+            self._current_group_index += 1
+            self._last_group_results = []
             self.state = ManagerState.EXECUTING
 
         elif reflection.action == ReflectionAction.RETRY_SAME:
+            # For parallel groups, retry the whole group
             if self.workspace.get_attempt_count(step.index) >= self.workspace.max_attempts_per_step:
                 # Max attempts reached, force replan
                 self.state = ManagerState.REPLANNING
             else:
+                self._last_group_results = []
                 self.state = ManagerState.EXECUTING
 
         elif reflection.action == ReflectionAction.RETRY_WITH_CHANGES:
@@ -1246,9 +1334,11 @@ class ManagerAgent:
             else:
                 # Modify the step description
                 step.description = f"{step.description}\n\nModification: {reflection.suggested_changes}"
+                self._last_group_results = []
                 self.state = ManagerState.EXECUTING
 
         elif reflection.action == ReflectionAction.REPLAN:
+            self._last_group_results = []
             self.state = ManagerState.REPLANNING
 
         elif reflection.action == ReflectionAction.COMPLETE:
@@ -1263,7 +1353,8 @@ class ManagerAgent:
 
         else:  # GATHER_INFO or unknown
             # Treat as continue for now
-            self.workspace.current_step_index += 1
+            self._current_group_index += 1
+            self._last_group_results = []
             self.state = ManagerState.EXECUTING
 
     def _do_replanning(self) -> None:

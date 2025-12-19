@@ -532,12 +532,17 @@ class TestManagerAgent:
             StepResult(step_index=0, success=True, summary="Done")
         ]
         manager.workspace.current_step_index = 0
+        # Set up parallel groups (each step in its own group for sequential execution)
+        manager._parallel_groups = [[0], [1]]
+        manager._current_group_index = 0
+        manager._last_group_results = [StepResult(step_index=0, success=True, summary="Done")]
         manager.state = ManagerState.REFLECTING
 
         manager._do_reflecting()
 
         assert manager.state == ManagerState.EXECUTING
-        assert manager.workspace.current_step_index == 1
+        # With parallel groups, we now track group index instead of step index
+        assert manager._current_group_index == 1
 
     def test_do_reflecting_replan(self):
         harness = MockHarness()
@@ -1163,3 +1168,298 @@ class TestPlannerAgentWithValidation:
 
         assert len(steps) == 1
         assert validation_result is not None
+
+
+class TestParallelPlanStepExecution:
+    """Tests for Phase 2: Parallel plan step execution."""
+
+    def test_manager_stores_parallel_groups(self):
+        """Test that manager stores parallel groups from validation result."""
+        harness = MockHarness()
+        # Plan with parallel groups: steps 0,1 can run in parallel, step 2 depends on both
+        plan_response = """{
+            "steps": [
+                {"index": 0, "description": "Step A", "expected_outcome": "Done", "dependencies": [], "can_parallelize": true},
+                {"index": 1, "description": "Step B", "expected_outcome": "Done", "dependencies": [], "can_parallelize": true},
+                {"index": 2, "description": "Step C", "expected_outcome": "Done", "dependencies": [0, 1]}
+            ]
+        }"""
+        client = MockLLMClient([plan_response])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test parallel execution"
+        manager.state = ManagerState.PLANNING
+
+        manager._do_planning()
+
+        assert manager.state == ManagerState.EXECUTING
+        assert len(manager.workspace.plan) == 3
+        # Parallel groups should be set
+        assert len(manager._parallel_groups) > 0
+
+    def test_manager_parallel_groups_default_sequential(self):
+        """Test that manager defaults to sequential groups when no parallel groups."""
+        harness = MockHarness()
+        # Plan with sequential dependencies
+        plan_response = """{
+            "steps": [
+                {"index": 0, "description": "Step 1", "expected_outcome": "Done", "dependencies": []},
+                {"index": 1, "description": "Step 2", "expected_outcome": "Done", "dependencies": [0]},
+                {"index": 2, "description": "Step 3", "expected_outcome": "Done", "dependencies": [1]}
+            ]
+        }"""
+        client = MockLLMClient([plan_response])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test sequential execution"
+        manager.state = ManagerState.PLANNING
+
+        manager._do_planning()
+
+        assert manager.state == ManagerState.EXECUTING
+        # Each step should be in its own group (sequential)
+        assert len(manager._parallel_groups) == 3
+        for group in manager._parallel_groups:
+            assert len(group) == 1
+
+    def test_manager_executes_parallel_group(self):
+        """Test that manager executes steps in a parallel group."""
+        harness = MockHarness()
+        client = MockLLMClient(["Step A done", "Step B done"])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test parallel group execution"
+        manager.workspace.plan = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done", dependencies=[], can_parallelize=True),
+            PlanStep(index=1, description="Step B", expected_outcome="Done", dependencies=[], can_parallelize=True),
+        ]
+        # Set up parallel groups: both steps in one group
+        manager._parallel_groups = [[0, 1]]
+        manager._current_group_index = 0
+        manager.state = ManagerState.EXECUTING
+
+        manager._do_executing()
+
+        # Should have executed both steps and moved to reflecting
+        assert manager.state == ManagerState.REFLECTING
+        assert len(manager.workspace.step_results) == 2
+        assert len(manager._last_group_results) == 2
+
+    def test_manager_reflecting_on_parallel_group_all_success(self):
+        """Test reflection on parallel group where all steps succeed."""
+        harness = MockHarness()
+        reflect_response = '{"action": "CONTINUE", "reasoning": "All steps succeeded", "confidence": 0.95}'
+        client = MockLLMClient([reflect_response])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test parallel reflection"
+        manager.workspace.plan = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done"),
+            PlanStep(index=1, description="Step B", expected_outcome="Done"),
+            PlanStep(index=2, description="Step C", expected_outcome="Done"),
+        ]
+        manager._parallel_groups = [[0, 1], [2]]
+        manager._current_group_index = 0
+        manager._last_group_results = [
+            StepResult(step_index=0, success=True, summary="A done"),
+            StepResult(step_index=1, success=True, summary="B done"),
+        ]
+        manager.workspace.step_results = manager._last_group_results.copy()
+        manager.state = ManagerState.REFLECTING
+
+        manager._do_reflecting()
+
+        # Should continue to next group
+        assert manager.state == ManagerState.EXECUTING
+        assert manager._current_group_index == 1
+        assert manager._last_group_results == []
+
+    def test_manager_reflecting_on_parallel_group_partial_failure(self):
+        """Test reflection on parallel group where some steps fail."""
+        harness = MockHarness()
+        # Reflector should be asked about the failed step
+        reflect_response = '{"action": "RETRY_SAME", "reasoning": "Step B failed, retry", "confidence": 0.7}'
+        client = MockLLMClient([reflect_response])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test parallel reflection with failure"
+        manager.workspace.plan = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done"),
+            PlanStep(index=1, description="Step B", expected_outcome="Done"),
+        ]
+        manager._parallel_groups = [[0, 1]]
+        manager._current_group_index = 0
+        manager._last_group_results = [
+            StepResult(step_index=0, success=True, summary="A done"),
+            StepResult(step_index=1, success=False, summary="B failed", errors=["Error"]),
+        ]
+        manager.workspace.step_results = manager._last_group_results.copy()
+        manager.workspace.attempt_counts[1] = 1
+        manager.state = ManagerState.REFLECTING
+
+        manager._do_reflecting()
+
+        # Should retry the group
+        assert manager.state == ManagerState.EXECUTING
+        assert manager._last_group_results == []
+
+    def test_manager_reflecting_complete_action(self):
+        """Test that COMPLETE action works with parallel groups."""
+        harness = MockHarness()
+        reflect_response = '{"action": "COMPLETE", "reasoning": "Goal achieved", "confidence": 0.99}'
+        client = MockLLMClient([reflect_response])
+        manager = ManagerAgent(harness, client)
+        manager.workspace.goal = "Test completion"
+        manager.workspace.plan = [
+            PlanStep(index=0, description="Final step", expected_outcome="Done"),
+        ]
+        manager._parallel_groups = [[0]]
+        manager._current_group_index = 0
+        manager._last_group_results = [
+            StepResult(step_index=0, success=True, summary="Done"),
+        ]
+        manager.workspace.step_results = manager._last_group_results.copy()
+        manager.state = ManagerState.REFLECTING
+
+        manager._do_reflecting()
+
+        assert manager.state == ManagerState.COMPLETED
+        assert manager.workspace.is_complete is True
+
+    def test_parallel_step_executor_single_step(self):
+        """Test ParallelStepExecutor with a single step (no parallelism)."""
+        from compymac.parallel import ParallelStepExecutor
+
+        harness = MockHarness()
+        client = MockLLMClient(["Step done"])
+        executor = ExecutorAgent(harness, client)
+        workspace = Workspace(goal="Test single step")
+
+        parallel_executor = ParallelStepExecutor(executor_agent=executor)
+        step = PlanStep(index=0, description="Single step", expected_outcome="Done")
+
+        results = parallel_executor.execute_parallel_group([step], workspace)
+
+        assert len(results) == 1
+        assert results[0].step_index == 0
+
+    def test_parallel_step_executor_multiple_steps(self):
+        """Test ParallelStepExecutor with multiple steps."""
+        from compymac.parallel import ParallelStepExecutor
+
+        harness = MockHarness()
+        client = MockLLMClient(["Step A done", "Step B done", "Step C done"])
+        executor = ExecutorAgent(harness, client)
+        workspace = Workspace(goal="Test multiple steps")
+
+        parallel_executor = ParallelStepExecutor(executor_agent=executor, max_workers=3)
+        steps = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done"),
+            PlanStep(index=1, description="Step B", expected_outcome="Done"),
+            PlanStep(index=2, description="Step C", expected_outcome="Done"),
+        ]
+
+        results = parallel_executor.execute_parallel_group(steps, workspace)
+
+        assert len(results) == 3
+        # Results should be in order by step index
+        assert results[0].step_index == 0
+        assert results[1].step_index == 1
+        assert results[2].step_index == 2
+
+    def test_parallel_step_executor_empty_group(self):
+        """Test ParallelStepExecutor with empty step list."""
+        from compymac.parallel import ParallelStepExecutor
+
+        harness = MockHarness()
+        client = MockLLMClient()
+        executor = ExecutorAgent(harness, client)
+        workspace = Workspace(goal="Test empty group")
+
+        parallel_executor = ParallelStepExecutor(executor_agent=executor)
+
+        results = parallel_executor.execute_parallel_group([], workspace)
+
+        assert len(results) == 0
+
+    def test_parallel_group_result_all_success(self):
+        """Test ParallelGroupResult with all successful steps."""
+        from compymac.parallel import ParallelGroupResult
+
+        results = [
+            StepResult(step_index=0, success=True, summary="A done"),
+            StepResult(step_index=1, success=True, summary="B done"),
+            StepResult(step_index=2, success=True, summary="C done"),
+        ]
+        group_result = ParallelGroupResult(results)
+
+        assert group_result.all_success is True
+        assert group_result.any_success is True
+        assert group_result.success_count == 3
+        assert group_result.failure_count == 0
+        assert len(group_result.successful_steps) == 3
+        assert len(group_result.failed_steps) == 0
+
+    def test_parallel_group_result_partial_failure(self):
+        """Test ParallelGroupResult with some failed steps."""
+        from compymac.parallel import ParallelGroupResult
+
+        results = [
+            StepResult(step_index=0, success=True, summary="A done"),
+            StepResult(step_index=1, success=False, summary="B failed"),
+            StepResult(step_index=2, success=True, summary="C done"),
+        ]
+        group_result = ParallelGroupResult(results)
+
+        assert group_result.all_success is False
+        assert group_result.any_success is True
+        assert group_result.success_count == 2
+        assert group_result.failure_count == 1
+        assert len(group_result.successful_steps) == 2
+        assert len(group_result.failed_steps) == 1
+        assert group_result.failed_steps[0].step_index == 1
+
+    def test_parallel_group_result_all_failure(self):
+        """Test ParallelGroupResult with all failed steps."""
+        from compymac.parallel import ParallelGroupResult
+
+        results = [
+            StepResult(step_index=0, success=False, summary="A failed"),
+            StepResult(step_index=1, success=False, summary="B failed"),
+        ]
+        group_result = ParallelGroupResult(results)
+
+        assert group_result.all_success is False
+        assert group_result.any_success is False
+        assert group_result.success_count == 0
+        assert group_result.failure_count == 2
+
+    def test_parallel_group_result_get_result(self):
+        """Test ParallelGroupResult.get_result() method."""
+        from compymac.parallel import ParallelGroupResult
+
+        results = [
+            StepResult(step_index=0, success=True, summary="A done"),
+            StepResult(step_index=2, success=True, summary="C done"),
+        ]
+        group_result = ParallelGroupResult(results)
+
+        assert group_result.get_result(0) is not None
+        assert group_result.get_result(0).summary == "A done"
+        assert group_result.get_result(2) is not None
+        assert group_result.get_result(2).summary == "C done"
+        assert group_result.get_result(1) is None  # Not in results
+        assert group_result.get_result(99) is None  # Not in results
+
+    def test_manager_disable_parallel_execution(self):
+        """Test that parallel execution can be disabled."""
+        harness = MockHarness()
+        client = MockLLMClient(["Step done"])
+        manager = ManagerAgent(harness, client)
+        manager._enable_parallel_execution = False
+        manager.workspace.goal = "Test disabled parallel"
+        manager.workspace.plan = [
+            PlanStep(index=0, description="Step A", expected_outcome="Done"),
+            PlanStep(index=1, description="Step B", expected_outcome="Done"),
+        ]
+        manager._parallel_groups = [[0, 1]]  # Would be parallel
+        manager._current_group_index = 0
+        manager.state = ManagerState.EXECUTING
+
+        # Should not create parallel executor
+        assert manager._parallel_step_executor is None
