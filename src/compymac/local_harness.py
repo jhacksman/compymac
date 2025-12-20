@@ -1347,35 +1347,149 @@ class LocalHarness(Harness):
         num_results: int = 5,
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
+        search_type: str = "auto",
+        start_published_date: str | None = None,
     ) -> str:
-        """Search the web using a search query.
+        """Search the web using Exa API.
 
-        Note: This is a stub implementation. In production, this would
-        integrate with a search API like Exa, SerpAPI, or similar.
+        Args:
+            query: The search query string
+            num_results: Number of results to return (default: 5, max: 10)
+            include_domains: List of domains to restrict search to
+            exclude_domains: List of domains to exclude from search
+            search_type: 'auto' (default), 'keyword' for exact matches, 'neural' for semantic
+            start_published_date: Only return results published after this date (ISO format)
+
+        Returns:
+            Formatted search results with URL, title, and snippet
         """
-        # Stub implementation - returns a message indicating the search
-        # In production, this would call an actual search API
-        result = f"Web search for: {query}\n"
-        result += f"Requested results: {num_results}\n"
+        import httpx
+
+        # Get API key from environment
+        api_key = os.environ.get("EXA_API_KEY")
+        if not api_key:
+            return "Error: EXA_API_KEY environment variable not set"
+
+        # Build request payload
+        payload: dict[str, Any] = {
+            "query": query,
+            "numResults": min(num_results, 10),
+            "text": True,  # Include text snippets
+        }
+
+        if search_type != "auto":
+            payload["type"] = search_type
         if include_domains:
-            result += f"Include domains: {', '.join(include_domains)}\n"
+            payload["includeDomains"] = include_domains
         if exclude_domains:
-            result += f"Exclude domains: {', '.join(exclude_domains)}\n"
-        result += "\n[Stub: No actual search performed. Integrate with search API for real results.]"
-        return result
+            payload["excludeDomains"] = exclude_domains
+        if start_published_date:
+            payload["startPublishedDate"] = start_published_date
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    "https://api.exa.ai/search",
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Format results
+            results = data.get("results", [])
+            if not results:
+                return f"No results found for: {query}"
+
+            output_lines = [f"Search results for: {query}\n"]
+            for i, result in enumerate(results, 1):
+                title = result.get("title", "No title")
+                url = result.get("url", "")
+                published = result.get("publishedDate", "")
+                text = result.get("text", "")[:300]  # Truncate text
+
+                output_lines.append(f"## Result {i}: {title}")
+                output_lines.append(f"URL: {url}")
+                if published:
+                    output_lines.append(f"Published: {published}")
+                if text:
+                    output_lines.append(f"\n{text}...")
+                output_lines.append("")
+
+            return "\n".join(output_lines)
+
+        except httpx.HTTPStatusError as e:
+            return f"Exa API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error performing web search: {e}"
 
     def _web_get_contents(self, urls: list[str]) -> str:
-        """Fetch the contents of one or more web pages.
+        """Fetch the contents of one or more web pages using Exa API.
 
-        Note: This is a stub implementation. In production, this would
-        fetch actual page contents.
+        Args:
+            urls: List of URLs to fetch content from (max 10)
+
+        Returns:
+            Formatted page contents with title, URL, and text
         """
-        # Stub implementation
-        result = f"Fetching contents from {len(urls)} URL(s):\n"
-        for url in urls:
-            result += f"  - {url}\n"
-        result += "\n[Stub: No actual fetch performed. Integrate with HTTP client for real contents.]"
-        return result
+        import httpx
+
+        # Get API key from environment
+        api_key = os.environ.get("EXA_API_KEY")
+        if not api_key:
+            return "Error: EXA_API_KEY environment variable not set"
+
+        if len(urls) > 10:
+            return "Error: Maximum 10 URLs allowed per request"
+
+        # Build request payload
+        payload = {
+            "urls": urls,
+            "text": True,  # Include full text content
+        }
+
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    "https://api.exa.ai/contents",
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Format results
+            results = data.get("results", [])
+            if not results:
+                return f"No content retrieved for URLs: {urls}"
+
+            output_lines = [f"Content from {len(results)} URL(s):\n"]
+            for i, result in enumerate(results, 1):
+                title = result.get("title", "No title")
+                url = result.get("url", "")
+                text = result.get("text", "")
+
+                output_lines.append(f"## Page {i}: {title}")
+                output_lines.append(f"URL: {url}")
+                output_lines.append(f"\n{text[:5000]}")  # Truncate to 5000 chars
+                output_lines.append("\n---\n")
+
+            return "\n".join(output_lines)
+
+        except httpx.HTTPStatusError as e:
+            return f"Exa API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error fetching contents: {e}"
 
     def _lsp_tool(
         self,
