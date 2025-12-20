@@ -599,6 +599,251 @@ class BrowserService:
             )
 
 
+    async def press_key(self, key: str) -> BrowserAction:
+        """Press keyboard key(s) in the browser.
+
+        Args:
+            key: Key to press. Use '+' for combinations (e.g., 'Control+Enter')
+        """
+        await self._ensure_initialized()
+
+        try:
+            if not self._page:
+                raise RuntimeError("Page not initialized")
+
+            await self._page.keyboard.press(key)
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="press_key",
+                details={"key": key},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Press key failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="press_key",
+                details={"key": key},
+                error=str(e),
+            )
+
+    async def move_mouse(
+        self,
+        element_id: str | None = None,
+        coordinates: tuple[float, float] | None = None,
+    ) -> BrowserAction:
+        """Move the mouse to an element or coordinates."""
+        await self._ensure_initialized()
+
+        try:
+            if not self._page:
+                raise RuntimeError("Page not initialized")
+
+            if element_id:
+                selector = f'[data-compyid="{element_id}"]'
+                element = await self._page.query_selector(selector)
+                if not element:
+                    raise ValueError(f"Element not found: {element_id}")
+                box = await element.bounding_box()
+                if not box:
+                    raise ValueError(f"Element has no bounding box: {element_id}")
+                x = box["x"] + box["width"] / 2
+                y = box["y"] + box["height"] / 2
+                await self._page.mouse.move(x, y)
+            elif coordinates:
+                await self._page.mouse.move(coordinates[0], coordinates[1])
+            else:
+                raise ValueError("Must provide element_id or coordinates")
+
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="move_mouse",
+                details={"element_id": element_id, "coordinates": coordinates},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Move mouse failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="move_mouse",
+                error=str(e),
+            )
+
+    async def select_option(
+        self,
+        index: int,
+        element_id: str | None = None,
+        selector: str | None = None,
+    ) -> BrowserAction:
+        """Select an option from a dropdown by index."""
+        await self._ensure_initialized()
+
+        try:
+            if not self._page:
+                raise RuntimeError("Page not initialized")
+
+            if element_id:
+                selector = f'[data-compyid="{element_id}"]'
+            elif not selector:
+                raise ValueError("Must provide element_id or selector")
+
+            await self._page.select_option(selector, index=index)
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="select_option",
+                details={"index": index, "element_id": element_id},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Select option failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="select_option",
+                error=str(e),
+            )
+
+    async def select_file(self, file_paths: list[str]) -> BrowserAction:
+        """Select file(s) for upload using file chooser."""
+        await self._ensure_initialized()
+
+        try:
+            if not self._page:
+                raise RuntimeError("Page not initialized")
+
+            await self._page.set_input_files('input[type="file"]', file_paths)
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="select_file",
+                details={"file_count": len(file_paths)},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Select file failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="select_file",
+                error=str(e),
+            )
+
+    async def set_mobile(self, enabled: bool) -> BrowserAction:
+        """Toggle mobile mode in the browser."""
+        await self._ensure_initialized()
+
+        try:
+            if not self._page or not self._context or not self._browser:
+                raise RuntimeError("Browser not initialized")
+
+            current_url = self._page.url
+            await self._page.close()
+            await self._context.close()
+
+            if enabled:
+                context_options: dict[str, Any] = {
+                    "viewport": {"width": 375, "height": 667},
+                    "is_mobile": True,
+                    "has_touch": True,
+                    "user_agent": (
+                        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
+                        "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+                    ),
+                }
+            else:
+                context_options = {
+                    "viewport": {
+                        "width": self.config.viewport_width,
+                        "height": self.config.viewport_height,
+                    },
+                }
+
+            self._context = await self._browser.new_context(**context_options)
+            self._page = await self._context.new_page()
+            self._page.set_default_timeout(self.config.timeout_ms)
+
+            if current_url and current_url != "about:blank":
+                await self._page.goto(current_url)
+
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="set_mobile",
+                details={"enabled": enabled},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Set mobile failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="set_mobile",
+                error=str(e),
+            )
+
+    async def restart(self, url: str, extensions: list[str] | None = None) -> BrowserAction:
+        """Restart the browser with optional extensions."""
+        await self._ensure_initialized()
+
+        try:
+            if self._context:
+                await self._context.close()
+            if self._browser:
+                await self._browser.close()
+
+            launch_options: dict[str, Any] = {
+                "headless": self.config.mode == BrowserMode.HEADLESS,
+            }
+
+            if extensions and self.config.engine == BrowserEngine.CHROMIUM:
+                launch_options["args"] = [
+                    f"--load-extension={','.join(extensions)}",
+                    "--disable-extensions-except=" + ",".join(extensions),
+                ]
+
+            if self.config.engine == BrowserEngine.CHROMIUM:
+                browser_type = self._playwright.chromium
+            elif self.config.engine == BrowserEngine.FIREFOX:
+                browser_type = self._playwright.firefox
+            else:
+                browser_type = self._playwright.webkit
+
+            self._browser = await browser_type.launch(**launch_options)
+
+            context_options: dict[str, Any] = {
+                "viewport": {
+                    "width": self.config.viewport_width,
+                    "height": self.config.viewport_height,
+                },
+            }
+
+            self._context = await self._browser.new_context(**context_options)
+            self._page = await self._context.new_page()
+            self._page.set_default_timeout(self.config.timeout_ms)
+
+            await self._page.goto(url)
+            page_state = await self._get_page_state()
+
+            return BrowserAction(
+                success=True,
+                action_type="restart",
+                details={"url": url, "extensions": extensions},
+                page_state=page_state,
+            )
+        except Exception as e:
+            logger.error(f"Restart failed: {e}")
+            return BrowserAction(
+                success=False,
+                action_type="restart",
+                error=str(e),
+            )
+
+
 def create_browser_tools(browser_service: BrowserService) -> list[dict[str, Any]]:
     """
     Create tool definitions for browser actions.
@@ -799,6 +1044,34 @@ class SyncBrowserService:
 
     def wait_for_selector(self, selector: str, timeout_ms: int | None = None) -> BrowserAction:
         return self._run(self._async_service.wait_for_selector(selector, timeout_ms))
+
+
+    def press_key(self, key: str) -> BrowserAction:
+        return self._run(self._async_service.press_key(key))
+
+    def move_mouse(
+        self,
+        element_id: str | None = None,
+        coordinates: tuple[float, float] | None = None,
+    ) -> BrowserAction:
+        return self._run(self._async_service.move_mouse(element_id, coordinates))
+
+    def select_option(
+        self,
+        index: int,
+        element_id: str | None = None,
+        selector: str | None = None,
+    ) -> BrowserAction:
+        return self._run(self._async_service.select_option(index, element_id, selector))
+
+    def select_file(self, file_paths: list[str]) -> BrowserAction:
+        return self._run(self._async_service.select_file(file_paths))
+
+    def set_mobile(self, enabled: bool) -> BrowserAction:
+        return self._run(self._async_service.set_mobile(enabled))
+
+    def restart(self, url: str, extensions: list[str] | None = None) -> BrowserAction:
+        return self._run(self._async_service.restart(url, extensions))
 
     def __enter__(self) -> "SyncBrowserService":
         self.initialize()
