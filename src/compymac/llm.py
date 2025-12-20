@@ -43,7 +43,7 @@ class LLMClient:
     This is a synchronous client for simplicity in the baseline.
     The important thing is that it demonstrates the interface,
     not that it's optimized for production.
-    
+
     Includes timeout and retry logic for resilience against API hangs.
     """
 
@@ -54,7 +54,7 @@ class LLMClient:
         retry_delay: float = DEFAULT_RETRY_DELAY,
     ) -> None:
         """Initialize the client with configuration.
-        
+
         Args:
             config: LLM configuration (model, API key, etc.)
             max_retries: Maximum number of retries for timeout/network errors
@@ -63,7 +63,7 @@ class LLMClient:
         self.config = config or LLMConfig.from_env()
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        
+
         # Use layered timeouts for better control
         timeout = httpx.Timeout(
             connect=DEFAULT_CONNECT_TIMEOUT,
@@ -71,7 +71,7 @@ class LLMClient:
             write=DEFAULT_WRITE_TIMEOUT,
             pool=DEFAULT_POOL_TIMEOUT,
         )
-        
+
         self._client = httpx.Client(
             base_url=self.config.base_url,
             headers={
@@ -97,7 +97,7 @@ class LLMClient:
 
         Returns:
             ChatResponse with the assistant's response
-            
+
         Raises:
             LLMError: If all retries are exhausted or a non-retryable error occurs
         """
@@ -114,12 +114,12 @@ class LLMClient:
                 payload["tool_choice"] = tool_choice
 
         last_error: Exception | None = None
-        
+
         for attempt in range(self.max_retries + 1):
             if attempt > 0:
                 logger.info(f"Retry attempt {attempt}/{self.max_retries} after {self.retry_delay}s delay...")
                 time.sleep(self.retry_delay)
-            
+
             logger.debug(f"Sending chat request with {len(messages)} messages (attempt {attempt + 1})")
 
             try:
@@ -127,13 +127,13 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
                 return ChatResponse.from_api_response(data)
-                
+
             except httpx.TimeoutException as e:
                 # Timeout errors are retryable
                 logger.warning(f"Request timed out (attempt {attempt + 1}): {e}")
                 last_error = e
                 continue
-                
+
             except httpx.HTTPStatusError as e:
                 # Check if it's a rate limit error (429) - retryable
                 if e.response.status_code == 429:
@@ -152,23 +152,23 @@ class LLMClient:
                         time.sleep(self.retry_delay)
                     last_error = e
                     continue
-                    
+
                 # 503 Service Unavailable is also retryable
                 if e.response.status_code == 503:
                     logger.warning(f"Service unavailable (attempt {attempt + 1}): {e}")
                     last_error = e
                     continue
-                
+
                 # Other HTTP errors are not retryable
                 logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
                 raise LLMError(f"HTTP {e.response.status_code}: {e.response.text}") from e
-                
+
             except httpx.RequestError as e:
                 # Network errors are retryable
                 logger.warning(f"Request error (attempt {attempt + 1}): {e}")
                 last_error = e
                 continue
-        
+
         # All retries exhausted
         logger.error(f"All {self.max_retries + 1} attempts failed. Last error: {last_error}")
         raise LLMError(f"Request failed after {self.max_retries + 1} attempts: {last_error}") from last_error
