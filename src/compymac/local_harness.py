@@ -707,7 +707,10 @@ class LocalHarness(Harness):
 
         def browser_press_key(content: str, tab_idx: int | None = None) -> str:
             """Press keyboard keys in the browser."""
-            # Stub - would need to add press_key to SyncBrowserService
+            browser = _ensure_browser()
+            result = browser.press_key(content)
+            if result.error:
+                return f"Error: {result.error}"
             return f"Pressed key(s): {content}"
 
         def browser_move_mouse(
@@ -716,12 +719,20 @@ class LocalHarness(Harness):
             tab_idx: int | None = None,
         ) -> str:
             """Move the mouse to an element or coordinates."""
-            # Stub - would need to add move_mouse to SyncBrowserService
+            browser = _ensure_browser()
+            coords_tuple = None
+            if coordinates:
+                parts = coordinates.split(",")
+                if len(parts) == 2:
+                    coords_tuple = (float(parts[0].strip()), float(parts[1].strip()))
+            result = browser.move_mouse(element_id=devinid, coordinates=coords_tuple)
+            if result.error:
+                return f"Error: {result.error}"
             if devinid:
                 return f"Moved mouse to element {devinid}"
             elif coordinates:
                 return f"Moved mouse to coordinates {coordinates}"
-            return "No target specified for mouse move"
+            return "Mouse moved"
 
         def browser_select_option(
             index: str,
@@ -729,25 +740,38 @@ class LocalHarness(Harness):
             tab_idx: int | None = None,
         ) -> str:
             """Select an option from a dropdown."""
-            # Stub - would need to add select_option to SyncBrowserService
+            browser = _ensure_browser()
+            result = browser.select_option(index=int(index), element_id=devinid)
+            if result.error:
+                return f"Error: {result.error}"
             target = f" in element {devinid}" if devinid else ""
             return f"Selected option at index {index}{target}"
 
         def browser_select_file(content: str, tab_idx: int | None = None) -> str:
             """Select file(s) for upload."""
-            # Stub - would need to add select_file to SyncBrowserService
+            browser = _ensure_browser()
             files = content.strip().split("\n")
+            result = browser.select_file(files)
+            if result.error:
+                return f"Error: {result.error}"
             return f"Selected {len(files)} file(s) for upload"
 
         def browser_set_mobile(enabled: bool, tab_idx: int | None = None) -> str:
             """Toggle mobile mode in the browser."""
-            # Stub - would need to add set_mobile to SyncBrowserService
+            browser = _ensure_browser()
+            result = browser.set_mobile(enabled)
+            if result.error:
+                return f"Error: {result.error}"
             mode = "enabled" if enabled else "disabled"
             return f"Mobile mode {mode}"
 
         def browser_restart(url: str, extensions: str | None = None) -> str:
             """Restart the browser with optional extensions."""
-            # Stub - would need to add restart to SyncBrowserService
+            browser = _ensure_browser()
+            ext_list = extensions.split(",") if extensions else None
+            result = browser.restart(url, ext_list)
+            if result.error:
+                return f"Error: {result.error}"
             ext_info = f" with extensions: {extensions}" if extensions else ""
             return f"Browser restarted{ext_info}, navigating to {url}"
 
@@ -1703,70 +1727,108 @@ If you're unsure about something, say so and suggest how to find out."""
             return f"Error asking smart friend: {e}"
 
     def _visual_checker(self, question: str) -> str:
-        """Analyze visual content using Venice.ai vision model.
+        """Analyze visual content using a vision model.
 
         Args:
             question: The question about visual content, may include image paths
 
         Returns:
-            Analysis of the visual content
+            Analysis of the visual content or configuration error
 
-        Note: Venice.ai supports vision through certain models. If no vision model
-        is available, falls back to text-based analysis guidance.
+        Note: This tool requires a vision-capable model to be configured.
+        Currently, Venice.ai does not support multimodal/vision inputs.
+        To enable this feature, configure VISION_API_URL and VISION_MODEL
+        environment variables to point to a vision-capable API endpoint
+        (e.g., OpenAI GPT-4V, Anthropic Claude with vision, or a local
+        multimodal model like LLaVA).
         """
+        # Check if a vision API is configured
+        vision_api_url = os.environ.get("VISION_API_URL")
+        vision_model = os.environ.get("VISION_MODEL")
+
+        if not vision_api_url:
+            return """Error: Visual analysis not configured.
+
+The visual_checker tool requires a vision-capable model, but none is configured.
+Venice.ai (the current LLM provider) does not support multimodal/vision inputs.
+
+To enable visual analysis, set these environment variables:
+- VISION_API_URL: API endpoint for a vision-capable model
+- VISION_MODEL: Model name (e.g., 'gpt-4-vision-preview', 'claude-3-opus')
+- VISION_API_KEY: API key for the vision service
+
+Supported vision APIs:
+- OpenAI GPT-4V: https://api.openai.com/v1/chat/completions
+- Anthropic Claude: https://api.anthropic.com/v1/messages
+- Local LLaVA/multimodal: Your local endpoint
+
+For now, you can use the browser screenshot tool to capture UI state
+and describe what you see in your question to ask_smart_friend instead."""
+
+        # If vision API is configured, attempt to use it
+        import base64
+        from pathlib import Path
+
         import httpx
 
-        # Get API key from environment
-        api_key = os.environ.get("LLM_API_KEY") or os.environ.get("VENICE_API_KEY")
+        api_key = os.environ.get("VISION_API_KEY")
         if not api_key:
-            return "Error: LLM_API_KEY or VENICE_API_KEY environment variable not set"
+            return "Error: VISION_API_KEY environment variable not set"
 
-        # Use a model that supports vision if available
-        model = os.environ.get("VISION_MODEL", "qwen3-next-80b")
+        # Extract image paths from the question (look for file paths)
+        import re
+        image_paths = re.findall(r'(/[\w/.-]+\.(?:png|jpg|jpeg|gif|webp))', question)
 
-        system_prompt = """You are a visual analysis assistant helping to analyze images, screenshots, and UI elements.
-When analyzing visual content:
-1. Describe what you observe in detail
-2. Identify any issues, errors, or anomalies
-3. Compare against expected behavior if described
-4. Provide specific, actionable feedback
+        messages = []
+        user_content = []
 
-If you cannot see the actual image, provide guidance on what to look for based on the description."""
+        # Add text part
+        user_content.append({"type": "text", "text": question})
+
+        # Add image parts if paths found
+        for img_path in image_paths:
+            path = Path(img_path)
+            if path.exists():
+                with open(path, "rb") as f:
+                    img_data = base64.b64encode(f.read()).decode()
+                suffix = path.suffix.lower().lstrip(".")
+                media_type = f"image/{suffix}" if suffix != "jpg" else "image/jpeg"
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{img_data}"}
+                })
+
+        messages.append({"role": "user", "content": user_content})
 
         try:
             with httpx.Client(timeout=120.0) as client:
                 response = client.post(
-                    "https://api.venice.ai/api/v1/chat/completions",
+                    vision_api_url,
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": question},
-                        ],
+                        "model": vision_model,
+                        "messages": messages,
                         "max_tokens": 2000,
-                        "temperature": 0.3,  # Lower temp for more precise analysis
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
 
-            # Extract response
             choices = data.get("choices", [])
             if not choices:
                 return "Error: No response from vision model"
 
-            content = choices[0].get("message", {}).get("content", "")
-            if not content:
+            result = choices[0].get("message", {}).get("content", "")
+            if not result:
                 return "Error: Empty response from vision model"
 
-            return f"Visual analysis:\n\n{content}"
+            return f"Visual analysis:\n\n{result}"
 
         except httpx.HTTPStatusError as e:
-            return f"Venice API error: {e.response.status_code} - {e.response.text}"
+            return f"Vision API error: {e.response.status_code} - {e.response.text}"
         except httpx.RequestError as e:
             return f"Request error: {e}"
         except Exception as e:
@@ -1959,6 +2021,10 @@ The user can view it at {pr_url}"""
 
         Returns:
             Confirmation of update
+
+        Note: This implementation has limitations compared to Devin's version.
+        Devin can automatically generate PR descriptions from diffs.
+        This version can only append a timestamp marker to existing descriptions.
         """
         import httpx
 
@@ -1990,20 +2056,19 @@ The user can view it at {pr_url}"""
                 current_body = pr.get("body", "")
                 pr_url = pr.get("html_url", "")
 
-                # Generate new description based on PR diff
-                # For now, just append a timestamp to show it was updated
                 new_body = current_body or ""
                 if not force and "[Auto-updated]" in new_body:
                     return f"PR #{pull_number} description was already auto-updated. Use force=True to update again."
 
-                # In a real implementation, we'd generate a description from the diff
-                # For now, we just note that it was updated
+                # Limitation: We can only append a timestamp, not generate descriptions
+                # Devin's version uses an internal service to generate descriptions from diffs
                 import datetime
                 timestamp = datetime.datetime.now(datetime.UTC).isoformat()
                 if "[Auto-updated]" not in new_body:
                     new_body += f"\n\n[Auto-updated: {timestamp}]"
+                    new_body += "\n\nNote: CompyMac cannot auto-generate PR descriptions from diffs."
+                    new_body += "\nTo generate a description, manually review the diff and update."
                 else:
-                    # Update existing timestamp
                     import re
                     new_body = re.sub(
                         r"\[Auto-updated: [^\]]+\]",
@@ -2020,7 +2085,11 @@ The user can view it at {pr_url}"""
                 update_response.raise_for_status()
 
             return f"""Updated PR #{pull_number} description in {repo}
-URL: {pr_url}"""
+URL: {pr_url}
+
+Note: This tool can only append timestamps to PR descriptions.
+Unlike Devin, CompyMac cannot automatically generate descriptions from diffs.
+Please manually review and update the description if needed."""
 
         except httpx.HTTPStatusError as e:
             return f"GitHub API error: {e.response.status_code} - {e.response.text}"
@@ -2414,28 +2483,74 @@ URL: {comment_url}"""
     ) -> str:
         """Deploy applications.
 
-        Note: This is a stub. In production, integrate with deployment services.
+        Note: Deployment requires external service configuration.
         """
         valid_commands = ["frontend", "backend", "logs", "expose"]
         if command not in valid_commands:
             raise ValueError(f"Invalid deploy command: {command}. Valid: {valid_commands}")
 
+        # Check for deployment configuration
+        fly_token = os.environ.get("FLY_API_TOKEN")
+        netlify_token = os.environ.get("NETLIFY_AUTH_TOKEN")
+        ngrok_token = os.environ.get("NGROK_AUTHTOKEN")
+
         if command == "frontend":
-            return f"""Deploying frontend from {dir or 'current directory'}
+            if not netlify_token:
+                return """Error: Frontend deployment not configured.
 
-[Stub: In production, this would deploy static files to a CDN and return a public URL.]"""
+To enable frontend deployment, set the NETLIFY_AUTH_TOKEN environment variable
+with your Netlify personal access token.
+
+Steps to configure:
+1. Create a Netlify account at https://netlify.com
+2. Generate a personal access token at https://app.netlify.com/user/applications#personal-access-tokens
+3. Set NETLIFY_AUTH_TOKEN=<your-token> in your environment
+
+Alternative: You can manually deploy by running:
+  npm run build && npx netlify deploy --prod"""
+            # TODO: Implement actual Netlify deployment when token is available
+            return "Error: Netlify deployment not yet implemented. Token is configured but integration pending."
+
         elif command == "backend":
-            return f"""Deploying backend from {dir or 'current directory'}
+            if not fly_token:
+                return """Error: Backend deployment not configured.
 
-[Stub: In production, this would deploy FastAPI to Fly.io and return a public URL.]"""
+To enable backend deployment to Fly.io, set the FLY_API_TOKEN environment variable.
+
+Steps to configure:
+1. Install flyctl: curl -L https://fly.io/install.sh | sh
+2. Login: flyctl auth login
+3. Get token: flyctl auth token
+4. Set FLY_API_TOKEN=<your-token> in your environment
+
+Alternative: You can manually deploy by running:
+  flyctl launch && flyctl deploy"""
+            # TODO: Implement actual Fly.io deployment when token is available
+            return "Error: Fly.io deployment not yet implemented. Token is configured but integration pending."
+
         elif command == "logs":
-            return """Fetching deployment logs
+            if not fly_token:
+                return """Error: Cannot fetch logs - deployment not configured.
 
-[Stub: In production, this would fetch logs from the deployed application.]"""
+Set FLY_API_TOKEN to enable log fetching from Fly.io deployments."""
+            # TODO: Implement actual log fetching
+            return "Error: Log fetching not yet implemented."
+
         else:  # expose
-            return f"""Exposing local port {port or 'unknown'}
+            if not ngrok_token:
+                return f"""Error: Port exposure not configured.
 
-[Stub: In production, this would create a tunnel and return a public URL.]"""
+To expose local port {port or 'unknown'} to the internet, set NGROK_AUTHTOKEN.
+
+Steps to configure:
+1. Create an ngrok account at https://ngrok.com
+2. Get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken
+3. Set NGROK_AUTHTOKEN=<your-token> in your environment
+
+Alternative: You can manually expose by running:
+  ngrok http {port or 3000}"""
+            # TODO: Implement actual ngrok tunnel
+            return "Error: ngrok tunnel not yet implemented. Token is configured but integration pending."
 
     def _recording_start(self) -> str:
         """Start a new screen recording using ffmpeg.
@@ -2562,29 +2677,70 @@ URL: {comment_url}"""
     ) -> str:
         """Interact with MCP (Model Context Protocol) servers.
 
-        Note: This is a stub. In production, integrate with MCP servers.
+        Note: MCP server integration requires configuration.
         """
         valid_commands = ["list_servers", "list_tools", "call_tool", "read_resource"]
         if command not in valid_commands:
             raise ValueError(f"Invalid MCP command: {command}. Valid: {valid_commands}")
 
+        # Check for MCP configuration
+        mcp_config_path = os.environ.get("MCP_CONFIG_PATH")
+        mcp_servers_json = os.environ.get("MCP_SERVERS")
+
+        if not mcp_config_path and not mcp_servers_json:
+            return """Error: MCP (Model Context Protocol) not configured.
+
+No MCP servers are configured. To enable MCP integrations:
+
+Option 1: Set MCP_CONFIG_PATH to a JSON config file:
+  {
+    "servers": {
+      "slack": {
+        "command": "npx",
+        "args": ["-y", "@anthropic/mcp-server-slack"],
+        "env": {"SLACK_BOT_TOKEN": "xoxb-..."}
+      },
+      "linear": {
+        "command": "npx",
+        "args": ["-y", "@anthropic/mcp-server-linear"],
+        "env": {"LINEAR_API_KEY": "lin_api_..."}
+      }
+    }
+  }
+
+Option 2: Set MCP_SERVERS as a JSON string with the same format.
+
+For more information on MCP:
+- Specification: https://modelcontextprotocol.io
+- Server examples: https://github.com/anthropics/mcp-servers
+
+Once configured, you can:
+- list_servers: See available MCP servers
+- list_tools: See tools/resources on a server
+- call_tool: Execute a tool on a server
+- read_resource: Read a resource from a server"""
+
+        # If we get here, MCP is configured but not yet implemented
         if command == "list_servers":
-            return """Available MCP servers:
+            return """Error: MCP server discovery not yet implemented.
 
-[Stub: In production, this would list configured MCP servers like Slack, Linear, etc.]"""
+MCP configuration detected but the client integration is pending.
+This will list configured servers like Slack, Linear, GitHub, etc."""
+
         elif command == "list_tools":
-            return f"""Tools available on {server or 'unknown server'}:
+            return f"""Error: MCP tool listing not yet implemented.
 
-[Stub: In production, this would list tools and resources from the MCP server.]"""
+Cannot list tools on '{server or 'unknown'}' - MCP client integration pending."""
+
         elif command == "call_tool":
-            return f"""Called {tool_name} on {server or 'unknown server'}
-Args: {tool_args or '{}'}
+            return f"""Error: MCP tool execution not yet implemented.
 
-[Stub: In production, this would execute the tool and return results.]"""
+Cannot call '{tool_name}' on '{server or 'unknown'}' - MCP client integration pending."""
+
         else:  # read_resource
-            return f"""Reading resource {resource_uri} from {server or 'unknown server'}
+            return f"""Error: MCP resource reading not yet implemented.
 
-[Stub: In production, this would read the resource from the MCP server.]"""
+Cannot read '{resource_uri}' from '{server or 'unknown'}' - MCP client integration pending."""
 
     def register_tool(
         self,
