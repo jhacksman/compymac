@@ -294,6 +294,313 @@ class LocalHarness(Harness):
             handler=self._glob,
         )
 
+        # wait tool - pause execution
+        self.register_tool(
+            name="wait",
+            schema=ToolSchema(
+                name="wait",
+                description="Wait for a specified number of seconds",
+                required_params=["seconds"],
+                optional_params=[],
+                param_types={"seconds": "number"},
+            ),
+            handler=self._wait,
+        )
+
+        # think tool - reasoning without action
+        self.register_tool(
+            name="think",
+            schema=ToolSchema(
+                name="think",
+                description="Think about something without taking action. Useful for reasoning.",
+                required_params=["thought"],
+                optional_params=[],
+                param_types={"thought": "string"},
+            ),
+            handler=self._think,
+        )
+
+        # TodoWrite tool - task management
+        self.register_tool(
+            name="TodoWrite",
+            schema=ToolSchema(
+                name="TodoWrite",
+                description="Create and manage a task list for tracking progress",
+                required_params=["todos"],
+                optional_params=[],
+                param_types={"todos": "array"},
+            ),
+            handler=self._todo_write,
+        )
+
+        # message_user tool - communicate with user
+        self.register_tool(
+            name="message_user",
+            schema=ToolSchema(
+                name="message_user",
+                description="Send a message to the user",
+                required_params=["message"],
+                optional_params=["block_on_user", "should_use_concise_message"],
+                param_types={
+                    "message": "string",
+                    "block_on_user": "boolean",
+                    "should_use_concise_message": "boolean",
+                },
+            ),
+            handler=self._message_user,
+        )
+
+        # web_search tool - search the web
+        self.register_tool(
+            name="web_search",
+            schema=ToolSchema(
+                name="web_search",
+                description="Search the web using a search query",
+                required_params=["query"],
+                optional_params=["num_results", "include_domains", "exclude_domains"],
+                param_types={
+                    "query": "string",
+                    "num_results": "number",
+                    "include_domains": "array",
+                    "exclude_domains": "array",
+                },
+            ),
+            handler=self._web_search,
+        )
+
+        # web_get_contents tool - fetch web page contents
+        self.register_tool(
+            name="web_get_contents",
+            schema=ToolSchema(
+                name="web_get_contents",
+                description="Fetch the contents of one or more web pages",
+                required_params=["urls"],
+                optional_params=[],
+                param_types={"urls": "array"},
+            ),
+            handler=self._web_get_contents,
+        )
+
+        # lsp_tool - Language Server Protocol operations
+        self.register_tool(
+            name="lsp_tool",
+            schema=ToolSchema(
+                name="lsp_tool",
+                description="Language Server Protocol operations: goto_definition, goto_references, hover_symbol, file_diagnostics",
+                required_params=["command", "path"],
+                optional_params=["symbol", "line"],
+                param_types={
+                    "command": "string",
+                    "path": "string",
+                    "symbol": "string",
+                    "line": "number",
+                },
+            ),
+            handler=self._lsp_tool,
+        )
+
+        # list_secrets - list available secrets
+        self.register_tool(
+            name="list_secrets",
+            schema=ToolSchema(
+                name="list_secrets",
+                description="List the names of all secrets available to the agent",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._list_secrets,
+        )
+
+        # ask_smart_friend - consult for complex reasoning
+        self.register_tool(
+            name="ask_smart_friend",
+            schema=ToolSchema(
+                name="ask_smart_friend",
+                description="Ask a smart friend for help with complex reasoning or debugging",
+                required_params=["question"],
+                optional_params=[],
+                param_types={"question": "string"},
+            ),
+            handler=self._ask_smart_friend,
+        )
+
+        # visual_checker - analyze visual content
+        self.register_tool(
+            name="visual_checker",
+            schema=ToolSchema(
+                name="visual_checker",
+                description="Analyze images, screenshots, or visual content",
+                required_params=["question"],
+                optional_params=[],
+                param_types={"question": "string"},
+            ),
+            handler=self._visual_checker,
+        )
+
+        # Git tools
+        self.register_tool(
+            name="git_view_pr",
+            schema=ToolSchema(
+                name="git_view_pr",
+                description="View details of a pull request including description, comments, and CI status",
+                required_params=["repo", "pull_number"],
+                optional_params=[],
+                param_types={"repo": "string", "pull_number": "number"},
+            ),
+            handler=self._git_view_pr,
+        )
+
+        self.register_tool(
+            name="git_create_pr",
+            schema=ToolSchema(
+                name="git_create_pr",
+                description="Create a new pull request",
+                required_params=["repo", "title", "head_branch", "base_branch", "exec_dir"],
+                optional_params=["draft"],
+                param_types={
+                    "repo": "string",
+                    "title": "string",
+                    "head_branch": "string",
+                    "base_branch": "string",
+                    "exec_dir": "string",
+                    "draft": "boolean",
+                },
+            ),
+            handler=self._git_create_pr,
+        )
+
+        self.register_tool(
+            name="git_update_pr_description",
+            schema=ToolSchema(
+                name="git_update_pr_description",
+                description="Update the description of an existing pull request",
+                required_params=["repo", "pull_number"],
+                optional_params=["force"],
+                param_types={"repo": "string", "pull_number": "number", "force": "boolean"},
+            ),
+            handler=self._git_update_pr_description,
+        )
+
+        self.register_tool(
+            name="git_pr_checks",
+            schema=ToolSchema(
+                name="git_pr_checks",
+                description="Check the CI status of a pull request",
+                required_params=["repo", "pull_number"],
+                optional_params=["wait_until_complete"],
+                param_types={
+                    "repo": "string",
+                    "pull_number": "number",
+                    "wait_until_complete": "boolean",
+                },
+            ),
+            handler=self._git_pr_checks,
+        )
+
+        self.register_tool(
+            name="git_ci_job_logs",
+            schema=ToolSchema(
+                name="git_ci_job_logs",
+                description="View the logs for a specific CI job",
+                required_params=["repo", "job_id"],
+                optional_params=[],
+                param_types={"repo": "string", "job_id": "number"},
+            ),
+            handler=self._git_ci_job_logs,
+        )
+
+        self.register_tool(
+            name="git_comment_on_pr",
+            schema=ToolSchema(
+                name="git_comment_on_pr",
+                description="Post a comment on a pull request",
+                required_params=["repo", "pull_number", "body"],
+                optional_params=["commit_id", "path", "line", "side", "in_reply_to"],
+                param_types={
+                    "repo": "string",
+                    "pull_number": "number",
+                    "body": "string",
+                    "commit_id": "string",
+                    "path": "string",
+                    "line": "number",
+                    "side": "string",
+                    "in_reply_to": "number",
+                },
+            ),
+            handler=self._git_comment_on_pr,
+        )
+
+        self.register_tool(
+            name="list_repos",
+            schema=ToolSchema(
+                name="list_repos",
+                description="List all repositories that you have access to",
+                required_params=[],
+                optional_params=["keyword", "page"],
+                param_types={"keyword": "string", "page": "number"},
+            ),
+            handler=self._list_repos,
+        )
+
+        # Deploy tool
+        self.register_tool(
+            name="deploy",
+            schema=ToolSchema(
+                name="deploy",
+                description="Deploy applications: frontend (static), backend (FastAPI), logs, or expose local port",
+                required_params=["command"],
+                optional_params=["dir", "port"],
+                param_types={"command": "string", "dir": "string", "port": "number"},
+            ),
+            handler=self._deploy,
+        )
+
+        # Recording tools
+        self.register_tool(
+            name="recording_start",
+            schema=ToolSchema(
+                name="recording_start",
+                description="Start a new screen recording",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._recording_start,
+        )
+
+        self.register_tool(
+            name="recording_stop",
+            schema=ToolSchema(
+                name="recording_stop",
+                description="Stop the current recording and process it",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._recording_stop,
+        )
+
+        # MCP tool
+        self.register_tool(
+            name="mcp_tool",
+            schema=ToolSchema(
+                name="mcp_tool",
+                description="Interact with MCP servers: list_servers, list_tools, call_tool, read_resource",
+                required_params=["command"],
+                optional_params=["server", "tool_name", "tool_args", "resource_uri", "shell_id"],
+                param_types={
+                    "command": "string",
+                    "server": "string",
+                    "tool_name": "string",
+                    "tool_args": "string",
+                    "resource_uri": "string",
+                    "shell_id": "string",
+                },
+            ),
+            handler=self._mcp_tool,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -398,6 +705,52 @@ class LocalHarness(Harness):
                 return f"Executed JS: {result.data}"
             return "No JS to execute"
 
+        def browser_press_key(content: str, tab_idx: int | None = None) -> str:
+            """Press keyboard keys in the browser."""
+            # Stub - would need to add press_key to SyncBrowserService
+            return f"Pressed key(s): {content}"
+
+        def browser_move_mouse(
+            devinid: str | None = None,
+            coordinates: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            """Move the mouse to an element or coordinates."""
+            # Stub - would need to add move_mouse to SyncBrowserService
+            if devinid:
+                return f"Moved mouse to element {devinid}"
+            elif coordinates:
+                return f"Moved mouse to coordinates {coordinates}"
+            return "No target specified for mouse move"
+
+        def browser_select_option(
+            index: str,
+            devinid: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            """Select an option from a dropdown."""
+            # Stub - would need to add select_option to SyncBrowserService
+            target = f" in element {devinid}" if devinid else ""
+            return f"Selected option at index {index}{target}"
+
+        def browser_select_file(content: str, tab_idx: int | None = None) -> str:
+            """Select file(s) for upload."""
+            # Stub - would need to add select_file to SyncBrowserService
+            files = content.strip().split("\n")
+            return f"Selected {len(files)} file(s) for upload"
+
+        def browser_set_mobile(enabled: bool, tab_idx: int | None = None) -> str:
+            """Toggle mobile mode in the browser."""
+            # Stub - would need to add set_mobile to SyncBrowserService
+            mode = "enabled" if enabled else "disabled"
+            return f"Mobile mode {mode}"
+
+        def browser_restart(url: str, extensions: str | None = None) -> str:
+            """Restart the browser with optional extensions."""
+            # Stub - would need to add restart to SyncBrowserService
+            ext_info = f" with extensions: {extensions}" if extensions else ""
+            return f"Browser restarted{ext_info}, navigating to {url}"
+
         # Register browser tools
         self.register_tool(
             name="browser_navigate",
@@ -487,6 +840,78 @@ class LocalHarness(Harness):
                 param_types={"content": "string", "tab_idx": "number"},
             ),
             handler=browser_console,
+        )
+
+        self.register_tool(
+            name="browser_press_key",
+            schema=ToolSchema(
+                name="browser_press_key",
+                description="Press keyboard keys in the browser",
+                required_params=["content"],
+                optional_params=["tab_idx"],
+                param_types={"content": "string", "tab_idx": "number"},
+            ),
+            handler=browser_press_key,
+        )
+
+        self.register_tool(
+            name="browser_move_mouse",
+            schema=ToolSchema(
+                name="browser_move_mouse",
+                description="Move the mouse to an element or coordinates",
+                required_params=[],
+                optional_params=["devinid", "coordinates", "tab_idx"],
+                param_types={"devinid": "string", "coordinates": "string", "tab_idx": "number"},
+            ),
+            handler=browser_move_mouse,
+        )
+
+        self.register_tool(
+            name="browser_select_option",
+            schema=ToolSchema(
+                name="browser_select_option",
+                description="Select an option from a dropdown",
+                required_params=["index"],
+                optional_params=["devinid", "tab_idx"],
+                param_types={"index": "string", "devinid": "string", "tab_idx": "number"},
+            ),
+            handler=browser_select_option,
+        )
+
+        self.register_tool(
+            name="browser_select_file",
+            schema=ToolSchema(
+                name="browser_select_file",
+                description="Select file(s) for upload in the browser",
+                required_params=["content"],
+                optional_params=["tab_idx"],
+                param_types={"content": "string", "tab_idx": "number"},
+            ),
+            handler=browser_select_file,
+        )
+
+        self.register_tool(
+            name="browser_set_mobile",
+            schema=ToolSchema(
+                name="browser_set_mobile",
+                description="Toggle mobile mode in the browser",
+                required_params=["enabled"],
+                optional_params=["tab_idx"],
+                param_types={"enabled": "boolean", "tab_idx": "number"},
+            ),
+            handler=browser_set_mobile,
+        )
+
+        self.register_tool(
+            name="browser_restart",
+            schema=ToolSchema(
+                name="browser_restart",
+                description="Restart the browser with optional extensions",
+                required_params=["url"],
+                optional_params=["extensions"],
+                param_types={"url": "string", "extensions": "string"},
+            ),
+            handler=browser_restart,
         )
 
     def _read_file(
@@ -867,6 +1292,372 @@ class LocalHarness(Harness):
                     matches.add(str(match))
 
         return "\n".join(sorted(matches)) if matches else "No matches found"
+
+    def _wait(self, seconds: float) -> str:
+        """Wait for a specified number of seconds."""
+        if seconds < 0:
+            raise ValueError("seconds must be non-negative")
+        if seconds > 600:
+            raise ValueError("Maximum wait time is 600 seconds")
+        time.sleep(seconds)
+        return f"Waited {seconds} seconds"
+
+    def _think(self, thought: str) -> str:
+        """Record a thought without taking action. Useful for reasoning."""
+        # Just log the thought and return it - no side effects
+        return f"Thought recorded: {thought}"
+
+    def _todo_write(self, todos: list[dict[str, Any]]) -> str:
+        """Update the todo list for task tracking."""
+        # Store todos in instance state
+        if not hasattr(self, "_todos"):
+            self._todos: list[dict[str, Any]] = []
+        self._todos = todos
+
+        # Format output
+        lines = ["Updated todo list:"]
+        for todo in todos:
+            status = todo.get("status", "pending")
+            content = todo.get("content", "")
+            marker = {"pending": "[ ]", "in_progress": "[*]", "completed": "[x]"}.get(
+                status, "[ ]"
+            )
+            lines.append(f"  {marker} {content}")
+
+        return "\n".join(lines)
+
+    def _message_user(
+        self,
+        message: str,
+        block_on_user: bool = False,
+        should_use_concise_message: bool = True,
+    ) -> str:
+        """Send a message to the user."""
+        # In local harness, we just print the message
+        # In a real deployment, this would send to a UI/API
+        print(f"\n[MESSAGE TO USER]\n{message}\n")
+
+        if block_on_user:
+            return f"Message sent (blocking): {message[:100]}..."
+        return f"Message sent: {message[:100]}..."
+
+    def _web_search(
+        self,
+        query: str,
+        num_results: int = 5,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> str:
+        """Search the web using a search query.
+
+        Note: This is a stub implementation. In production, this would
+        integrate with a search API like Exa, SerpAPI, or similar.
+        """
+        # Stub implementation - returns a message indicating the search
+        # In production, this would call an actual search API
+        result = f"Web search for: {query}\n"
+        result += f"Requested results: {num_results}\n"
+        if include_domains:
+            result += f"Include domains: {', '.join(include_domains)}\n"
+        if exclude_domains:
+            result += f"Exclude domains: {', '.join(exclude_domains)}\n"
+        result += "\n[Stub: No actual search performed. Integrate with search API for real results.]"
+        return result
+
+    def _web_get_contents(self, urls: list[str]) -> str:
+        """Fetch the contents of one or more web pages.
+
+        Note: This is a stub implementation. In production, this would
+        fetch actual page contents.
+        """
+        # Stub implementation
+        result = f"Fetching contents from {len(urls)} URL(s):\n"
+        for url in urls:
+            result += f"  - {url}\n"
+        result += "\n[Stub: No actual fetch performed. Integrate with HTTP client for real contents.]"
+        return result
+
+    def _lsp_tool(
+        self,
+        command: str,
+        path: str,
+        symbol: str | None = None,
+        line: int | None = None,
+    ) -> str:
+        """Execute LSP operations.
+
+        Note: This is a stub implementation. In production, this would
+        integrate with a real LSP server.
+        """
+        valid_commands = ["goto_definition", "goto_references", "hover_symbol", "file_diagnostics"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid LSP command: {command}. Valid: {valid_commands}")
+
+        result = f"LSP {command} on {path}\n"
+        if symbol:
+            result += f"Symbol: {symbol}\n"
+        if line:
+            result += f"Line: {line}\n"
+        result += "\n[Stub: No actual LSP operation performed. Integrate with LSP server for real results.]"
+        return result
+
+    def _list_secrets(self) -> str:
+        """List available secrets.
+
+        In local harness, returns environment variables that look like secrets.
+        """
+        import os
+
+        # Look for common secret patterns in environment
+        secret_patterns = ["API_KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL"]
+        found_secrets = []
+
+        for key in os.environ:
+            if any(pattern in key.upper() for pattern in secret_patterns):
+                found_secrets.append(key)
+
+        if found_secrets:
+            return "Available secrets:\n" + "\n".join(f"  - {s}" for s in sorted(found_secrets))
+        return "No secrets found in environment."
+
+    def _ask_smart_friend(self, question: str) -> str:
+        """Ask a smart friend for help with complex reasoning.
+
+        Note: In production, this would call an LLM for assistance.
+        In local harness, returns a placeholder response.
+        """
+        # In a real implementation, this would call the LLM
+        return f"""Smart friend response to: "{question[:100]}..."
+
+[Stub: In production, this would invoke an LLM to help with complex reasoning.
+For now, consider:
+- Breaking down the problem into smaller parts
+- Checking documentation and existing code
+- Looking for similar patterns in the codebase]"""
+
+    def _visual_checker(self, question: str) -> str:
+        """Analyze visual content.
+
+        Note: In production, this would use a vision model.
+        In local harness, returns a placeholder response.
+        """
+        # In a real implementation, this would call a vision model
+        return f"""Visual analysis request: "{question[:100]}..."
+
+[Stub: In production, this would invoke a vision model (e.g., omniparser v2) to analyze images.
+For now, ensure:
+- The image path is correct and accessible
+- The question is specific about what to look for
+- Screenshots are taken before analysis]"""
+
+    def _git_view_pr(self, repo: str, pull_number: int) -> str:
+        """View details of a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        return f"""PR #{pull_number} in {repo}
+
+[Stub: In production, this would fetch PR details from GitHub API including:
+- Title and description
+- Author and reviewers
+- Comments and review status
+- CI check status
+- Diff summary]"""
+
+    def _git_create_pr(
+        self,
+        repo: str,
+        title: str,
+        head_branch: str,
+        base_branch: str,
+        exec_dir: str,
+        draft: bool = False,
+    ) -> str:
+        """Create a new pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        draft_str = " (draft)" if draft else ""
+        return f"""Created PR{draft_str}: {title}
+Repository: {repo}
+Branch: {head_branch} -> {base_branch}
+Working directory: {exec_dir}
+
+[Stub: In production, this would create a real PR via GitHub API and return the PR URL.]"""
+
+    def _git_update_pr_description(
+        self,
+        repo: str,
+        pull_number: int,
+        force: bool = False,
+    ) -> str:
+        """Update the description of an existing pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        force_str = " (forced)" if force else ""
+        return f"""Updated PR #{pull_number} description{force_str} in {repo}
+
+[Stub: In production, this would update the PR description via GitHub API.]"""
+
+    def _git_pr_checks(
+        self,
+        repo: str,
+        pull_number: int,
+        wait_until_complete: bool = True,
+    ) -> str:
+        """Check the CI status of a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        wait_str = " (waited for completion)" if wait_until_complete else ""
+        return f"""CI checks for PR #{pull_number} in {repo}{wait_str}
+
+[Stub: In production, this would fetch CI check status from GitHub API including:
+- Check name and status (pending/success/failure)
+- Job IDs for failed checks
+- Duration and timestamps]"""
+
+    def _git_ci_job_logs(self, repo: str, job_id: int) -> str:
+        """View the logs for a specific CI job.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        return f"""Logs for job {job_id} in {repo}
+
+[Stub: In production, this would fetch the full CI job logs from GitHub Actions API.]"""
+
+    def _git_comment_on_pr(
+        self,
+        repo: str,
+        pull_number: int,
+        body: str,
+        commit_id: str | None = None,
+        path: str | None = None,
+        line: int | None = None,
+        side: str | None = None,
+        in_reply_to: int | None = None,
+    ) -> str:
+        """Post a comment on a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        comment_type = "inline" if path and line else "general"
+        reply_str = f" (reply to #{in_reply_to})" if in_reply_to else ""
+        return f"""Posted {comment_type} comment{reply_str} on PR #{pull_number} in {repo}
+Body: {body[:100]}...
+
+[Stub: In production, this would post a comment via GitHub API.]"""
+
+    def _list_repos(
+        self,
+        keyword: str | None = None,
+        page: int = 1,
+    ) -> str:
+        """List all repositories that you have access to.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        filter_str = f" matching '{keyword}'" if keyword else ""
+        return f"""Repositories (page {page}){filter_str}
+
+[Stub: In production, this would list repositories from GitHub API.]"""
+
+    def _deploy(
+        self,
+        command: str,
+        dir: str | None = None,
+        port: int | None = None,
+    ) -> str:
+        """Deploy applications.
+
+        Note: This is a stub. In production, integrate with deployment services.
+        """
+        valid_commands = ["frontend", "backend", "logs", "expose"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid deploy command: {command}. Valid: {valid_commands}")
+
+        if command == "frontend":
+            return f"""Deploying frontend from {dir or 'current directory'}
+
+[Stub: In production, this would deploy static files to a CDN and return a public URL.]"""
+        elif command == "backend":
+            return f"""Deploying backend from {dir or 'current directory'}
+
+[Stub: In production, this would deploy FastAPI to Fly.io and return a public URL.]"""
+        elif command == "logs":
+            return """Fetching deployment logs
+
+[Stub: In production, this would fetch logs from the deployed application.]"""
+        else:  # expose
+            return f"""Exposing local port {port or 'unknown'}
+
+[Stub: In production, this would create a tunnel and return a public URL.]"""
+
+    def _recording_start(self) -> str:
+        """Start a new screen recording.
+
+        Note: This is a stub. In production, integrate with screen recording service.
+        """
+        if not hasattr(self, "_recording_active"):
+            self._recording_active = False
+
+        if self._recording_active:
+            return "Error: Recording already in progress"
+
+        self._recording_active = True
+        return "Started screen recording"
+
+    def _recording_stop(self) -> str:
+        """Stop the current recording and process it.
+
+        Note: This is a stub. In production, integrate with screen recording service.
+        """
+        if not hasattr(self, "_recording_active"):
+            self._recording_active = False
+
+        if not self._recording_active:
+            return "Error: No recording in progress"
+
+        self._recording_active = False
+        return """Stopped screen recording
+
+[Stub: In production, this would return the path to the recorded video file.]"""
+
+    def _mcp_tool(
+        self,
+        command: str,
+        server: str | None = None,
+        tool_name: str | None = None,
+        tool_args: str | None = None,
+        resource_uri: str | None = None,
+        shell_id: str | None = None,
+    ) -> str:
+        """Interact with MCP (Model Context Protocol) servers.
+
+        Note: This is a stub. In production, integrate with MCP servers.
+        """
+        valid_commands = ["list_servers", "list_tools", "call_tool", "read_resource"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid MCP command: {command}. Valid: {valid_commands}")
+
+        if command == "list_servers":
+            return """Available MCP servers:
+
+[Stub: In production, this would list configured MCP servers like Slack, Linear, etc.]"""
+        elif command == "list_tools":
+            return f"""Tools available on {server or 'unknown server'}:
+
+[Stub: In production, this would list tools and resources from the MCP server.]"""
+        elif command == "call_tool":
+            return f"""Called {tool_name} on {server or 'unknown server'}
+Args: {tool_args or '{}'}
+
+[Stub: In production, this would execute the tool and return results.]"""
+        else:  # read_resource
+            return f"""Reading resource {resource_uri} from {server or 'unknown server'}
+
+[Stub: In production, this would read the resource from the MCP server.]"""
 
     def register_tool(
         self,
