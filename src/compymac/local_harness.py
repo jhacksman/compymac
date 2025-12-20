@@ -1498,22 +1498,127 @@ class LocalHarness(Harness):
         symbol: str | None = None,
         line: int | None = None,
     ) -> str:
-        """Execute LSP operations.
+        """Execute LSP operations using jedi for Python files.
 
-        Note: This is a stub implementation. In production, this would
-        integrate with a real LSP server.
+        Args:
+            command: LSP command (goto_definition, goto_references, hover_symbol, file_diagnostics)
+            path: Absolute path to the file
+            symbol: Symbol name to search for (required for most commands)
+            line: Line number where the symbol occurs (1-indexed)
+
+        Returns:
+            LSP operation results
         """
         valid_commands = ["goto_definition", "goto_references", "hover_symbol", "file_diagnostics"]
         if command not in valid_commands:
             raise ValueError(f"Invalid LSP command: {command}. Valid: {valid_commands}")
 
-        result = f"LSP {command} on {path}\n"
-        if symbol:
-            result += f"Symbol: {symbol}\n"
-        if line:
-            result += f"Line: {line}\n"
-        result += "\n[Stub: No actual LSP operation performed. Integrate with LSP server for real results.]"
-        return result
+        # Check if file exists
+        if not os.path.exists(path):
+            return f"Error: File not found: {path}"
+
+        # Only support Python files with jedi
+        if not path.endswith(".py"):
+            return f"LSP {command} on {path}\n\n[Note: Only Python files are supported. For other languages, integrate with appropriate LSP server.]"
+
+        try:
+            import jedi
+        except ImportError:
+            return f"LSP {command} on {path}\n\n[Error: jedi not installed. Run: pip install jedi]"
+
+        try:
+            # Read file content
+            with open(path, encoding="utf-8") as f:
+                source = f.read()
+
+            if command == "file_diagnostics":
+                # Get syntax errors and warnings
+                script = jedi.Script(source, path=path)
+                errors = script.get_syntax_errors()
+
+                if not errors:
+                    return f"No diagnostics found in {path}"
+
+                output_lines = [f"Diagnostics for {path}:", ""]
+                for error in errors:
+                    output_lines.append(f"  Line {error.line}: {error.get_message()}")
+
+                return "\n".join(output_lines)
+
+            # For other commands, we need symbol and line
+            if not symbol or not line:
+                return f"Error: {command} requires both 'symbol' and 'line' parameters"
+
+            # Find the column position of the symbol on the line
+            lines = source.split("\n")
+            if line < 1 or line > len(lines):
+                return f"Error: Line {line} is out of range (file has {len(lines)} lines)"
+
+            target_line = lines[line - 1]
+            col = target_line.find(symbol)
+            if col == -1:
+                return f"Error: Symbol '{symbol}' not found on line {line}"
+
+            # Create jedi script and get completions at position
+            script = jedi.Script(source, path=path)
+
+            if command == "goto_definition":
+                definitions = script.goto(line, col)
+                if not definitions:
+                    return f"No definition found for '{symbol}' at {path}:{line}"
+
+                output_lines = [f"Definition(s) for '{symbol}':", ""]
+                for defn in definitions:
+                    module_path = defn.module_path or "built-in"
+                    defn_line = defn.line or "?"
+                    output_lines.append(f"  {module_path}:{defn_line}")
+                    if defn.description:
+                        output_lines.append(f"    {defn.description}")
+
+                return "\n".join(output_lines)
+
+            elif command == "goto_references":
+                references = script.get_references(line, col)
+                if not references:
+                    return f"No references found for '{symbol}'"
+
+                output_lines = [f"References for '{symbol}':", ""]
+                for ref in references[:20]:  # Limit to 20 references
+                    module_path = ref.module_path or path
+                    ref_line = ref.line or "?"
+                    output_lines.append(f"  {module_path}:{ref_line}")
+
+                if len(references) > 20:
+                    output_lines.append(f"\n  ... and {len(references) - 20} more references")
+
+                return "\n".join(output_lines)
+
+            elif command == "hover_symbol":
+                # Get type info and documentation
+                names = script.infer(line, col)
+                if not names:
+                    return f"No type information found for '{symbol}'"
+
+                output_lines = [f"Type info for '{symbol}':", ""]
+                for name in names:
+                    output_lines.append(f"  Type: {name.type}")
+                    if name.full_name:
+                        output_lines.append(f"  Full name: {name.full_name}")
+                    if name.description:
+                        output_lines.append(f"  Description: {name.description}")
+                    docstring = name.docstring()
+                    if docstring:
+                        # Truncate long docstrings
+                        if len(docstring) > 500:
+                            docstring = docstring[:500] + "..."
+                        output_lines.append(f"\n  Documentation:\n  {docstring}")
+
+                return "\n".join(output_lines)
+
+            return f"Unknown command: {command}"
+
+        except Exception as e:
+            return f"LSP error: {e}"
 
     def _list_secrets(self) -> str:
         """List available secrets.
@@ -1812,34 +1917,118 @@ Body: {body[:100]}...
 [Stub: In production, this would create a tunnel and return a public URL.]"""
 
     def _recording_start(self) -> str:
-        """Start a new screen recording.
+        """Start a new screen recording using ffmpeg.
 
-        Note: This is a stub. In production, integrate with screen recording service.
+        Records the screen to a temporary video file. Only one recording
+        can be active at a time.
+
+        Returns:
+            Confirmation message or error
         """
+        import shutil
+        import subprocess
+        import tempfile
+
         if not hasattr(self, "_recording_active"):
             self._recording_active = False
+            self._recording_process = None
+            self._recording_path = None
 
         if self._recording_active:
             return "Error: Recording already in progress"
 
-        self._recording_active = True
-        return "Started screen recording"
+        # Check if ffmpeg is available
+        if not shutil.which("ffmpeg"):
+            return "Error: ffmpeg not found. Install ffmpeg to enable screen recording."
+
+        # Create temporary file for recording
+        temp_dir = tempfile.gettempdir()
+        timestamp = int(time.time())
+        self._recording_path = os.path.join(temp_dir, f"recording_{timestamp}.mp4")
+
+        # Determine the display to record
+        display = os.environ.get("DISPLAY", ":0")
+
+        try:
+            # Start ffmpeg recording in background
+            # Using x11grab for Linux, would need different input for macOS/Windows
+            cmd = [
+                "ffmpeg",
+                "-y",  # Overwrite output file
+                "-f", "x11grab",
+                "-framerate", "10",  # Lower framerate for smaller files
+                "-i", display,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "28",  # Lower quality for smaller files
+                self._recording_path,
+            ]
+
+            self._recording_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
+            )
+
+            self._recording_active = True
+            return f"Started screen recording to {self._recording_path}"
+
+        except Exception as e:
+            self._recording_active = False
+            self._recording_process = None
+            self._recording_path = None
+            return f"Error starting recording: {e}"
 
     def _recording_stop(self) -> str:
-        """Stop the current recording and process it.
+        """Stop the current recording and return the video path.
 
-        Note: This is a stub. In production, integrate with screen recording service.
+        Returns:
+            Path to the recorded video file or error message
         """
         if not hasattr(self, "_recording_active"):
             self._recording_active = False
+            self._recording_process = None
+            self._recording_path = None
 
         if not self._recording_active:
             return "Error: No recording in progress"
 
-        self._recording_active = False
-        return """Stopped screen recording
+        if self._recording_process is None:
+            self._recording_active = False
+            return "Error: Recording process not found"
 
-[Stub: In production, this would return the path to the recorded video file.]"""
+        try:
+            # Send 'q' to ffmpeg to stop recording gracefully
+            self._recording_process.stdin.write(b"q")
+            self._recording_process.stdin.flush()
+
+            # Wait for process to finish (with timeout)
+            try:
+                self._recording_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._recording_process.kill()
+                self._recording_process.wait()
+
+            video_path = self._recording_path
+
+            # Reset state
+            self._recording_active = False
+            self._recording_process = None
+            self._recording_path = None
+
+            # Check if file was created
+            if video_path and os.path.exists(video_path):
+                file_size = os.path.getsize(video_path)
+                return f"Stopped screen recording\nVideo saved to: {video_path}\nFile size: {file_size} bytes"
+            else:
+                return f"Recording stopped but video file not found at {video_path}"
+
+        except Exception as e:
+            self._recording_active = False
+            self._recording_process = None
+            self._recording_path = None
+            return f"Error stopping recording: {e}"
 
     def _mcp_tool(
         self,
