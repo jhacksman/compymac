@@ -2,7 +2,11 @@
 
 ## Intent: Self-Hosting on GB10 Boards
 
-This document captures the planned vision model architecture for CompyMac when self-hosted on NVIDIA GB10 boards (64GB VRAM constraint).
+This document captures the planned vision model architecture for CompyMac when self-hosted on NVIDIA DGX Spark / GB10 boards.
+
+**Hardware Specs:**
+- Single GB10: 128GB VRAM
+- Dual GB10 (linked): 256GB VRAM
 
 ## Primary: OmniParser V2
 
@@ -54,18 +58,29 @@ This document captures the planned vision model architecture for CompyMac when s
 
 While self-hosting is not yet available, CompyMac uses Venice.ai's `mistral-31-24b` model for vision tasks. This model has `supportsVision: true` and serves as a temporary solution for visual_checker functionality.
 
-## VRAM Budget (64GB GB10)
+## VRAM Budget
 
-When self-hosting, the 64GB VRAM constraint applies globally across all loaded models:
+**Single GB10 (128GB VRAM):**
 
 | Model | Estimated VRAM | Purpose |
 |-------|----------------|---------|
 | OmniParser V2 (YOLOv8 + Florence-2) | ~4-8GB | UI element detection |
 | DeepSeek-OCR | ~7GB | Text extraction |
-| Primary LLM (TBD) | ~40-50GB | Agent reasoning |
-| **Total** | **~55-65GB** | Within 64GB budget |
+| Primary LLM (full precision) | ~80-100GB | Agent reasoning |
+| **Total** | **~95-115GB** | Within 128GB budget |
 
-Note: Exact VRAM usage depends on quantization and batch size. May need to swap models or use quantized versions to fit within budget.
+**Dual GB10 Linked (256GB VRAM):**
+
+With 256GB available, we can run larger models or multiple concurrent agents without model swapping.
+
+| Model | Estimated VRAM | Purpose |
+|-------|----------------|---------|
+| OmniParser V2 (YOLOv8 + Florence-2) | ~4-8GB | UI element detection |
+| DeepSeek-OCR | ~7GB | Text extraction |
+| Primary LLM (large, full precision) | ~150-200GB | Agent reasoning |
+| **Total** | **~165-215GB** | Within 256GB budget |
+
+Note: Exact VRAM usage depends on quantization and batch size. With 128GB+ headroom, model swapping is less critical but may still be useful for optimizing latency.
 
 ## Implementation Notes
 
