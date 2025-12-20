@@ -294,6 +294,93 @@ class LocalHarness(Harness):
             handler=self._glob,
         )
 
+        # wait tool - pause execution
+        self.register_tool(
+            name="wait",
+            schema=ToolSchema(
+                name="wait",
+                description="Wait for a specified number of seconds",
+                required_params=["seconds"],
+                optional_params=[],
+                param_types={"seconds": "number"},
+            ),
+            handler=self._wait,
+        )
+
+        # think tool - reasoning without action
+        self.register_tool(
+            name="think",
+            schema=ToolSchema(
+                name="think",
+                description="Think about something without taking action. Useful for reasoning.",
+                required_params=["thought"],
+                optional_params=[],
+                param_types={"thought": "string"},
+            ),
+            handler=self._think,
+        )
+
+        # TodoWrite tool - task management
+        self.register_tool(
+            name="TodoWrite",
+            schema=ToolSchema(
+                name="TodoWrite",
+                description="Create and manage a task list for tracking progress",
+                required_params=["todos"],
+                optional_params=[],
+                param_types={"todos": "array"},
+            ),
+            handler=self._todo_write,
+        )
+
+        # message_user tool - communicate with user
+        self.register_tool(
+            name="message_user",
+            schema=ToolSchema(
+                name="message_user",
+                description="Send a message to the user",
+                required_params=["message"],
+                optional_params=["block_on_user", "should_use_concise_message"],
+                param_types={
+                    "message": "string",
+                    "block_on_user": "boolean",
+                    "should_use_concise_message": "boolean",
+                },
+            ),
+            handler=self._message_user,
+        )
+
+        # web_search tool - search the web
+        self.register_tool(
+            name="web_search",
+            schema=ToolSchema(
+                name="web_search",
+                description="Search the web using a search query",
+                required_params=["query"],
+                optional_params=["num_results", "include_domains", "exclude_domains"],
+                param_types={
+                    "query": "string",
+                    "num_results": "number",
+                    "include_domains": "array",
+                    "exclude_domains": "array",
+                },
+            ),
+            handler=self._web_search,
+        )
+
+        # web_get_contents tool - fetch web page contents
+        self.register_tool(
+            name="web_get_contents",
+            schema=ToolSchema(
+                name="web_get_contents",
+                description="Fetch the contents of one or more web pages",
+                required_params=["urls"],
+                optional_params=[],
+                param_types={"urls": "array"},
+            ),
+            handler=self._web_get_contents,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -867,6 +954,90 @@ class LocalHarness(Harness):
                     matches.add(str(match))
 
         return "\n".join(sorted(matches)) if matches else "No matches found"
+
+    def _wait(self, seconds: float) -> str:
+        """Wait for a specified number of seconds."""
+        if seconds < 0:
+            raise ValueError("seconds must be non-negative")
+        if seconds > 600:
+            raise ValueError("Maximum wait time is 600 seconds")
+        time.sleep(seconds)
+        return f"Waited {seconds} seconds"
+
+    def _think(self, thought: str) -> str:
+        """Record a thought without taking action. Useful for reasoning."""
+        # Just log the thought and return it - no side effects
+        return f"Thought recorded: {thought}"
+
+    def _todo_write(self, todos: list[dict[str, Any]]) -> str:
+        """Update the todo list for task tracking."""
+        # Store todos in instance state
+        if not hasattr(self, "_todos"):
+            self._todos: list[dict[str, Any]] = []
+        self._todos = todos
+
+        # Format output
+        lines = ["Updated todo list:"]
+        for todo in todos:
+            status = todo.get("status", "pending")
+            content = todo.get("content", "")
+            marker = {"pending": "[ ]", "in_progress": "[*]", "completed": "[x]"}.get(
+                status, "[ ]"
+            )
+            lines.append(f"  {marker} {content}")
+
+        return "\n".join(lines)
+
+    def _message_user(
+        self,
+        message: str,
+        block_on_user: bool = False,
+        should_use_concise_message: bool = True,
+    ) -> str:
+        """Send a message to the user."""
+        # In local harness, we just print the message
+        # In a real deployment, this would send to a UI/API
+        print(f"\n[MESSAGE TO USER]\n{message}\n")
+
+        if block_on_user:
+            return f"Message sent (blocking): {message[:100]}..."
+        return f"Message sent: {message[:100]}..."
+
+    def _web_search(
+        self,
+        query: str,
+        num_results: int = 5,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> str:
+        """Search the web using a search query.
+
+        Note: This is a stub implementation. In production, this would
+        integrate with a search API like Exa, SerpAPI, or similar.
+        """
+        # Stub implementation - returns a message indicating the search
+        # In production, this would call an actual search API
+        result = f"Web search for: {query}\n"
+        result += f"Requested results: {num_results}\n"
+        if include_domains:
+            result += f"Include domains: {', '.join(include_domains)}\n"
+        if exclude_domains:
+            result += f"Exclude domains: {', '.join(exclude_domains)}\n"
+        result += "\n[Stub: No actual search performed. Integrate with search API for real results.]"
+        return result
+
+    def _web_get_contents(self, urls: list[str]) -> str:
+        """Fetch the contents of one or more web pages.
+
+        Note: This is a stub implementation. In production, this would
+        fetch actual page contents.
+        """
+        # Stub implementation
+        result = f"Fetching contents from {len(urls)} URL(s):\n"
+        for url in urls:
+            result += f"  - {url}\n"
+        result += "\n[Stub: No actual fetch performed. Integrate with HTTP client for real contents.]"
+        return result
 
     def register_tool(
         self,
