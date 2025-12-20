@@ -438,6 +438,169 @@ class LocalHarness(Harness):
             handler=self._visual_checker,
         )
 
+        # Git tools
+        self.register_tool(
+            name="git_view_pr",
+            schema=ToolSchema(
+                name="git_view_pr",
+                description="View details of a pull request including description, comments, and CI status",
+                required_params=["repo", "pull_number"],
+                optional_params=[],
+                param_types={"repo": "string", "pull_number": "number"},
+            ),
+            handler=self._git_view_pr,
+        )
+
+        self.register_tool(
+            name="git_create_pr",
+            schema=ToolSchema(
+                name="git_create_pr",
+                description="Create a new pull request",
+                required_params=["repo", "title", "head_branch", "base_branch", "exec_dir"],
+                optional_params=["draft"],
+                param_types={
+                    "repo": "string",
+                    "title": "string",
+                    "head_branch": "string",
+                    "base_branch": "string",
+                    "exec_dir": "string",
+                    "draft": "boolean",
+                },
+            ),
+            handler=self._git_create_pr,
+        )
+
+        self.register_tool(
+            name="git_update_pr_description",
+            schema=ToolSchema(
+                name="git_update_pr_description",
+                description="Update the description of an existing pull request",
+                required_params=["repo", "pull_number"],
+                optional_params=["force"],
+                param_types={"repo": "string", "pull_number": "number", "force": "boolean"},
+            ),
+            handler=self._git_update_pr_description,
+        )
+
+        self.register_tool(
+            name="git_pr_checks",
+            schema=ToolSchema(
+                name="git_pr_checks",
+                description="Check the CI status of a pull request",
+                required_params=["repo", "pull_number"],
+                optional_params=["wait_until_complete"],
+                param_types={
+                    "repo": "string",
+                    "pull_number": "number",
+                    "wait_until_complete": "boolean",
+                },
+            ),
+            handler=self._git_pr_checks,
+        )
+
+        self.register_tool(
+            name="git_ci_job_logs",
+            schema=ToolSchema(
+                name="git_ci_job_logs",
+                description="View the logs for a specific CI job",
+                required_params=["repo", "job_id"],
+                optional_params=[],
+                param_types={"repo": "string", "job_id": "number"},
+            ),
+            handler=self._git_ci_job_logs,
+        )
+
+        self.register_tool(
+            name="git_comment_on_pr",
+            schema=ToolSchema(
+                name="git_comment_on_pr",
+                description="Post a comment on a pull request",
+                required_params=["repo", "pull_number", "body"],
+                optional_params=["commit_id", "path", "line", "side", "in_reply_to"],
+                param_types={
+                    "repo": "string",
+                    "pull_number": "number",
+                    "body": "string",
+                    "commit_id": "string",
+                    "path": "string",
+                    "line": "number",
+                    "side": "string",
+                    "in_reply_to": "number",
+                },
+            ),
+            handler=self._git_comment_on_pr,
+        )
+
+        self.register_tool(
+            name="list_repos",
+            schema=ToolSchema(
+                name="list_repos",
+                description="List all repositories that you have access to",
+                required_params=[],
+                optional_params=["keyword", "page"],
+                param_types={"keyword": "string", "page": "number"},
+            ),
+            handler=self._list_repos,
+        )
+
+        # Deploy tool
+        self.register_tool(
+            name="deploy",
+            schema=ToolSchema(
+                name="deploy",
+                description="Deploy applications: frontend (static), backend (FastAPI), logs, or expose local port",
+                required_params=["command"],
+                optional_params=["dir", "port"],
+                param_types={"command": "string", "dir": "string", "port": "number"},
+            ),
+            handler=self._deploy,
+        )
+
+        # Recording tools
+        self.register_tool(
+            name="recording_start",
+            schema=ToolSchema(
+                name="recording_start",
+                description="Start a new screen recording",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._recording_start,
+        )
+
+        self.register_tool(
+            name="recording_stop",
+            schema=ToolSchema(
+                name="recording_stop",
+                description="Stop the current recording and process it",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._recording_stop,
+        )
+
+        # MCP tool
+        self.register_tool(
+            name="mcp_tool",
+            schema=ToolSchema(
+                name="mcp_tool",
+                description="Interact with MCP servers: list_servers, list_tools, call_tool, read_resource",
+                required_params=["command"],
+                optional_params=["server", "tool_name", "tool_args", "resource_uri", "shell_id"],
+                param_types={
+                    "command": "string",
+                    "server": "string",
+                    "tool_name": "string",
+                    "tool_args": "string",
+                    "resource_uri": "string",
+                    "shell_id": "string",
+                },
+            ),
+            handler=self._mcp_tool,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -1168,6 +1331,215 @@ For now, ensure:
 - The image path is correct and accessible
 - The question is specific about what to look for
 - Screenshots are taken before analysis]"""
+
+    def _git_view_pr(self, repo: str, pull_number: int) -> str:
+        """View details of a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        return f"""PR #{pull_number} in {repo}
+
+[Stub: In production, this would fetch PR details from GitHub API including:
+- Title and description
+- Author and reviewers
+- Comments and review status
+- CI check status
+- Diff summary]"""
+
+    def _git_create_pr(
+        self,
+        repo: str,
+        title: str,
+        head_branch: str,
+        base_branch: str,
+        exec_dir: str,
+        draft: bool = False,
+    ) -> str:
+        """Create a new pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        draft_str = " (draft)" if draft else ""
+        return f"""Created PR{draft_str}: {title}
+Repository: {repo}
+Branch: {head_branch} -> {base_branch}
+Working directory: {exec_dir}
+
+[Stub: In production, this would create a real PR via GitHub API and return the PR URL.]"""
+
+    def _git_update_pr_description(
+        self,
+        repo: str,
+        pull_number: int,
+        force: bool = False,
+    ) -> str:
+        """Update the description of an existing pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        force_str = " (forced)" if force else ""
+        return f"""Updated PR #{pull_number} description{force_str} in {repo}
+
+[Stub: In production, this would update the PR description via GitHub API.]"""
+
+    def _git_pr_checks(
+        self,
+        repo: str,
+        pull_number: int,
+        wait_until_complete: bool = True,
+    ) -> str:
+        """Check the CI status of a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        wait_str = " (waited for completion)" if wait_until_complete else ""
+        return f"""CI checks for PR #{pull_number} in {repo}{wait_str}
+
+[Stub: In production, this would fetch CI check status from GitHub API including:
+- Check name and status (pending/success/failure)
+- Job IDs for failed checks
+- Duration and timestamps]"""
+
+    def _git_ci_job_logs(self, repo: str, job_id: int) -> str:
+        """View the logs for a specific CI job.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        return f"""Logs for job {job_id} in {repo}
+
+[Stub: In production, this would fetch the full CI job logs from GitHub Actions API.]"""
+
+    def _git_comment_on_pr(
+        self,
+        repo: str,
+        pull_number: int,
+        body: str,
+        commit_id: str | None = None,
+        path: str | None = None,
+        line: int | None = None,
+        side: str | None = None,
+        in_reply_to: int | None = None,
+    ) -> str:
+        """Post a comment on a pull request.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        comment_type = "inline" if path and line else "general"
+        reply_str = f" (reply to #{in_reply_to})" if in_reply_to else ""
+        return f"""Posted {comment_type} comment{reply_str} on PR #{pull_number} in {repo}
+Body: {body[:100]}...
+
+[Stub: In production, this would post a comment via GitHub API.]"""
+
+    def _list_repos(
+        self,
+        keyword: str | None = None,
+        page: int = 1,
+    ) -> str:
+        """List all repositories that you have access to.
+
+        Note: This is a stub. In production, integrate with GitHub API.
+        """
+        filter_str = f" matching '{keyword}'" if keyword else ""
+        return f"""Repositories (page {page}){filter_str}
+
+[Stub: In production, this would list repositories from GitHub API.]"""
+
+    def _deploy(
+        self,
+        command: str,
+        dir: str | None = None,
+        port: int | None = None,
+    ) -> str:
+        """Deploy applications.
+
+        Note: This is a stub. In production, integrate with deployment services.
+        """
+        valid_commands = ["frontend", "backend", "logs", "expose"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid deploy command: {command}. Valid: {valid_commands}")
+
+        if command == "frontend":
+            return f"""Deploying frontend from {dir or 'current directory'}
+
+[Stub: In production, this would deploy static files to a CDN and return a public URL.]"""
+        elif command == "backend":
+            return f"""Deploying backend from {dir or 'current directory'}
+
+[Stub: In production, this would deploy FastAPI to Fly.io and return a public URL.]"""
+        elif command == "logs":
+            return """Fetching deployment logs
+
+[Stub: In production, this would fetch logs from the deployed application.]"""
+        else:  # expose
+            return f"""Exposing local port {port or 'unknown'}
+
+[Stub: In production, this would create a tunnel and return a public URL.]"""
+
+    def _recording_start(self) -> str:
+        """Start a new screen recording.
+
+        Note: This is a stub. In production, integrate with screen recording service.
+        """
+        if not hasattr(self, "_recording_active"):
+            self._recording_active = False
+
+        if self._recording_active:
+            return "Error: Recording already in progress"
+
+        self._recording_active = True
+        return "Started screen recording"
+
+    def _recording_stop(self) -> str:
+        """Stop the current recording and process it.
+
+        Note: This is a stub. In production, integrate with screen recording service.
+        """
+        if not hasattr(self, "_recording_active"):
+            self._recording_active = False
+
+        if not self._recording_active:
+            return "Error: No recording in progress"
+
+        self._recording_active = False
+        return """Stopped screen recording
+
+[Stub: In production, this would return the path to the recorded video file.]"""
+
+    def _mcp_tool(
+        self,
+        command: str,
+        server: str | None = None,
+        tool_name: str | None = None,
+        tool_args: str | None = None,
+        resource_uri: str | None = None,
+        shell_id: str | None = None,
+    ) -> str:
+        """Interact with MCP (Model Context Protocol) servers.
+
+        Note: This is a stub. In production, integrate with MCP servers.
+        """
+        valid_commands = ["list_servers", "list_tools", "call_tool", "read_resource"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid MCP command: {command}. Valid: {valid_commands}")
+
+        if command == "list_servers":
+            return """Available MCP servers:
+
+[Stub: In production, this would list configured MCP servers like Slack, Linear, etc.]"""
+        elif command == "list_tools":
+            return f"""Tools available on {server or 'unknown server'}:
+
+[Stub: In production, this would list tools and resources from the MCP server.]"""
+        elif command == "call_tool":
+            return f"""Called {tool_name} on {server or 'unknown server'}
+Args: {tool_args or '{}'}
+
+[Stub: In production, this would execute the tool and return results.]"""
+        else:  # read_resource
+            return f"""Reading resource {resource_uri} from {server or 'unknown server'}
+
+[Stub: In production, this would read the resource from the MCP server.]"""
 
     def register_tool(
         self,
