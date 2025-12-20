@@ -1668,18 +1668,103 @@ If you cannot see the actual image, provide guidance on what to look for based o
             return f"Error in visual analysis: {e}"
 
     def _git_view_pr(self, repo: str, pull_number: int) -> str:
-        """View details of a pull request.
+        """View details of a pull request using GitHub API.
 
-        Note: This is a stub. In production, integrate with GitHub API.
+        Args:
+            repo: Repository in owner/repo format
+            pull_number: PR number
+
+        Returns:
+            PR details including title, description, comments, and CI status
         """
-        return f"""PR #{pull_number} in {repo}
+        import httpx
 
-[Stub: In production, this would fetch PR details from GitHub API including:
-- Title and description
-- Author and reviewers
-- Comments and review status
-- CI check status
-- Diff summary]"""
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format (remove github.com/ prefix if present)
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                # Get PR details
+                pr_response = client.get(
+                    f"https://api.github.com/repos/{repo}/pulls/{pull_number}",
+                    headers=headers,
+                )
+                pr_response.raise_for_status()
+                pr = pr_response.json()
+
+                # Get PR comments
+                comments_response = client.get(
+                    f"https://api.github.com/repos/{repo}/issues/{pull_number}/comments",
+                    headers=headers,
+                )
+                comments = comments_response.json() if comments_response.status_code == 200 else []
+
+                # Get review comments (inline)
+                review_comments_response = client.get(
+                    f"https://api.github.com/repos/{repo}/pulls/{pull_number}/comments",
+                    headers=headers,
+                )
+                review_comments = review_comments_response.json() if review_comments_response.status_code == 200 else []
+
+            # Format output
+            output_lines = [
+                f"# PR #{pull_number}: {pr.get('title', 'No title')}",
+                f"URL: {pr.get('html_url', '')}",
+                f"State: {pr.get('state', 'unknown')}",
+                f"Author: {pr.get('user', {}).get('login', 'unknown')}",
+                f"Branch: {pr.get('head', {}).get('ref', '')} -> {pr.get('base', {}).get('ref', '')}",
+                f"Mergeable: {pr.get('mergeable', 'unknown')}",
+                f"Created: {pr.get('created_at', '')}",
+                f"Updated: {pr.get('updated_at', '')}",
+                "",
+                "## Description",
+                pr.get("body", "No description") or "No description",
+                "",
+            ]
+
+            # Add comments
+            if comments:
+                output_lines.append(f"## Comments ({len(comments)})")
+                for comment in comments[:10]:  # Limit to 10 comments
+                    author = comment.get("user", {}).get("login", "unknown")
+                    body = comment.get("body", "")[:500]
+                    comment_id = comment.get("id", "")
+                    output_lines.append(f"\n**{author}** (id: {comment_id}):")
+                    output_lines.append(body)
+                output_lines.append("")
+
+            # Add review comments
+            if review_comments:
+                output_lines.append(f"## Review Comments ({len(review_comments)})")
+                for comment in review_comments[:10]:
+                    author = comment.get("user", {}).get("login", "unknown")
+                    path = comment.get("path", "")
+                    line = comment.get("line", "")
+                    body = comment.get("body", "")[:300]
+                    comment_id = comment.get("id", "")
+                    output_lines.append(f"\n**{author}** on {path}:{line} (id: {comment_id}):")
+                    output_lines.append(body)
+
+            return "\n".join(output_lines)
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error viewing PR: {e}"
 
     def _git_create_pr(
         self,
@@ -1690,17 +1775,69 @@ If you cannot see the actual image, provide guidance on what to look for based o
         exec_dir: str,
         draft: bool = False,
     ) -> str:
-        """Create a new pull request.
+        """Create a new pull request using GitHub API.
 
-        Note: This is a stub. In production, integrate with GitHub API.
+        Args:
+            repo: Repository in owner/repo format
+            title: PR title
+            head_branch: Branch to merge from
+            base_branch: Branch to merge into
+            exec_dir: Working directory (for context)
+            draft: Whether to create as draft PR
+
+        Returns:
+            Created PR details with URL
         """
-        draft_str = " (draft)" if draft else ""
-        return f"""Created PR{draft_str}: {title}
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    f"https://api.github.com/repos/{repo}/pulls",
+                    headers=headers,
+                    json={
+                        "title": title,
+                        "head": head_branch,
+                        "base": base_branch,
+                        "draft": draft,
+                    },
+                )
+                response.raise_for_status()
+                pr = response.json()
+
+            pr_number = pr.get("number", "")
+            pr_url = pr.get("html_url", "")
+            draft_str = " (draft)" if draft else ""
+
+            return f"""Created PR{draft_str}: {title}
+PR #{pr_number}: {pr_url}
 Repository: {repo}
 Branch: {head_branch} -> {base_branch}
-Working directory: {exec_dir}
 
-[Stub: In production, this would create a real PR via GitHub API and return the PR URL.]"""
+The user can view it at {pr_url}"""
+
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text
+            return f"GitHub API error: {e.response.status_code} - {error_body}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error creating PR: {e}"
 
     def _git_update_pr_description(
         self,
@@ -1710,12 +1847,82 @@ Working directory: {exec_dir}
     ) -> str:
         """Update the description of an existing pull request.
 
-        Note: This is a stub. In production, integrate with GitHub API.
-        """
-        force_str = " (forced)" if force else ""
-        return f"""Updated PR #{pull_number} description{force_str} in {repo}
+        Args:
+            repo: Repository in owner/repo format
+            pull_number: PR number
+            force: Force update even if description was modified
 
-[Stub: In production, this would update the PR description via GitHub API.]"""
+        Returns:
+            Confirmation of update
+        """
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                # Get current PR to check description
+                pr_response = client.get(
+                    f"https://api.github.com/repos/{repo}/pulls/{pull_number}",
+                    headers=headers,
+                )
+                pr_response.raise_for_status()
+                pr = pr_response.json()
+
+                current_body = pr.get("body", "")
+                pr_url = pr.get("html_url", "")
+
+                # Generate new description based on PR diff
+                # For now, just append a timestamp to show it was updated
+                new_body = current_body or ""
+                if not force and "[Auto-updated]" in new_body:
+                    return f"PR #{pull_number} description was already auto-updated. Use force=True to update again."
+
+                # In a real implementation, we'd generate a description from the diff
+                # For now, we just note that it was updated
+                import datetime
+                timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+                if "[Auto-updated]" not in new_body:
+                    new_body += f"\n\n[Auto-updated: {timestamp}]"
+                else:
+                    # Update existing timestamp
+                    import re
+                    new_body = re.sub(
+                        r"\[Auto-updated: [^\]]+\]",
+                        f"[Auto-updated: {timestamp}]",
+                        new_body,
+                    )
+
+                # Update the PR
+                update_response = client.patch(
+                    f"https://api.github.com/repos/{repo}/pulls/{pull_number}",
+                    headers=headers,
+                    json={"body": new_body},
+                )
+                update_response.raise_for_status()
+
+            return f"""Updated PR #{pull_number} description in {repo}
+URL: {pr_url}"""
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error updating PR description: {e}"
 
     def _git_pr_checks(
         self,
@@ -1725,24 +1932,200 @@ Working directory: {exec_dir}
     ) -> str:
         """Check the CI status of a pull request.
 
-        Note: This is a stub. In production, integrate with GitHub API.
-        """
-        wait_str = " (waited for completion)" if wait_until_complete else ""
-        return f"""CI checks for PR #{pull_number} in {repo}{wait_str}
+        Args:
+            repo: Repository in owner/repo format
+            pull_number: PR number
+            wait_until_complete: Whether to wait for all checks to complete
 
-[Stub: In production, this would fetch CI check status from GitHub API including:
-- Check name and status (pending/success/failure)
-- Job IDs for failed checks
-- Duration and timestamps]"""
+        Returns:
+            CI check status for all checks
+        """
+        import time as time_module
+
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        max_wait = 600  # 10 minutes max wait
+        poll_interval = 10  # Check every 10 seconds
+        waited = 0
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                while True:
+                    # Get PR to find head SHA
+                    pr_response = client.get(
+                        f"https://api.github.com/repos/{repo}/pulls/{pull_number}",
+                        headers=headers,
+                    )
+                    pr_response.raise_for_status()
+                    pr = pr_response.json()
+                    head_sha = pr.get("head", {}).get("sha", "")
+
+                    if not head_sha:
+                        return "Error: Could not get PR head SHA"
+
+                    # Get check runs for the commit
+                    checks_response = client.get(
+                        f"https://api.github.com/repos/{repo}/commits/{head_sha}/check-runs",
+                        headers=headers,
+                    )
+                    checks_response.raise_for_status()
+                    checks_data = checks_response.json()
+                    check_runs = checks_data.get("check_runs", [])
+
+                    # Count statuses
+                    pending = 0
+                    success = 0
+                    failure = 0
+                    skipped = 0
+                    cancelled = 0
+
+                    for check in check_runs:
+                        status = check.get("status", "")
+                        conclusion = check.get("conclusion", "")
+
+                        if status != "completed":
+                            pending += 1
+                        elif conclusion == "success":
+                            success += 1
+                        elif conclusion in ("failure", "timed_out"):
+                            failure += 1
+                        elif conclusion == "skipped":
+                            skipped += 1
+                        elif conclusion == "cancelled":
+                            cancelled += 1
+
+                    all_complete = pending == 0
+
+                    if all_complete or not wait_until_complete or waited >= max_wait:
+                        break
+
+                    time_module.sleep(poll_interval)
+                    waited += poll_interval
+
+            # Format output
+            output_lines = [
+                f"CI check results for {head_sha[:8]} (waited {waited}s)",
+                "",
+                f"{failure} fail",
+                f"{pending} pending",
+                f"{success} pass",
+                f"{skipped} skipping",
+                f"{cancelled} cancel",
+                "",
+            ]
+
+            if failure > 0:
+                output_lines.append("Failed checks:")
+                for check in check_runs:
+                    if check.get("conclusion") in ("failure", "timed_out"):
+                        name = check.get("name", "unknown")
+                        job_id = check.get("id", "")
+                        output_lines.append(f'  - {name} (job_id: {job_id})')
+                output_lines.append("")
+
+            if success > 0:
+                output_lines.append("Passed checks:")
+                for check in check_runs:
+                    if check.get("conclusion") == "success":
+                        name = check.get("name", "unknown")
+                        job_id = check.get("id", "")
+                        output_lines.append(f'  - {name} (job_id: {job_id})')
+
+            return "\n".join(output_lines)
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error checking PR status: {e}"
 
     def _git_ci_job_logs(self, repo: str, job_id: int) -> str:
         """View the logs for a specific CI job.
 
-        Note: This is a stub. In production, integrate with GitHub API.
-        """
-        return f"""Logs for job {job_id} in {repo}
+        Args:
+            repo: Repository in owner/repo format
+            job_id: CI job ID
 
-[Stub: In production, this would fetch the full CI job logs from GitHub Actions API.]"""
+        Returns:
+            Full job logs
+        """
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                # Get job details first
+                job_response = client.get(
+                    f"https://api.github.com/repos/{repo}/actions/jobs/{job_id}",
+                    headers=headers,
+                )
+                job_response.raise_for_status()
+                job = job_response.json()
+
+                job_name = job.get("name", "unknown")
+                job_status = job.get("status", "unknown")
+                job_conclusion = job.get("conclusion", "unknown")
+
+                # Get job logs
+                logs_headers = headers.copy()
+                logs_headers["Accept"] = "application/vnd.github+json"
+                logs_response = client.get(
+                    f"https://api.github.com/repos/{repo}/actions/jobs/{job_id}/logs",
+                    headers=logs_headers,
+                    follow_redirects=True,
+                )
+
+                if logs_response.status_code == 200:
+                    logs = logs_response.text
+                    # Truncate if too long
+                    if len(logs) > 50000:
+                        logs = logs[:50000] + "\n\n[... truncated ...]"
+                else:
+                    logs = f"Could not fetch logs: {logs_response.status_code}"
+
+            return f"""Job: {job_name} (ID: {job_id})
+Status: {job_status}
+Conclusion: {job_conclusion}
+
+--- Logs ---
+{logs}"""
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error fetching job logs: {e}"
 
     def _git_comment_on_pr(
         self,
@@ -1757,14 +2140,87 @@ Working directory: {exec_dir}
     ) -> str:
         """Post a comment on a pull request.
 
-        Note: This is a stub. In production, integrate with GitHub API.
-        """
-        comment_type = "inline" if path and line else "general"
-        reply_str = f" (reply to #{in_reply_to})" if in_reply_to else ""
-        return f"""Posted {comment_type} comment{reply_str} on PR #{pull_number} in {repo}
-Body: {body[:100]}...
+        Args:
+            repo: Repository in owner/repo format
+            pull_number: PR number
+            body: Comment body in markdown
+            commit_id: Commit SHA for inline comments
+            path: File path for inline comments
+            line: Line number for inline comments
+            side: Side of diff (LEFT or RIGHT)
+            in_reply_to: Comment ID to reply to
 
-[Stub: In production, this would post a comment via GitHub API.]"""
+        Returns:
+            Confirmation with comment ID
+        """
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        # Normalize repo format
+        if repo.startswith("github.com/"):
+            repo = repo[11:]
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                if in_reply_to:
+                    # Reply to existing review comment
+                    response = client.post(
+                        f"https://api.github.com/repos/{repo}/pulls/{pull_number}/comments/{in_reply_to}/replies",
+                        headers=headers,
+                        json={"body": body},
+                    )
+                elif path and line and commit_id:
+                    # Create inline review comment
+                    payload: dict[str, Any] = {
+                        "body": body,
+                        "commit_id": commit_id,
+                        "path": path,
+                        "line": line,
+                    }
+                    if side:
+                        payload["side"] = side
+
+                    response = client.post(
+                        f"https://api.github.com/repos/{repo}/pulls/{pull_number}/comments",
+                        headers=headers,
+                        json=payload,
+                    )
+                else:
+                    # Create general issue comment
+                    response = client.post(
+                        f"https://api.github.com/repos/{repo}/issues/{pull_number}/comments",
+                        headers=headers,
+                        json={"body": body},
+                    )
+
+                response.raise_for_status()
+                comment = response.json()
+
+            comment_id = comment.get("id", "")
+            comment_url = comment.get("html_url", "")
+            comment_type = "inline" if path and line else "general"
+            reply_str = f" (reply to #{in_reply_to})" if in_reply_to else ""
+
+            return f"""Posted {comment_type} comment{reply_str} on PR #{pull_number}
+Comment ID: {comment_id}
+URL: {comment_url}"""
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error posting comment: {e}"
 
     def _list_repos(
         self,
@@ -1773,12 +2229,77 @@ Body: {body[:100]}...
     ) -> str:
         """List all repositories that you have access to.
 
-        Note: This is a stub. In production, integrate with GitHub API.
-        """
-        filter_str = f" matching '{keyword}'" if keyword else ""
-        return f"""Repositories (page {page}){filter_str}
+        Args:
+            keyword: Filter repositories by keyword in owner/repo format
+            page: Page number for pagination (30 per page)
 
-[Stub: In production, this would list repositories from GitHub API.]"""
+        Returns:
+            List of repositories
+        """
+        import httpx
+
+        # Get API token from environment
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            return "Error: GITHUB_TOKEN or GH_TOKEN environment variable not set"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                # Get user's repos
+                response = client.get(
+                    "https://api.github.com/user/repos",
+                    headers=headers,
+                    params={
+                        "per_page": 30,
+                        "page": page,
+                        "sort": "updated",
+                        "direction": "desc",
+                    },
+                )
+                response.raise_for_status()
+                repos = response.json()
+
+            # Filter by keyword if provided
+            if keyword:
+                keyword_lower = keyword.lower()
+                repos = [r for r in repos if keyword_lower in r.get("full_name", "").lower()]
+
+            if not repos:
+                filter_str = f" matching '{keyword}'" if keyword else ""
+                return f"No repositories found{filter_str} on page {page}"
+
+            # Format output
+            output_lines = [f"Repositories (page {page}, {len(repos)} results):"]
+            if keyword:
+                output_lines[0] += f" matching '{keyword}'"
+            output_lines.append("")
+
+            for repo in repos:
+                full_name = repo.get("full_name", "")
+                description = repo.get("description", "") or "No description"
+                private = " (private)" if repo.get("private") else ""
+                stars = repo.get("stargazers_count", 0)
+                updated = repo.get("updated_at", "")[:10]
+
+                output_lines.append(f"- {full_name}{private}")
+                output_lines.append(f"  {description[:80]}")
+                output_lines.append(f"  Stars: {stars} | Updated: {updated}")
+                output_lines.append("")
+
+            return "\n".join(output_lines)
+
+        except httpx.HTTPStatusError as e:
+            return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error listing repos: {e}"
 
     def _deploy(
         self,
