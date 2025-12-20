@@ -8,8 +8,13 @@ It produces identical event logs for debugging and replay.
 Supports optional TraceContext for complete execution capture.
 """
 
+import fnmatch
 import hashlib
 import json
+import os
+import pty
+import re
+import select
 import subprocess
 import threading
 import time
@@ -77,6 +82,13 @@ class LocalHarness(Harness):
         # Thread-local storage for per-thread trace contexts
         # This allows parallel execution with independent trace contexts per thread
         self._thread_local = threading.local()
+
+        # Track files that have been read (for Edit's Read-before-Edit constraint)
+        self._files_read: set[str] = set()
+
+        # Shell session state (for persistent bash sessions)
+        self._shell_sessions: dict[str, dict[str, Any]] = {}
+        self._shell_lock = threading.Lock()
 
         # Register default tools
         self._register_default_tools()
@@ -152,6 +164,24 @@ class LocalHarness(Harness):
             handler=self._read_file,
         )
 
+        # Edit file tool (requires prior Read)
+        self.register_tool(
+            name="Edit",
+            schema=ToolSchema(
+                name="Edit",
+                description="Edit a file by replacing old_string with new_string. Requires prior Read.",
+                required_params=["file_path", "old_string", "new_string"],
+                optional_params=["replace_all"],
+                param_types={
+                    "file_path": "string",
+                    "old_string": "string",
+                    "new_string": "string",
+                    "replace_all": "boolean",
+                },
+            ),
+            handler=self._edit_file,
+        )
+
         # Write file tool
         self.register_tool(
             name="Write",
@@ -172,15 +202,291 @@ class LocalHarness(Harness):
                 name="bash",
                 description="Execute a shell command",
                 required_params=["command", "exec_dir", "bash_id"],
-                optional_params=["timeout"],
+                optional_params=["timeout", "run_in_background"],
                 param_types={
                     "command": "string",
                     "exec_dir": "string",
                     "bash_id": "string",
                     "timeout": "number",
+                    "run_in_background": "boolean",
                 },
             ),
             handler=self._run_bash,
+        )
+
+        # bash_output tool - get output from background shell
+        self.register_tool(
+            name="bash_output",
+            schema=ToolSchema(
+                name="bash_output",
+                description="Get output from a running or completed background shell",
+                required_params=["bash_id"],
+                optional_params=["filter"],
+                param_types={"bash_id": "string", "filter": "string"},
+            ),
+            handler=self._get_bash_output,
+        )
+
+        # write_to_shell tool - send input to shell
+        self.register_tool(
+            name="write_to_shell",
+            schema=ToolSchema(
+                name="write_to_shell",
+                description="Write input to an active shell process",
+                required_params=["shell_id"],
+                optional_params=["content", "press_enter"],
+                param_types={
+                    "shell_id": "string",
+                    "content": "string",
+                    "press_enter": "boolean",
+                },
+            ),
+            handler=self._write_to_shell,
+        )
+
+        # kill_shell tool - terminate a shell
+        self.register_tool(
+            name="kill_shell",
+            schema=ToolSchema(
+                name="kill_shell",
+                description="Kill a running background shell",
+                required_params=["shell_id"],
+                optional_params=[],
+                param_types={"shell_id": "string"},
+            ),
+            handler=self._kill_shell,
+        )
+
+        # grep tool - search file contents
+        self.register_tool(
+            name="grep",
+            schema=ToolSchema(
+                name="grep",
+                description="Search for patterns in files using regex",
+                required_params=["pattern", "path"],
+                optional_params=["output_mode", "glob", "type", "-i", "-n", "-A", "-B", "-C"],
+                param_types={
+                    "pattern": "string",
+                    "path": "string",
+                    "output_mode": "string",
+                    "glob": "string",
+                    "type": "string",
+                    "-i": "boolean",
+                    "-n": "boolean",
+                    "-A": "number",
+                    "-B": "number",
+                    "-C": "number",
+                },
+            ),
+            handler=self._grep,
+        )
+
+        # glob tool - find files by pattern
+        self.register_tool(
+            name="glob",
+            schema=ToolSchema(
+                name="glob",
+                description="Find files matching a glob pattern",
+                required_params=["pattern", "path"],
+                optional_params=[],
+                param_types={"pattern": "string", "path": "string"},
+            ),
+            handler=self._glob,
+        )
+
+    def register_browser_tools(self) -> None:
+        """Register browser automation tools using SyncBrowserService."""
+        from compymac.browser import SyncBrowserService
+
+        # Lazy initialization of browser service
+        if not hasattr(self, "_browser_service"):
+            self._browser_service: SyncBrowserService | None = None
+
+        def _ensure_browser() -> SyncBrowserService:
+            if self._browser_service is None:
+                self._browser_service = SyncBrowserService()
+                self._browser_service.initialize()
+            return self._browser_service
+
+        def browser_navigate(url: str, tab_idx: int | None = None) -> str:
+            browser = _ensure_browser()
+            result = browser.navigate(url)
+            if result.error:
+                return f"Error: {result.error}"
+            page_state = result.page_state
+            if page_state:
+                elements_info = "\n".join(
+                    f"  [{e.element_id}] {e.tag_name}: {e.text[:50] if e.text else ''}"
+                    for e in page_state.elements[:20]
+                )
+                return f"Navigated to {url}\n\nPage title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
+            return f"Navigated to {url}"
+
+        def browser_view(tab_idx: int | None = None, reload_window: bool = False) -> str:
+            browser = _ensure_browser()
+            result = browser.get_page_content()
+            if result.error:
+                return f"Error: {result.error}"
+            page_state = result.page_state
+            if page_state:
+                elements_info = "\n".join(
+                    f"  [{e.element_id}] {e.tag_name}: {e.text[:50] if e.text else ''}"
+                    for e in page_state.elements[:20]
+                )
+                return f"Page title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
+            return "No page content available"
+
+        def browser_click(
+            devinid: str | None = None,
+            coordinates: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            browser = _ensure_browser()
+            coords = None
+            if coordinates:
+                parts = coordinates.split(",")
+                if len(parts) == 2:
+                    coords = (float(parts[0]), float(parts[1]))
+            result = browser.click(element_id=devinid, coordinates=coords)
+            if result.error:
+                return f"Error: {result.error}"
+            return f"Clicked element {devinid or coordinates}"
+
+        def browser_type(
+            content: str,
+            devinid: str | None = None,
+            coordinates: str | None = None,
+            press_enter: bool = False,
+            tab_idx: int | None = None,
+        ) -> str:
+            browser = _ensure_browser()
+            result = browser.type_text(
+                text=content,
+                element_id=devinid,
+                press_enter=press_enter,
+            )
+            if result.error:
+                return f"Error: {result.error}"
+            return f"Typed '{content[:50]}...' into element"
+
+        def browser_scroll(
+            direction: str = "down",
+            devinid: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            browser = _ensure_browser()
+            result = browser.scroll(direction=direction, element_id=devinid)
+            if result.error:
+                return f"Error: {result.error}"
+            return f"Scrolled {direction}"
+
+        def browser_screenshot(full_page: bool = False, tab_idx: int | None = None) -> str:
+            browser = _ensure_browser()
+            result = browser.screenshot(full_page=full_page)
+            if result.error:
+                return f"Error: {result.error}"
+            if result.screenshot_path:
+                return f"Screenshot saved to: {result.screenshot_path}"
+            return "Screenshot taken"
+
+        def browser_console(content: str | None = None, tab_idx: int | None = None) -> str:
+            browser = _ensure_browser()
+            if content:
+                result = browser.execute_js(content)
+                if result.error:
+                    return f"Error: {result.error}"
+                return f"Executed JS: {result.data}"
+            return "No JS to execute"
+
+        # Register browser tools
+        self.register_tool(
+            name="browser_navigate",
+            schema=ToolSchema(
+                name="browser_navigate",
+                description="Navigate to a URL in the browser",
+                required_params=["url"],
+                optional_params=["tab_idx"],
+                param_types={"url": "string", "tab_idx": "number"},
+            ),
+            handler=browser_navigate,
+        )
+
+        self.register_tool(
+            name="browser_view",
+            schema=ToolSchema(
+                name="browser_view",
+                description="View the current browser page state",
+                required_params=[],
+                optional_params=["tab_idx", "reload_window"],
+                param_types={"tab_idx": "number", "reload_window": "boolean"},
+            ),
+            handler=browser_view,
+        )
+
+        self.register_tool(
+            name="browser_click",
+            schema=ToolSchema(
+                name="browser_click",
+                description="Click an element in the browser",
+                required_params=[],
+                optional_params=["devinid", "coordinates", "tab_idx"],
+                param_types={"devinid": "string", "coordinates": "string", "tab_idx": "number"},
+            ),
+            handler=browser_click,
+        )
+
+        self.register_tool(
+            name="browser_type",
+            schema=ToolSchema(
+                name="browser_type",
+                description="Type text into an element in the browser",
+                required_params=["content"],
+                optional_params=["devinid", "coordinates", "press_enter", "tab_idx"],
+                param_types={
+                    "content": "string",
+                    "devinid": "string",
+                    "coordinates": "string",
+                    "press_enter": "boolean",
+                    "tab_idx": "number",
+                },
+            ),
+            handler=browser_type,
+        )
+
+        self.register_tool(
+            name="browser_scroll",
+            schema=ToolSchema(
+                name="browser_scroll",
+                description="Scroll the browser page",
+                required_params=["direction", "devinid"],
+                optional_params=["tab_idx"],
+                param_types={"direction": "string", "devinid": "string", "tab_idx": "number"},
+            ),
+            handler=browser_scroll,
+        )
+
+        self.register_tool(
+            name="browser_screenshot",
+            schema=ToolSchema(
+                name="browser_screenshot",
+                description="Take a screenshot of the current page",
+                required_params=[],
+                optional_params=["full_page", "tab_idx"],
+                param_types={"full_page": "boolean", "tab_idx": "number"},
+            ),
+            handler=browser_screenshot,
+        )
+
+        self.register_tool(
+            name="browser_console",
+            schema=ToolSchema(
+                name="browser_console",
+                description="Execute JavaScript in the browser console",
+                required_params=[],
+                optional_params=["content", "tab_idx"],
+                param_types={"content": "string", "tab_idx": "number"},
+            ),
+            handler=browser_console,
         )
 
     def _read_file(
@@ -193,6 +499,9 @@ class LocalHarness(Harness):
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Track that this file has been read (for Edit's Read-before-Edit constraint)
+        self._files_read.add(str(path.resolve()))
 
         content = path.read_text()
         lines = content.split("\n")
@@ -225,9 +534,13 @@ class LocalHarness(Harness):
         exec_dir: str,
         bash_id: str,
         timeout: int | None = None,
+        run_in_background: bool = False,
     ) -> str:
         """Execute a shell command with output truncation."""
         effective_timeout = timeout or 45  # Default 45 second timeout
+
+        if run_in_background:
+            return self._run_bash_background(command, exec_dir, bash_id)
 
         try:
             result = subprocess.run(
@@ -253,6 +566,307 @@ class LocalHarness(Harness):
         self._last_bash_id = bash_id
 
         return output
+
+    def _run_bash_background(
+        self,
+        command: str,
+        exec_dir: str,
+        bash_id: str,
+    ) -> str:
+        """Run a shell command in the background."""
+        with self._shell_lock:
+            # Create a new PTY for this shell session
+            master_fd, slave_fd = pty.openpty()
+
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=exec_dir,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                preexec_fn=os.setsid,
+            )
+
+            self._shell_sessions[bash_id] = {
+                "process": process,
+                "master_fd": master_fd,
+                "slave_fd": slave_fd,
+                "output_buffer": "",
+                "exec_dir": exec_dir,
+                "command": command,
+            }
+
+        # Store for envelope
+        self._last_return_code = 0
+        self._last_exec_dir = exec_dir
+        self._last_bash_id = bash_id
+
+        return f"Started background process with bash_id={bash_id}"
+
+    def _get_bash_output(
+        self,
+        bash_id: str,
+        filter: str | None = None,
+    ) -> str:
+        """Get output from a background shell session."""
+        with self._shell_lock:
+            if bash_id not in self._shell_sessions:
+                return f"Error: No shell session with id '{bash_id}'"
+
+            session = self._shell_sessions[bash_id]
+            master_fd = session["master_fd"]
+            process = session["process"]
+
+            # Read any available output
+            new_output = ""
+            try:
+                while True:
+                    ready, _, _ = select.select([master_fd], [], [], 0.1)
+                    if not ready:
+                        break
+                    data = os.read(master_fd, 4096)
+                    if not data:
+                        break
+                    new_output += data.decode("utf-8", errors="replace")
+            except OSError:
+                pass
+
+            session["output_buffer"] += new_output
+
+            # Check if process is still running
+            poll_result = process.poll()
+            status = "running" if poll_result is None else f"finished (exit code {poll_result})"
+
+            output = session["output_buffer"]
+
+            # Apply filter if provided
+            if filter:
+                try:
+                    pattern = re.compile(filter)
+                    output = "\n".join(
+                        line for line in output.split("\n") if pattern.search(line)
+                    )
+                except re.error as e:
+                    return f"Error: Invalid regex filter: {e}"
+
+            return f"Shell {bash_id} status: {status}\n\nOutput:\n{output}"
+
+    def _write_to_shell(
+        self,
+        shell_id: str,
+        content: str | None = None,
+        press_enter: bool = False,
+    ) -> str:
+        """Write input to an active shell session."""
+        with self._shell_lock:
+            if shell_id not in self._shell_sessions:
+                return f"Error: No shell session with id '{shell_id}'"
+
+            session = self._shell_sessions[shell_id]
+            master_fd = session["master_fd"]
+
+            try:
+                if content:
+                    os.write(master_fd, content.encode("utf-8"))
+                if press_enter:
+                    os.write(master_fd, b"\n")
+                return f"Wrote to shell {shell_id}"
+            except OSError as e:
+                return f"Error writing to shell: {e}"
+
+    def _kill_shell(self, shell_id: str) -> str:
+        """Kill a background shell session."""
+        with self._shell_lock:
+            if shell_id not in self._shell_sessions:
+                return f"Error: No shell session with id '{shell_id}'"
+
+            session = self._shell_sessions[shell_id]
+            process = session["process"]
+
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+            # Clean up file descriptors
+            try:
+                os.close(session["master_fd"])
+            except OSError:
+                pass
+            try:
+                os.close(session["slave_fd"])
+            except OSError:
+                pass
+
+            del self._shell_sessions[shell_id]
+            return f"Killed shell {shell_id}"
+
+    def _edit_file(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False,
+    ) -> str:
+        """Edit a file by replacing old_string with new_string."""
+        path = Path(file_path)
+        resolved_path = str(path.resolve())
+
+        # Check Read-before-Edit constraint
+        if resolved_path not in self._files_read:
+            raise ValueError(
+                f"Edit requires prior Read. You must Read '{file_path}' before editing it."
+            )
+
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        content = path.read_text()
+
+        # Check uniqueness constraint
+        count = content.count(old_string)
+        if count == 0:
+            raise ValueError(f"old_string not found in file: {old_string[:100]}...")
+        if count > 1 and not replace_all:
+            raise ValueError(
+                f"old_string appears {count} times. Use replace_all=true to replace all, "
+                "or provide more context to make it unique."
+            )
+
+        # Perform replacement
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+            replacements = count
+        else:
+            new_content = content.replace(old_string, new_string, 1)
+            replacements = 1
+
+        path.write_text(new_content)
+        return f"Successfully edited {file_path}: {replacements} replacement(s) made"
+
+    def _grep(
+        self,
+        pattern: str,
+        path: str,
+        output_mode: str = "files_with_matches",
+        glob: str | None = None,
+        type: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Search for patterns in files using regex."""
+        search_path = Path(path)
+        if not search_path.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+
+        # Build ripgrep-like flags
+        case_insensitive = kwargs.get("-i", False)
+        show_line_numbers = kwargs.get("-n", False)
+        context_after = kwargs.get("-A", 0)
+        context_before = kwargs.get("-B", 0)
+        context_both = kwargs.get("-C", 0)
+
+        if context_both:
+            context_after = context_both
+            context_before = context_both
+
+        # Compile regex
+        flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            raise ValueError(f"Invalid regex pattern: {e}") from e
+
+        results: list[str] = []
+        files_with_matches: set[str] = set()
+        match_counts: dict[str, int] = {}
+
+        # Determine file type filter
+        type_extensions: dict[str, list[str]] = {
+            "py": [".py"],
+            "js": [".js", ".jsx"],
+            "ts": [".ts", ".tsx"],
+            "rust": [".rs"],
+            "go": [".go"],
+            "java": [".java"],
+            "c": [".c", ".h"],
+            "cpp": [".cpp", ".hpp", ".cc", ".hh"],
+        }
+
+        def should_include_file(file_path: Path) -> bool:
+            if glob:
+                # Support multiple patterns separated by semicolon
+                patterns = glob.split(";")
+                return any(fnmatch.fnmatch(file_path.name, p.strip()) for p in patterns)
+            if type and type in type_extensions:
+                return file_path.suffix in type_extensions[type]
+            return True
+
+        # Walk directory or search single file
+        if search_path.is_file():
+            files_to_search = [search_path]
+        else:
+            files_to_search = [
+                f for f in search_path.rglob("*")
+                if f.is_file() and should_include_file(f)
+            ]
+
+        for file_path in files_to_search:
+            try:
+                content = file_path.read_text()
+                lines = content.split("\n")
+
+                file_matches = []
+                for i, line in enumerate(lines):
+                    if regex.search(line):
+                        files_with_matches.add(str(file_path))
+                        match_counts[str(file_path)] = match_counts.get(str(file_path), 0) + 1
+
+                        if output_mode == "content":
+                            # Add context lines
+                            start = max(0, i - context_before)
+                            end = min(len(lines), i + context_after + 1)
+
+                            for j in range(start, end):
+                                prefix = f"{file_path}:{j + 1}:" if show_line_numbers else f"{file_path}:"
+                                file_matches.append(f"{prefix}{lines[j]}")
+
+                if file_matches:
+                    results.extend(file_matches)
+
+            except (UnicodeDecodeError, PermissionError):
+                continue
+
+        # Format output based on mode
+        if output_mode == "files_with_matches":
+            return "\n".join(sorted(files_with_matches)) if files_with_matches else "No matches found"
+        elif output_mode == "count":
+            return "\n".join(f"{f}:{c}" for f, c in sorted(match_counts.items()))
+        else:  # content
+            return "\n".join(results) if results else "No matches found"
+
+    def _glob(self, pattern: str, path: str) -> str:
+        """Find files matching a glob pattern."""
+        search_path = Path(path)
+        if not search_path.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+
+        # Support multiple patterns separated by semicolon
+        patterns = pattern.split(";")
+        matches: set[str] = set()
+
+        for p in patterns:
+            p = p.strip()
+            # If pattern doesn't contain **, add it to match anywhere
+            if "**" not in p:
+                p = f"**/{p}"
+
+            for match in search_path.glob(p):
+                if match.is_file():
+                    matches.add(str(match))
+
+        return "\n".join(sorted(matches)) if matches else "No matches found"
 
     def register_tool(
         self,
