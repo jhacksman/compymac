@@ -991,10 +991,24 @@ class LocalHarness(Harness):
         exec_dir: str,
         bash_id: str,
         timeout: int | None = None,
+        description: str | None = None,
         run_in_background: bool = False,
     ) -> str:
-        """Execute a shell command with output truncation."""
+        """Execute a shell command with output truncation.
+
+        Args:
+            command: The shell command to execute
+            exec_dir: Directory to execute the command in
+            bash_id: Identifier for the shell session
+            timeout: Optional timeout in seconds (default: 45)
+            description: Optional human-readable description of what the command does
+            run_in_background: Whether to run the command in the background
+        """
         effective_timeout = timeout or 45  # Default 45 second timeout
+
+        # Store description for tracing/logging purposes
+        if description:
+            self._last_command_description = description
 
         if run_in_background:
             return self._run_bash_background(command, exec_dir, bash_id)
@@ -1210,9 +1224,21 @@ class LocalHarness(Harness):
         output_mode: str = "files_with_matches",
         glob: str | None = None,
         type: str | None = None,
+        multiline: bool = False,
+        head_limit: int | None = None,
         **kwargs: Any,
     ) -> str:
-        """Search for patterns in files using regex."""
+        """Search for patterns in files using regex.
+
+        Args:
+            pattern: The regex pattern to search for
+            path: File or directory to search in
+            output_mode: 'files_with_matches', 'content', or 'count'
+            glob: Glob pattern to filter files
+            type: File type to search (py, js, ts, etc.)
+            multiline: Enable multiline mode where . matches newlines
+            head_limit: Limit output to first N lines/entries
+        """
         search_path = Path(path)
         if not search_path.exists():
             raise FileNotFoundError(f"Path not found: {path}")
@@ -1230,6 +1256,8 @@ class LocalHarness(Harness):
 
         # Compile regex
         flags = re.IGNORECASE if case_insensitive else 0
+        if multiline:
+            flags |= re.MULTILINE | re.DOTALL
         try:
             regex = re.compile(pattern, flags)
         except re.error as e:
@@ -1271,23 +1299,38 @@ class LocalHarness(Harness):
 
         for file_path in files_to_search:
             try:
-                content = file_path.read_text()
-                lines = content.split("\n")
+                file_content = file_path.read_text()
+                lines = file_content.split("\n")
 
                 file_matches = []
-                for i, line in enumerate(lines):
-                    if regex.search(line):
+
+                if multiline:
+                    # Multiline mode: search across the entire file content
+                    for match in regex.finditer(file_content):
                         files_with_matches.add(str(file_path))
                         match_counts[str(file_path)] = match_counts.get(str(file_path), 0) + 1
 
                         if output_mode == "content":
-                            # Add context lines
-                            start = max(0, i - context_before)
-                            end = min(len(lines), i + context_after + 1)
+                            line_num = file_content[:match.start()].count("\n") + 1
+                            matched_text = match.group()
+                            if len(matched_text) > 500:
+                                matched_text = matched_text[:500] + "..."
+                            prefix = f"{file_path}:{line_num}:" if show_line_numbers else f"{file_path}:"
+                            file_matches.append(f"{prefix}{matched_text}")
+                else:
+                    # Line-by-line mode (original behavior)
+                    for i, line in enumerate(lines):
+                        if regex.search(line):
+                            files_with_matches.add(str(file_path))
+                            match_counts[str(file_path)] = match_counts.get(str(file_path), 0) + 1
 
-                            for j in range(start, end):
-                                prefix = f"{file_path}:{j + 1}:" if show_line_numbers else f"{file_path}:"
-                                file_matches.append(f"{prefix}{lines[j]}")
+                            if output_mode == "content":
+                                start = max(0, i - context_before)
+                                end = min(len(lines), i + context_after + 1)
+
+                                for j in range(start, end):
+                                    prefix = f"{file_path}:{j + 1}:" if show_line_numbers else f"{file_path}:"
+                                    file_matches.append(f"{prefix}{lines[j]}")
 
                 if file_matches:
                     results.extend(file_matches)
@@ -1297,10 +1340,18 @@ class LocalHarness(Harness):
 
         # Format output based on mode
         if output_mode == "files_with_matches":
-            return "\n".join(sorted(files_with_matches)) if files_with_matches else "No matches found"
+            output_list = sorted(files_with_matches)
+            if head_limit:
+                output_list = output_list[:head_limit]
+            return "\n".join(output_list) if output_list else "No matches found"
         elif output_mode == "count":
-            return "\n".join(f"{f}:{c}" for f, c in sorted(match_counts.items()))
+            output_list = [f"{f}:{c}" for f, c in sorted(match_counts.items())]
+            if head_limit:
+                output_list = output_list[:head_limit]
+            return "\n".join(output_list)
         else:  # content
+            if head_limit:
+                results = results[:head_limit]
             return "\n".join(results) if results else "No matches found"
 
     def _glob(self, pattern: str, path: str) -> str:
@@ -1363,15 +1414,55 @@ class LocalHarness(Harness):
         message: str,
         block_on_user: bool = False,
         should_use_concise_message: bool = True,
+        attachments: str | None = None,
+        request_auth: bool = False,
+        request_deploy: bool = False,
     ) -> str:
-        """Send a message to the user."""
+        """Send a message to the user.
+
+        Args:
+            message: The message content to send
+            block_on_user: Whether to wait for user response before continuing
+            should_use_concise_message: Whether to use a concise version of the message
+            attachments: Comma-separated list of absolute file paths to attach
+            request_auth: Whether to request authentication from the user
+            request_deploy: Whether to request deployment approval from the user
+        """
         # In local harness, we just print the message
         # In a real deployment, this would send to a UI/API
-        print(f"\n[MESSAGE TO USER]\n{message}\n")
+        output_parts = [f"\n[MESSAGE TO USER]\n{message}"]
 
+        if attachments:
+            attachment_list = [a.strip() for a in attachments.split(",")]
+            valid_attachments = []
+            for att in attachment_list:
+                if os.path.exists(att):
+                    valid_attachments.append(att)
+                else:
+                    output_parts.append(f"Warning: Attachment not found: {att}")
+            if valid_attachments:
+                output_parts.append(f"\nAttachments: {', '.join(valid_attachments)}")
+
+        if request_auth:
+            output_parts.append("\n[REQUESTING AUTHENTICATION]")
+
+        if request_deploy:
+            output_parts.append("\n[REQUESTING DEPLOYMENT APPROVAL]")
+
+        print("\n".join(output_parts))
+
+        status_parts = []
         if block_on_user:
-            return f"Message sent (blocking): {message[:100]}..."
-        return f"Message sent: {message[:100]}..."
+            status_parts.append("blocking")
+        if attachments:
+            status_parts.append(f"{len(attachments.split(','))} attachment(s)")
+        if request_auth:
+            status_parts.append("auth requested")
+        if request_deploy:
+            status_parts.append("deploy approval requested")
+
+        status = f" ({', '.join(status_parts)})" if status_parts else ""
+        return f"Message sent{status}: {message[:100]}..."
 
     def _web_search(
         self,
