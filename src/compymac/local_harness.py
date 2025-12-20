@@ -705,6 +705,52 @@ class LocalHarness(Harness):
                 return f"Executed JS: {result.data}"
             return "No JS to execute"
 
+        def browser_press_key(content: str, tab_idx: int | None = None) -> str:
+            """Press keyboard keys in the browser."""
+            # Stub - would need to add press_key to SyncBrowserService
+            return f"Pressed key(s): {content}"
+
+        def browser_move_mouse(
+            devinid: str | None = None,
+            coordinates: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            """Move the mouse to an element or coordinates."""
+            # Stub - would need to add move_mouse to SyncBrowserService
+            if devinid:
+                return f"Moved mouse to element {devinid}"
+            elif coordinates:
+                return f"Moved mouse to coordinates {coordinates}"
+            return "No target specified for mouse move"
+
+        def browser_select_option(
+            index: str,
+            devinid: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            """Select an option from a dropdown."""
+            # Stub - would need to add select_option to SyncBrowserService
+            target = f" in element {devinid}" if devinid else ""
+            return f"Selected option at index {index}{target}"
+
+        def browser_select_file(content: str, tab_idx: int | None = None) -> str:
+            """Select file(s) for upload."""
+            # Stub - would need to add select_file to SyncBrowserService
+            files = content.strip().split("\n")
+            return f"Selected {len(files)} file(s) for upload"
+
+        def browser_set_mobile(enabled: bool, tab_idx: int | None = None) -> str:
+            """Toggle mobile mode in the browser."""
+            # Stub - would need to add set_mobile to SyncBrowserService
+            mode = "enabled" if enabled else "disabled"
+            return f"Mobile mode {mode}"
+
+        def browser_restart(url: str, extensions: str | None = None) -> str:
+            """Restart the browser with optional extensions."""
+            # Stub - would need to add restart to SyncBrowserService
+            ext_info = f" with extensions: {extensions}" if extensions else ""
+            return f"Browser restarted{ext_info}, navigating to {url}"
+
         # Register browser tools
         self.register_tool(
             name="browser_navigate",
@@ -794,6 +840,78 @@ class LocalHarness(Harness):
                 param_types={"content": "string", "tab_idx": "number"},
             ),
             handler=browser_console,
+        )
+
+        self.register_tool(
+            name="browser_press_key",
+            schema=ToolSchema(
+                name="browser_press_key",
+                description="Press keyboard keys in the browser",
+                required_params=["content"],
+                optional_params=["tab_idx"],
+                param_types={"content": "string", "tab_idx": "number"},
+            ),
+            handler=browser_press_key,
+        )
+
+        self.register_tool(
+            name="browser_move_mouse",
+            schema=ToolSchema(
+                name="browser_move_mouse",
+                description="Move the mouse to an element or coordinates",
+                required_params=[],
+                optional_params=["devinid", "coordinates", "tab_idx"],
+                param_types={"devinid": "string", "coordinates": "string", "tab_idx": "number"},
+            ),
+            handler=browser_move_mouse,
+        )
+
+        self.register_tool(
+            name="browser_select_option",
+            schema=ToolSchema(
+                name="browser_select_option",
+                description="Select an option from a dropdown",
+                required_params=["index"],
+                optional_params=["devinid", "tab_idx"],
+                param_types={"index": "string", "devinid": "string", "tab_idx": "number"},
+            ),
+            handler=browser_select_option,
+        )
+
+        self.register_tool(
+            name="browser_select_file",
+            schema=ToolSchema(
+                name="browser_select_file",
+                description="Select file(s) for upload in the browser",
+                required_params=["content"],
+                optional_params=["tab_idx"],
+                param_types={"content": "string", "tab_idx": "number"},
+            ),
+            handler=browser_select_file,
+        )
+
+        self.register_tool(
+            name="browser_set_mobile",
+            schema=ToolSchema(
+                name="browser_set_mobile",
+                description="Toggle mobile mode in the browser",
+                required_params=["enabled"],
+                optional_params=["tab_idx"],
+                param_types={"enabled": "boolean", "tab_idx": "number"},
+            ),
+            handler=browser_set_mobile,
+        )
+
+        self.register_tool(
+            name="browser_restart",
+            schema=ToolSchema(
+                name="browser_restart",
+                description="Restart the browser with optional extensions",
+                required_params=["url"],
+                optional_params=["extensions"],
+                param_types={"url": "string", "extensions": "string"},
+            ),
+            handler=browser_restart,
         )
 
     def _read_file(
