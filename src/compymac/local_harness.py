@@ -1834,45 +1834,27 @@ If you're unsure about something, say so and suggest how to find out."""
         Returns:
             Analysis of the visual content or configuration error
 
-        Note: This tool requires a vision-capable model to be configured.
-        Currently, Venice.ai does not support multimodal/vision inputs.
-        To enable this feature, configure VISION_API_URL and VISION_MODEL
-        environment variables to point to a vision-capable API endpoint
-        (e.g., OpenAI GPT-4V, Anthropic Claude with vision, or a local
-        multimodal model like LLaVA).
+        Note: This tool uses Venice.ai's mistral-31-24b vision model by default.
+        You can override with VISION_API_URL and VISION_MODEL environment variables.
         """
-        # Check if a vision API is configured
-        vision_api_url = os.environ.get("VISION_API_URL")
-        vision_model = os.environ.get("VISION_MODEL")
-
-        if not vision_api_url:
-            return """Error: Visual analysis not configured.
-
-The visual_checker tool requires a vision-capable model, but none is configured.
-Venice.ai (the current LLM provider) does not support multimodal/vision inputs.
-
-To enable visual analysis, set these environment variables:
-- VISION_API_URL: API endpoint for a vision-capable model
-- VISION_MODEL: Model name (e.g., 'gpt-4-vision-preview', 'claude-3-opus')
-- VISION_API_KEY: API key for the vision service
-
-Supported vision APIs:
-- OpenAI GPT-4V: https://api.openai.com/v1/chat/completions
-- Anthropic Claude: https://api.anthropic.com/v1/messages
-- Local LLaVA/multimodal: Your local endpoint
-
-For now, you can use the browser screenshot tool to capture UI state
-and describe what you see in your question to ask_smart_friend instead."""
-
-        # If vision API is configured, attempt to use it
         import base64
         from pathlib import Path
 
         import httpx
 
+        # Check if a custom vision API is configured, otherwise use Venice.ai
+        vision_api_url = os.environ.get("VISION_API_URL")
+        vision_model = os.environ.get("VISION_MODEL")
         api_key = os.environ.get("VISION_API_KEY")
+
+        # Default to Venice.ai with mistral-31-24b (vision-capable model)
+        if not vision_api_url:
+            vision_api_url = "https://api.venice.ai/api/v1/chat/completions"
+            vision_model = "mistral-31-24b"
+            api_key = os.environ.get("LLM_API_KEY")
+
         if not api_key:
-            return "Error: VISION_API_KEY environment variable not set"
+            return "Error: No API key configured. Set LLM_API_KEY for Venice.ai or VISION_API_KEY for custom vision API."
 
         # Extract image paths from the question (look for file paths)
         import re
