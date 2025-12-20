@@ -381,6 +381,63 @@ class LocalHarness(Harness):
             handler=self._web_get_contents,
         )
 
+        # lsp_tool - Language Server Protocol operations
+        self.register_tool(
+            name="lsp_tool",
+            schema=ToolSchema(
+                name="lsp_tool",
+                description="Language Server Protocol operations: goto_definition, goto_references, hover_symbol, file_diagnostics",
+                required_params=["command", "path"],
+                optional_params=["symbol", "line"],
+                param_types={
+                    "command": "string",
+                    "path": "string",
+                    "symbol": "string",
+                    "line": "number",
+                },
+            ),
+            handler=self._lsp_tool,
+        )
+
+        # list_secrets - list available secrets
+        self.register_tool(
+            name="list_secrets",
+            schema=ToolSchema(
+                name="list_secrets",
+                description="List the names of all secrets available to the agent",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._list_secrets,
+        )
+
+        # ask_smart_friend - consult for complex reasoning
+        self.register_tool(
+            name="ask_smart_friend",
+            schema=ToolSchema(
+                name="ask_smart_friend",
+                description="Ask a smart friend for help with complex reasoning or debugging",
+                required_params=["question"],
+                optional_params=[],
+                param_types={"question": "string"},
+            ),
+            handler=self._ask_smart_friend,
+        )
+
+        # visual_checker - analyze visual content
+        self.register_tool(
+            name="visual_checker",
+            schema=ToolSchema(
+                name="visual_checker",
+                description="Analyze images, screenshots, or visual content",
+                required_params=["question"],
+                optional_params=[],
+                param_types={"question": "string"},
+            ),
+            handler=self._visual_checker,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -1038,6 +1095,79 @@ class LocalHarness(Harness):
             result += f"  - {url}\n"
         result += "\n[Stub: No actual fetch performed. Integrate with HTTP client for real contents.]"
         return result
+
+    def _lsp_tool(
+        self,
+        command: str,
+        path: str,
+        symbol: str | None = None,
+        line: int | None = None,
+    ) -> str:
+        """Execute LSP operations.
+
+        Note: This is a stub implementation. In production, this would
+        integrate with a real LSP server.
+        """
+        valid_commands = ["goto_definition", "goto_references", "hover_symbol", "file_diagnostics"]
+        if command not in valid_commands:
+            raise ValueError(f"Invalid LSP command: {command}. Valid: {valid_commands}")
+
+        result = f"LSP {command} on {path}\n"
+        if symbol:
+            result += f"Symbol: {symbol}\n"
+        if line:
+            result += f"Line: {line}\n"
+        result += "\n[Stub: No actual LSP operation performed. Integrate with LSP server for real results.]"
+        return result
+
+    def _list_secrets(self) -> str:
+        """List available secrets.
+
+        In local harness, returns environment variables that look like secrets.
+        """
+        import os
+
+        # Look for common secret patterns in environment
+        secret_patterns = ["API_KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL"]
+        found_secrets = []
+
+        for key in os.environ:
+            if any(pattern in key.upper() for pattern in secret_patterns):
+                found_secrets.append(key)
+
+        if found_secrets:
+            return "Available secrets:\n" + "\n".join(f"  - {s}" for s in sorted(found_secrets))
+        return "No secrets found in environment."
+
+    def _ask_smart_friend(self, question: str) -> str:
+        """Ask a smart friend for help with complex reasoning.
+
+        Note: In production, this would call an LLM for assistance.
+        In local harness, returns a placeholder response.
+        """
+        # In a real implementation, this would call the LLM
+        return f"""Smart friend response to: "{question[:100]}..."
+
+[Stub: In production, this would invoke an LLM to help with complex reasoning.
+For now, consider:
+- Breaking down the problem into smaller parts
+- Checking documentation and existing code
+- Looking for similar patterns in the codebase]"""
+
+    def _visual_checker(self, question: str) -> str:
+        """Analyze visual content.
+
+        Note: In production, this would use a vision model.
+        In local harness, returns a placeholder response.
+        """
+        # In a real implementation, this would call a vision model
+        return f"""Visual analysis request: "{question[:100]}..."
+
+[Stub: In production, this would invoke a vision model (e.g., omniparser v2) to analyze images.
+For now, ensure:
+- The image path is correct and accessible
+- The question is specific about what to look for
+- Screenshots are taken before analysis]"""
 
     def register_tool(
         self,
