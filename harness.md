@@ -247,6 +247,7 @@ This section lists every tool available in this session with granular detail.
 | **browser_select_file** | content (paths) | tab_idx | - |
 | **browser_set_mobile** | enabled | tab_idx | - |
 | **browser_restart** | url | extensions | - |
+| **browser_screenshot** | - | tab_idx | Screenshot path |
 
 **Side effects**: Screenshots to /home/ubuntu/screenshots/; HTML stripped with devinid injection
 
