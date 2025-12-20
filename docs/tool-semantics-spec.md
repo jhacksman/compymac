@@ -118,6 +118,13 @@ Required: content
 ### browser_set_mobile
 Required: enabled
 
+### browser_move_mouse
+Optional: devinid, coordinates, tab_idx
+
+### browser_screenshot
+Optional: tab_idx
+Returns screenshot path.
+
 ### browser_restart
 Required: url
 Optional: extensions
