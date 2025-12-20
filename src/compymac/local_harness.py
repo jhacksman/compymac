@@ -1535,34 +1535,137 @@ class LocalHarness(Harness):
         return "No secrets found in environment."
 
     def _ask_smart_friend(self, question: str) -> str:
-        """Ask a smart friend for help with complex reasoning.
+        """Ask a smart friend for help with complex reasoning using Venice.ai LLM.
 
-        Note: In production, this would call an LLM for assistance.
-        In local harness, returns a placeholder response.
+        Args:
+            question: The question to ask for help with
+
+        Returns:
+            LLM response with reasoning assistance
         """
-        # In a real implementation, this would call the LLM
-        return f"""Smart friend response to: "{question[:100]}..."
+        import httpx
 
-[Stub: In production, this would invoke an LLM to help with complex reasoning.
-For now, consider:
-- Breaking down the problem into smaller parts
-- Checking documentation and existing code
-- Looking for similar patterns in the codebase]"""
+        # Get API key from environment
+        api_key = os.environ.get("LLM_API_KEY") or os.environ.get("VENICE_API_KEY")
+        if not api_key:
+            return "Error: LLM_API_KEY or VENICE_API_KEY environment variable not set"
+
+        # Use Venice.ai API with qwen3-next-80b model for reasoning
+        model = os.environ.get("LLM_MODEL", "qwen3-next-80b")
+
+        system_prompt = """You are a smart friend helping with complex reasoning and debugging.
+You have expertise in software engineering, debugging, and problem-solving.
+Provide clear, actionable suggestions. Be concise but thorough.
+If you're unsure about something, say so and suggest how to find out."""
+
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
+                    "https://api.venice.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question},
+                        ],
+                        "max_tokens": 2000,
+                        "temperature": 0.7,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Extract response
+            choices = data.get("choices", [])
+            if not choices:
+                return "Error: No response from LLM"
+
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                return "Error: Empty response from LLM"
+
+            return f"Smart friend response:\n\n{content}"
+
+        except httpx.HTTPStatusError as e:
+            return f"Venice API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error asking smart friend: {e}"
 
     def _visual_checker(self, question: str) -> str:
-        """Analyze visual content.
+        """Analyze visual content using Venice.ai vision model.
 
-        Note: In production, this would use a vision model.
-        In local harness, returns a placeholder response.
+        Args:
+            question: The question about visual content, may include image paths
+
+        Returns:
+            Analysis of the visual content
+
+        Note: Venice.ai supports vision through certain models. If no vision model
+        is available, falls back to text-based analysis guidance.
         """
-        # In a real implementation, this would call a vision model
-        return f"""Visual analysis request: "{question[:100]}..."
+        import httpx
 
-[Stub: In production, this would invoke a vision model (e.g., omniparser v2) to analyze images.
-For now, ensure:
-- The image path is correct and accessible
-- The question is specific about what to look for
-- Screenshots are taken before analysis]"""
+        # Get API key from environment
+        api_key = os.environ.get("LLM_API_KEY") or os.environ.get("VENICE_API_KEY")
+        if not api_key:
+            return "Error: LLM_API_KEY or VENICE_API_KEY environment variable not set"
+
+        # Use a model that supports vision if available
+        model = os.environ.get("VISION_MODEL", "qwen3-next-80b")
+
+        system_prompt = """You are a visual analysis assistant helping to analyze images, screenshots, and UI elements.
+When analyzing visual content:
+1. Describe what you observe in detail
+2. Identify any issues, errors, or anomalies
+3. Compare against expected behavior if described
+4. Provide specific, actionable feedback
+
+If you cannot see the actual image, provide guidance on what to look for based on the description."""
+
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
+                    "https://api.venice.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question},
+                        ],
+                        "max_tokens": 2000,
+                        "temperature": 0.3,  # Lower temp for more precise analysis
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Extract response
+            choices = data.get("choices", [])
+            if not choices:
+                return "Error: No response from vision model"
+
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                return "Error: Empty response from vision model"
+
+            return f"Visual analysis:\n\n{content}"
+
+        except httpx.HTTPStatusError as e:
+            return f"Venice API error: {e.response.status_code} - {e.response.text}"
+        except httpx.RequestError as e:
+            return f"Request error: {e}"
+        except Exception as e:
+            return f"Error in visual analysis: {e}"
 
     def _git_view_pr(self, repo: str, pull_number: int) -> str:
         """View details of a pull request.
