@@ -3074,17 +3074,18 @@ Alternative: You can manually expose by running:
     ) -> str:
         """Interact with MCP (Model Context Protocol) servers.
 
-        Note: MCP server integration requires configuration.
+        Uses the official MCP Python SDK to connect to configured servers.
+        Servers are spawned on-demand and cached for the session.
         """
+        import asyncio
+
         valid_commands = ["list_servers", "list_tools", "call_tool", "read_resource"]
         if command not in valid_commands:
             raise ValueError(f"Invalid MCP command: {command}. Valid: {valid_commands}")
 
-        # Check for MCP configuration
-        mcp_config_path = os.environ.get("MCP_CONFIG_PATH")
-        mcp_servers_json = os.environ.get("MCP_SERVERS")
-
-        if not mcp_config_path and not mcp_servers_json:
+        # Load MCP configuration
+        config = self._load_mcp_config()
+        if config is None:
             return """Error: MCP (Model Context Protocol) not configured.
 
 No MCP servers are configured. To enable MCP integrations:
@@ -3094,13 +3095,13 @@ Option 1: Set MCP_CONFIG_PATH to a JSON config file:
     "servers": {
       "slack": {
         "command": "npx",
-        "args": ["-y", "@anthropic/mcp-server-slack"],
+        "args": ["-y", "@modelcontextprotocol/server-slack"],
         "env": {"SLACK_BOT_TOKEN": "xoxb-..."}
       },
-      "linear": {
+      "github": {
         "command": "npx",
-        "args": ["-y", "@anthropic/mcp-server-linear"],
-        "env": {"LINEAR_API_KEY": "lin_api_..."}
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}
       }
     }
   }
@@ -3109,7 +3110,7 @@ Option 2: Set MCP_SERVERS as a JSON string with the same format.
 
 For more information on MCP:
 - Specification: https://modelcontextprotocol.io
-- Server examples: https://github.com/anthropics/mcp-servers
+- Server examples: https://github.com/modelcontextprotocol/servers
 
 Once configured, you can:
 - list_servers: See available MCP servers
@@ -3117,27 +3118,169 @@ Once configured, you can:
 - call_tool: Execute a tool on a server
 - read_resource: Read a resource from a server"""
 
-        # If we get here, MCP is configured but not yet implemented
+        servers = config.get("servers", {})
+        if not servers:
+            return "Error: MCP configuration found but no servers defined."
+
+        # Handle list_servers command
         if command == "list_servers":
-            return """Error: MCP server discovery not yet implemented.
+            server_list = []
+            for name, cfg in servers.items():
+                cmd = cfg.get("command", "unknown")
+                args = cfg.get("args", [])
+                server_list.append(f"- {name}: {cmd} {' '.join(args)}")
+            return "Available MCP servers:\n" + "\n".join(server_list)
 
-MCP configuration detected but the client integration is pending.
-This will list configured servers like Slack, Linear, GitHub, etc."""
+        # All other commands require a server name
+        if not server:
+            return f"Error: 'server' parameter required for '{command}' command."
 
-        elif command == "list_tools":
-            return f"""Error: MCP tool listing not yet implemented.
+        if server not in servers:
+            available = ", ".join(servers.keys())
+            return f"Error: Unknown server '{server}'. Available: {available}"
 
-Cannot list tools on '{server or 'unknown'}' - MCP client integration pending."""
+        server_config = servers[server]
 
-        elif command == "call_tool":
-            return f"""Error: MCP tool execution not yet implemented.
+        # Run the async MCP operation
+        try:
+            result = asyncio.run(
+                self._mcp_async_operation(command, server, server_config, tool_name, tool_args, resource_uri)
+            )
+            return result
+        except Exception as e:
+            return f"Error executing MCP {command}: {e}"
 
-Cannot call '{tool_name}' on '{server or 'unknown'}' - MCP client integration pending."""
+    def _load_mcp_config(self) -> dict[str, Any] | None:
+        """Load MCP configuration from environment."""
+        mcp_config_path = os.environ.get("MCP_CONFIG_PATH")
+        mcp_servers_json = os.environ.get("MCP_SERVERS")
 
-        else:  # read_resource
-            return f"""Error: MCP resource reading not yet implemented.
+        if mcp_config_path:
+            try:
+                with open(mcp_config_path) as f:
+                    return json.load(f)
+            except Exception as e:
+                return {"error": f"Failed to load MCP config from {mcp_config_path}: {e}"}
 
-Cannot read '{resource_uri}' from '{server or 'unknown'}' - MCP client integration pending."""
+        if mcp_servers_json:
+            try:
+                return json.loads(mcp_servers_json)
+            except json.JSONDecodeError as e:
+                return {"error": f"Failed to parse MCP_SERVERS JSON: {e}"}
+
+        return None
+
+    async def _mcp_async_operation(
+        self,
+        command: str,
+        server_name: str,
+        server_config: dict[str, Any],
+        tool_name: str | None,
+        tool_args: str | None,
+        resource_uri: str | None,
+    ) -> str:
+        """Execute an async MCP operation."""
+        from contextlib import AsyncExitStack
+
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        # Build server parameters
+        cmd = server_config.get("command", "npx")
+        args = server_config.get("args", [])
+        env = server_config.get("env", {})
+
+        # Merge with current environment
+        full_env = {**os.environ, **env}
+
+        server_params = StdioServerParameters(
+            command=cmd,
+            args=args,
+            env=full_env,
+        )
+
+        async with AsyncExitStack() as stack:
+            # Connect to the server
+            try:
+                stdio_transport = await stack.enter_async_context(stdio_client(server_params))
+                stdio, write = stdio_transport
+                session = await stack.enter_async_context(ClientSession(stdio, write))
+                await session.initialize()
+            except Exception as e:
+                return f"Error connecting to MCP server '{server_name}': {e}"
+
+            # Execute the requested command
+            if command == "list_tools":
+                try:
+                    response = await session.list_tools()
+                    tools = response.tools
+                    if not tools:
+                        return f"No tools available on server '{server_name}'."
+
+                    tool_list = []
+                    for tool in tools:
+                        desc = tool.description or "No description"
+                        # Truncate long descriptions
+                        if len(desc) > 100:
+                            desc = desc[:97] + "..."
+                        tool_list.append(f"- {tool.name}: {desc}")
+
+                    return f"Tools on '{server_name}':\n" + "\n".join(tool_list)
+                except Exception as e:
+                    return f"Error listing tools on '{server_name}': {e}"
+
+            elif command == "call_tool":
+                if not tool_name:
+                    return "Error: 'tool_name' parameter required for 'call_tool' command."
+
+                # Parse tool_args from JSON string
+                parsed_args: dict[str, Any] = {}
+                if tool_args:
+                    try:
+                        parsed_args = json.loads(tool_args)
+                        if not isinstance(parsed_args, dict):
+                            return f"Error: tool_args must be a JSON object, got {type(parsed_args).__name__}"
+                    except json.JSONDecodeError as e:
+                        return f"Error parsing tool_args JSON: {e}"
+
+                try:
+                    result = await session.call_tool(tool_name, parsed_args)
+                    # Format the result content
+                    content_parts = []
+                    for content in result.content:
+                        if hasattr(content, "text"):
+                            content_parts.append(content.text)
+                        elif hasattr(content, "data"):
+                            content_parts.append(f"[Binary data: {len(content.data)} bytes]")
+                        else:
+                            content_parts.append(str(content))
+
+                    return "\n".join(content_parts) if content_parts else "Tool executed successfully (no output)"
+                except Exception as e:
+                    return f"Error calling tool '{tool_name}' on '{server_name}': {e}"
+
+            elif command == "read_resource":
+                if not resource_uri:
+                    return "Error: 'resource_uri' parameter required for 'read_resource' command."
+
+                try:
+                    result = await session.read_resource(resource_uri)
+                    # Format the resource content
+                    content_parts = []
+                    for content in result.contents:
+                        if hasattr(content, "text"):
+                            content_parts.append(content.text)
+                        elif hasattr(content, "blob"):
+                            content_parts.append(f"[Binary blob: {len(content.blob)} bytes]")
+                        else:
+                            content_parts.append(str(content))
+
+                    return "\n".join(content_parts) if content_parts else "Resource read successfully (empty)"
+                except Exception as e:
+                    return f"Error reading resource '{resource_uri}' from '{server_name}': {e}"
+
+            else:
+                return f"Unknown command: {command}"
 
     def register_tool(
         self,
