@@ -556,10 +556,10 @@ class LocalHarness(Harness):
             name="deploy",
             schema=ToolSchema(
                 name="deploy",
-                description="Deploy applications: frontend (static), backend (FastAPI to Fly.io), logs (view Fly.io logs), or expose local port",
+                description="Deploy applications: frontend (static to GitHub Pages), backend (FastAPI to Fly.io), logs (view Fly.io logs), or expose local port",
                 required_params=["command"],
-                optional_params=["dir", "port", "app"],
-                param_types={"command": "string", "dir": "string", "port": "number", "app": "string"},
+                optional_params=["dir", "port", "repo", "app"],
+                param_types={"command": "string", "dir": "string", "port": "number", "repo": "string", "app": "string"},
             ),
             handler=self._deploy,
         )
@@ -2569,29 +2569,35 @@ URL: {comment_url}"""
         command: str,
         dir: str | None = None,
         port: int | None = None,
+        repo: str | None = None,
         app: str | None = None,
     ) -> str:
-        """Deploy applications using Fly.io, Netlify, or ngrok.
+        """Deploy applications using GitHub Pages, Fly.io, or ngrok.
 
         Args:
             command: One of 'frontend', 'backend', 'logs', 'expose'
-            dir: Directory containing the app to deploy
+            dir: Directory containing the build files to deploy
             port: Port to expose (for 'expose' command)
+            repo: GitHub repo in owner/repo format (for 'frontend' command)
             app: App name for Fly.io (for 'logs' command)
 
         Returns:
             Deployment result or error message
         """
+        import base64
+        import hashlib
         import shutil
         import subprocess
+
+        import httpx
 
         valid_commands = ["frontend", "backend", "logs", "expose"]
         if command not in valid_commands:
             raise ValueError(f"Invalid deploy command: {command}. Valid: {valid_commands}")
 
         # Check for deployment configuration
+        github_token = os.environ.get("GITHUB_TOKEN")
         fly_token = os.environ.get("FLY_API_TOKEN")
-        netlify_token = os.environ.get("NETLIFY_AUTH_TOKEN")
         ngrok_token = os.environ.get("NGROK_AUTHTOKEN")
 
         # Find flyctl binary
@@ -2603,21 +2609,167 @@ URL: {comment_url}"""
                 flyctl_path = home_fly
 
         if command == "frontend":
-            if not netlify_token:
+            if not github_token:
                 return """Error: Frontend deployment not configured.
 
-To enable frontend deployment, set the NETLIFY_AUTH_TOKEN environment variable
-with your Netlify personal access token.
+To enable frontend deployment to GitHub Pages, set the GITHUB_TOKEN environment variable.
 
 Steps to configure:
-1. Create a Netlify account at https://netlify.com
-2. Generate a personal access token at https://app.netlify.com/user/applications#personal-access-tokens
-3. Set NETLIFY_AUTH_TOKEN=<your-token> in your environment
+1. Create a GitHub personal access token at https://github.com/settings/tokens
+2. Grant 'repo' scope for full repository access
+3. Set GITHUB_TOKEN=<your-token> in your environment"""
 
-Alternative: You can manually deploy by running:
-  npm run build && npx netlify deploy --prod"""
-            # TODO: Implement actual Netlify deployment when token is available
-            return "Error: Netlify deployment not yet implemented. Token is configured but integration pending."
+            if not repo:
+                return "Error: 'repo' parameter required for frontend deployment. Specify the target repo in owner/repo format."
+
+            if not dir:
+                return "Error: 'dir' parameter required for frontend deployment. Specify the directory containing your build files."
+
+            if not os.path.isdir(dir):
+                return f"Error: Directory not found: {dir}"
+
+            # Parse repo
+            if "/" not in repo:
+                return f"Error: Invalid repo format '{repo}'. Use owner/repo format."
+            owner, repo_name = repo.split("/", 1)
+
+            try:
+                # Collect all files from the build directory
+                files_to_upload = []
+                for root, dirs, files in os.walk(dir):
+                    # Skip hidden directories
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+                    for file in files:
+                        if file.startswith('.'):
+                            continue
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, dir)
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+                        files_to_upload.append({
+                            'path': rel_path,
+                            'content': base64.b64encode(content).decode('utf-8'),
+                            'sha': hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest(),
+                        })
+
+                if not files_to_upload:
+                    return f"Error: No files found in directory: {dir}"
+
+                # Create blobs and tree using GitHub API
+                headers = {
+                    "Authorization": f"token {github_token}",
+                    "Accept": "application/vnd.github.v3+json",
+                }
+
+                # Get the current gh-pages branch ref (or create it)
+                ref_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/ref/heads/gh-pages"
+                ref_response = httpx.get(ref_url, headers=headers, timeout=30)
+
+                parent_sha = None
+                if ref_response.status_code == 200:
+                    parent_sha = ref_response.json()["object"]["sha"]
+
+                # Create blobs for each file
+                tree_items = []
+                for file_info in files_to_upload:
+                    blob_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/blobs"
+                    blob_response = httpx.post(
+                        blob_url,
+                        headers=headers,
+                        json={"content": file_info['content'], "encoding": "base64"},
+                        timeout=60,
+                    )
+                    if blob_response.status_code not in (200, 201):
+                        return f"Error creating blob for {file_info['path']}: {blob_response.text}"
+
+                    blob_sha = blob_response.json()["sha"]
+                    tree_items.append({
+                        "path": file_info['path'],
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": blob_sha,
+                    })
+
+                # Create tree
+                tree_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/trees"
+                tree_response = httpx.post(
+                    tree_url,
+                    headers=headers,
+                    json={"tree": tree_items},
+                    timeout=60,
+                )
+                if tree_response.status_code not in (200, 201):
+                    return f"Error creating tree: {tree_response.text}"
+
+                tree_sha = tree_response.json()["sha"]
+
+                # Create commit
+                commit_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/commits"
+                commit_data = {
+                    "message": "Deploy to GitHub Pages via CompyMac",
+                    "tree": tree_sha,
+                }
+                if parent_sha:
+                    commit_data["parents"] = [parent_sha]
+
+                commit_response = httpx.post(
+                    commit_url,
+                    headers=headers,
+                    json=commit_data,
+                    timeout=60,
+                )
+                if commit_response.status_code not in (200, 201):
+                    return f"Error creating commit: {commit_response.text}"
+
+                commit_sha = commit_response.json()["sha"]
+
+                # Update or create gh-pages branch ref
+                if parent_sha:
+                    # Update existing ref
+                    update_response = httpx.patch(
+                        ref_url,
+                        headers=headers,
+                        json={"sha": commit_sha, "force": True},
+                        timeout=30,
+                    )
+                    if update_response.status_code != 200:
+                        return f"Error updating gh-pages ref: {update_response.text}"
+                else:
+                    # Create new ref
+                    create_ref_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/refs"
+                    create_response = httpx.post(
+                        create_ref_url,
+                        headers=headers,
+                        json={"ref": "refs/heads/gh-pages", "sha": commit_sha},
+                        timeout=30,
+                    )
+                    if create_response.status_code not in (200, 201):
+                        return f"Error creating gh-pages ref: {create_response.text}"
+
+                # Enable GitHub Pages if not already enabled
+                pages_url = f"https://api.github.com/repos/{owner}/{repo_name}/pages"
+                pages_response = httpx.get(pages_url, headers=headers, timeout=30)
+
+                if pages_response.status_code == 404:
+                    # Enable Pages
+                    enable_response = httpx.post(
+                        pages_url,
+                        headers=headers,
+                        json={"source": {"branch": "gh-pages", "path": "/"}},
+                        timeout=30,
+                    )
+                    if enable_response.status_code not in (200, 201):
+                        return f"Deployed to gh-pages branch but failed to enable Pages: {enable_response.text}\n\nManually enable Pages at https://github.com/{owner}/{repo_name}/settings/pages"
+
+                pages_url_final = f"https://{owner}.github.io/{repo_name}/"
+                return f"Deployment successful!\n\nFiles deployed: {len(files_to_upload)}\nCommit: {commit_sha[:7]}\n\nSite URL: {pages_url_final}\n\nNote: It may take a few minutes for changes to appear."
+
+            except httpx.HTTPStatusError as e:
+                return f"GitHub API error: {e.response.status_code} - {e.response.text}"
+            except httpx.RequestError as e:
+                return f"Request error: {e}"
+            except Exception as e:
+                return f"Error during deployment: {e}"
 
         elif command == "backend":
             if not fly_token:
