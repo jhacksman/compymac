@@ -758,14 +758,19 @@ class LocalHarness(Harness):
             target = f" in element {devinid}" if devinid else ""
             return f"Selected option at index {index}{target}"
 
-        def browser_select_file(content: str, tab_idx: int | None = None) -> str:
-            """Select file(s) for upload."""
+        def browser_select_file(
+            content: str,
+            devinid: str | None = None,
+            tab_idx: int | None = None,
+        ) -> str:
+            """Select file(s) for upload on a file input element."""
             browser = _ensure_browser()
             files = content.strip().split("\n")
-            result = browser.select_file(files)
+            result = browser.select_file(files, element_id=devinid)
             if result.error:
                 return f"Error: {result.error}"
-            return f"Selected {len(files)} file(s) for upload"
+            target = f" on element {devinid}" if devinid else ""
+            return f"Selected {len(files)} file(s) for upload{target}"
 
         def browser_set_mobile(enabled: bool, tab_idx: int | None = None) -> str:
             """Toggle mobile mode in the browser."""

@@ -708,21 +708,35 @@ class BrowserService:
                 error=str(e),
             )
 
-    async def select_file(self, file_paths: list[str]) -> BrowserAction:
-        """Select file(s) for upload using file chooser."""
+    async def select_file(
+        self,
+        file_paths: list[str],
+        element_id: str | None = None,
+        selector: str | None = None,
+    ) -> BrowserAction:
+        """Select file(s) for upload on a file input element."""
         await self._ensure_initialized()
 
         try:
             if not self._page:
                 raise RuntimeError("Page not initialized")
 
-            await self._page.set_input_files('input[type="file"]', file_paths)
+            # Build selector from element_id or use provided selector
+            if element_id:
+                target_selector = f'[data-compyid="{element_id}"]'
+            elif selector:
+                target_selector = selector
+            else:
+                # Default to first file input on page
+                target_selector = 'input[type="file"]'
+
+            await self._page.set_input_files(target_selector, file_paths)
             page_state = await self._get_page_state()
 
             return BrowserAction(
                 success=True,
                 action_type="select_file",
-                details={"file_count": len(file_paths)},
+                details={"file_count": len(file_paths), "element_id": element_id},
                 page_state=page_state,
             )
         except Exception as e:
@@ -1064,8 +1078,13 @@ class SyncBrowserService:
     ) -> BrowserAction:
         return self._run(self._async_service.select_option(index, element_id, selector))
 
-    def select_file(self, file_paths: list[str]) -> BrowserAction:
-        return self._run(self._async_service.select_file(file_paths))
+    def select_file(
+        self,
+        file_paths: list[str],
+        element_id: str | None = None,
+        selector: str | None = None,
+    ) -> BrowserAction:
+        return self._run(self._async_service.select_file(file_paths, element_id, selector))
 
     def set_mobile(self, enabled: bool) -> BrowserAction:
         return self._run(self._async_service.set_mobile(enabled))
