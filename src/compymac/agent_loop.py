@@ -147,8 +147,8 @@ class AgentLoop:
                 },
             )
 
-        # Get tool schemas from harness
-        tools = self.harness.get_tool_schemas()
+        # Get tool schemas from harness (only active tools for token efficiency)
+        tools = self.harness.get_active_tool_schemas()
 
         # Call LLM
         self._event_log.log_event(
