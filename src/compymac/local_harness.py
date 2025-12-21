@@ -19,7 +19,8 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +44,24 @@ if TYPE_CHECKING:
     from compymac.trace_store import TraceContext
 
 
+class ToolCategory(Enum):
+    """Categories for organizing tools in the toolshed."""
+    CORE = "core"  # Always enabled: Read, Write, Edit, bash, grep, glob, think, message_user, request_tools
+    SHELL = "shell"  # bash_output, write_to_shell, kill_shell, wait
+    GIT_LOCAL = "git_local"  # git_status, git_diff_*, git_commit, git_add, etc.
+    GIT_REMOTE = "git_remote"  # git_view_pr, git_create_pr, git_pr_checks, etc.
+    FILESYSTEM = "filesystem"  # fs_read_file, fs_write_file, fs_list_directory, etc.
+    BROWSER = "browser"  # browser_navigate, browser_view, browser_click, etc.
+    SEARCH = "search"  # web_search, web_get_contents
+    LSP = "lsp"  # lsp_tool
+    DEPLOY = "deploy"  # deploy
+    RECORDING = "recording"  # recording_start, recording_stop
+    MCP = "mcp"  # mcp_tool
+    AI = "ai"  # ask_smart_friend, visual_checker
+    SECRETS = "secrets"  # list_secrets
+    TODO = "todo"  # TodoWrite
+
+
 @dataclass
 class RegisteredTool:
     """A tool registered with the harness."""
@@ -50,6 +69,59 @@ class RegisteredTool:
     schema: ToolSchema
     handler: Callable[..., str]
     envelope_type: str = "generic"
+    category: ToolCategory = ToolCategory.CORE
+    is_core: bool = False  # If True, always included in active toolset
+
+
+@dataclass
+class ActiveToolset:
+    """Tracks which tools are currently enabled for the agent."""
+    _enabled_categories: set[ToolCategory] = field(default_factory=lambda: {ToolCategory.CORE})
+    _enabled_tools: set[str] = field(default_factory=set)  # Explicitly enabled tool names
+    _disabled_tools: set[str] = field(default_factory=set)  # Explicitly disabled tool names
+
+    def enable_category(self, category: ToolCategory) -> None:
+        """Enable all tools in a category."""
+        self._enabled_categories.add(category)
+
+    def disable_category(self, category: ToolCategory) -> None:
+        """Disable a category (except CORE which cannot be disabled)."""
+        if category != ToolCategory.CORE:
+            self._enabled_categories.discard(category)
+
+    def enable_tool(self, tool_name: str) -> None:
+        """Explicitly enable a specific tool."""
+        self._enabled_tools.add(tool_name)
+        self._disabled_tools.discard(tool_name)
+
+    def disable_tool(self, tool_name: str) -> None:
+        """Explicitly disable a specific tool."""
+        self._disabled_tools.add(tool_name)
+        self._enabled_tools.discard(tool_name)
+
+    def is_enabled(self, tool: "RegisteredTool") -> bool:
+        """Check if a tool is currently enabled."""
+        # Core tools are always enabled unless explicitly disabled
+        if tool.is_core and tool.name not in self._disabled_tools:
+            return True
+        # Explicitly enabled tools are enabled
+        if tool.name in self._enabled_tools:
+            return True
+        # Explicitly disabled tools are disabled
+        if tool.name in self._disabled_tools:
+            return False
+        # Otherwise, check if the tool's category is enabled
+        return tool.category in self._enabled_categories
+
+    def get_enabled_categories(self) -> list[str]:
+        """Get list of enabled category names."""
+        return [cat.value for cat in self._enabled_categories]
+
+    def reset(self) -> None:
+        """Reset to default state (only CORE enabled)."""
+        self._enabled_categories = {ToolCategory.CORE}
+        self._enabled_tools = set()
+        self._disabled_tools = set()
 
 
 class LocalHarness(Harness):
@@ -89,6 +161,9 @@ class LocalHarness(Harness):
         # Shell session state (for persistent bash sessions)
         self._shell_sessions: dict[str, dict[str, Any]] = {}
         self._shell_lock = threading.Lock()
+
+        # Active toolset for dynamic tool discovery
+        self._active_toolset = ActiveToolset()
 
         # Register default tools
         self._register_default_tools()
@@ -151,6 +226,7 @@ class LocalHarness(Harness):
 
     def _register_default_tools(self) -> None:
         """Register the standard tool set."""
+        # CORE tools - always enabled
         # Read file tool
         self.register_tool(
             name="Read",
@@ -162,6 +238,8 @@ class LocalHarness(Harness):
                 param_types={"file_path": "string", "offset": "number", "limit": "number"},
             ),
             handler=self._read_file,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
         # Edit file tool (requires prior Read)
@@ -180,6 +258,8 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._edit_file,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
         # Write file tool
@@ -193,6 +273,8 @@ class LocalHarness(Harness):
                 param_types={"file_path": "string", "content": "string"},
             ),
             handler=self._write_file,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
         # Bash tool
@@ -213,8 +295,11 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._run_bash,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
+        # SHELL tools - shell session management
         # bash_output tool - get output from background shell
         self.register_tool(
             name="bash_output",
@@ -226,6 +311,7 @@ class LocalHarness(Harness):
                 param_types={"bash_id": "string", "filter": "string"},
             ),
             handler=self._get_bash_output,
+            category=ToolCategory.SHELL,
         )
 
         # write_to_shell tool - send input to shell
@@ -243,6 +329,7 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._write_to_shell,
+            category=ToolCategory.SHELL,
         )
 
         # kill_shell tool - terminate a shell
@@ -256,8 +343,10 @@ class LocalHarness(Harness):
                 param_types={"shell_id": "string"},
             ),
             handler=self._kill_shell,
+            category=ToolCategory.SHELL,
         )
 
+        # CORE tools continued - search tools
         # grep tool - search file contents
         self.register_tool(
             name="grep",
@@ -282,6 +371,8 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._grep,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
         # glob tool - find files by pattern
@@ -295,8 +386,11 @@ class LocalHarness(Harness):
                 param_types={"pattern": "string", "path": "string"},
             ),
             handler=self._glob,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
+        # SHELL tools continued
         # wait tool - pause execution
         self.register_tool(
             name="wait",
@@ -308,8 +402,10 @@ class LocalHarness(Harness):
                 param_types={"seconds": "number"},
             ),
             handler=self._wait,
+            category=ToolCategory.SHELL,
         )
 
+        # CORE tools continued - reasoning
         # think tool - reasoning without action
         self.register_tool(
             name="think",
@@ -321,8 +417,11 @@ class LocalHarness(Harness):
                 param_types={"thought": "string"},
             ),
             handler=self._think,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
+        # TODO tools
         # TodoWrite tool - task management
         self.register_tool(
             name="TodoWrite",
@@ -334,9 +433,29 @@ class LocalHarness(Harness):
                 param_types={"todos": "array"},
             ),
             handler=self._todo_write,
+            category=ToolCategory.TODO,
         )
 
-        # message_user tool - communicate with user
+        # request_tools - dynamic tool discovery (CORE - always enabled)
+        self.register_tool(
+            name="request_tools",
+            schema=ToolSchema(
+                name="request_tools",
+                description="Request additional tools to be enabled. Use list_categories=true to see available tool categories, or specify a category or tool_names to enable specific tools.",
+                required_params=[],
+                optional_params=["category", "tool_names", "list_categories"],
+                param_types={
+                    "category": "string",
+                    "tool_names": "array",
+                    "list_categories": "boolean",
+                },
+            ),
+            handler=self._request_tools,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        # CORE tools - message_user (always enabled)
         self.register_tool(
             name="message_user",
             schema=ToolSchema(
@@ -354,9 +473,11 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._message_user,
+            category=ToolCategory.CORE,
+            is_core=True,
         )
 
-        # web_search tool - search the web
+        # SEARCH tools - web search
         self.register_tool(
             name="web_search",
             schema=ToolSchema(
@@ -374,9 +495,9 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._web_search,
+            category=ToolCategory.SEARCH,
         )
 
-        # web_get_contents tool - fetch web page contents
         self.register_tool(
             name="web_get_contents",
             schema=ToolSchema(
@@ -387,9 +508,10 @@ class LocalHarness(Harness):
                 param_types={"urls": "array"},
             ),
             handler=self._web_get_contents,
+            category=ToolCategory.SEARCH,
         )
 
-        # lsp_tool - Language Server Protocol operations
+        # LSP tools
         self.register_tool(
             name="lsp_tool",
             schema=ToolSchema(
@@ -405,9 +527,10 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._lsp_tool,
+            category=ToolCategory.LSP,
         )
 
-        # list_secrets - list available secrets
+        # SECRETS tools
         self.register_tool(
             name="list_secrets",
             schema=ToolSchema(
@@ -418,9 +541,10 @@ class LocalHarness(Harness):
                 param_types={},
             ),
             handler=self._list_secrets,
+            category=ToolCategory.SECRETS,
         )
 
-        # ask_smart_friend - consult for complex reasoning
+        # AI tools - smart friend and visual checker
         self.register_tool(
             name="ask_smart_friend",
             schema=ToolSchema(
@@ -431,9 +555,9 @@ class LocalHarness(Harness):
                 param_types={"question": "string"},
             ),
             handler=self._ask_smart_friend,
+            category=ToolCategory.AI,
         )
 
-        # visual_checker - analyze visual content
         self.register_tool(
             name="visual_checker",
             schema=ToolSchema(
@@ -444,9 +568,10 @@ class LocalHarness(Harness):
                 param_types={"question": "string"},
             ),
             handler=self._visual_checker,
+            category=ToolCategory.AI,
         )
 
-        # Git tools
+        # GIT_REMOTE tools - GitHub/GitLab API operations
         self.register_tool(
             name="git_view_pr",
             schema=ToolSchema(
@@ -457,6 +582,7 @@ class LocalHarness(Harness):
                 param_types={"repo": "string", "pull_number": "number"},
             ),
             handler=self._git_view_pr,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -476,6 +602,7 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._git_create_pr,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -488,6 +615,7 @@ class LocalHarness(Harness):
                 param_types={"repo": "string", "pull_number": "number", "force": "boolean"},
             ),
             handler=self._git_update_pr_description,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -504,6 +632,7 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._git_pr_checks,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -516,6 +645,7 @@ class LocalHarness(Harness):
                 param_types={"repo": "string", "job_id": "number"},
             ),
             handler=self._git_ci_job_logs,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -537,6 +667,7 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._git_comment_on_pr,
+            category=ToolCategory.GIT_REMOTE,
         )
 
         self.register_tool(
@@ -549,9 +680,10 @@ class LocalHarness(Harness):
                 param_types={"keyword": "string", "page": "number"},
             ),
             handler=self._list_repos,
+            category=ToolCategory.GIT_REMOTE,
         )
 
-        # Deploy tool
+        # DEPLOY tools
         self.register_tool(
             name="deploy",
             schema=ToolSchema(
@@ -562,9 +694,10 @@ class LocalHarness(Harness):
                 param_types={"command": "string", "dir": "string", "port": "number", "repo": "string", "app": "string"},
             ),
             handler=self._deploy,
+            category=ToolCategory.DEPLOY,
         )
 
-        # Recording tools
+        # RECORDING tools
         self.register_tool(
             name="recording_start",
             schema=ToolSchema(
@@ -575,6 +708,7 @@ class LocalHarness(Harness):
                 param_types={},
             ),
             handler=self._recording_start,
+            category=ToolCategory.RECORDING,
         )
 
         self.register_tool(
@@ -587,9 +721,10 @@ class LocalHarness(Harness):
                 param_types={},
             ),
             handler=self._recording_stop,
+            category=ToolCategory.RECORDING,
         )
 
-        # MCP tool
+        # MCP tools
         self.register_tool(
             name="mcp_tool",
             schema=ToolSchema(
@@ -607,9 +742,10 @@ class LocalHarness(Harness):
                 },
             ),
             handler=self._mcp_tool,
+            category=ToolCategory.MCP,
         )
 
-        # Git MCP tools (local git operations using GitPython)
+        # GIT_LOCAL tools (local git operations using GitPython)
         self.register_tool(
             name="git_status",
             schema=ToolSchema(
@@ -620,6 +756,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string"},
             ),
             handler=self._git_status,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -632,6 +769,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "context_lines": "number"},
             ),
             handler=self._git_diff_unstaged,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -644,6 +782,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "context_lines": "number"},
             ),
             handler=self._git_diff_staged,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -656,6 +795,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "target": "string", "context_lines": "number"},
             ),
             handler=self._git_diff,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -668,6 +808,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "message": "string"},
             ),
             handler=self._git_commit,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -680,6 +821,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "files": "array"},
             ),
             handler=self._git_add,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -692,6 +834,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string"},
             ),
             handler=self._git_reset,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -704,6 +847,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "max_count": "number"},
             ),
             handler=self._git_log,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -716,6 +860,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "branch_name": "string", "base_branch": "string"},
             ),
             handler=self._git_create_branch,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -728,6 +873,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "branch_name": "string"},
             ),
             handler=self._git_checkout,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -740,6 +886,7 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "revision": "string"},
             ),
             handler=self._git_show,
+            category=ToolCategory.GIT_LOCAL,
         )
 
         self.register_tool(
@@ -752,9 +899,10 @@ class LocalHarness(Harness):
                 param_types={"repo_path": "string", "show_remote": "boolean"},
             ),
             handler=self._git_branch_list,
+            category=ToolCategory.GIT_LOCAL,
         )
 
-        # Filesystem MCP tools (local file operations)
+        # FILESYSTEM tools (local file operations)
         self.register_tool(
             name="fs_read_file",
             schema=ToolSchema(
@@ -765,6 +913,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string"},
             ),
             handler=self._fs_read_file,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -777,6 +926,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string", "content": "string"},
             ),
             handler=self._fs_write_file,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -789,6 +939,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string"},
             ),
             handler=self._fs_list_directory,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -801,6 +952,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string"},
             ),
             handler=self._fs_create_directory,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -813,6 +965,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string"},
             ),
             handler=self._fs_delete,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -825,6 +978,7 @@ class LocalHarness(Harness):
                 param_types={"source": "string", "destination": "string"},
             ),
             handler=self._fs_move,
+            category=ToolCategory.FILESYSTEM,
         )
 
         self.register_tool(
@@ -837,6 +991,7 @@ class LocalHarness(Harness):
                 param_types={"path": "string"},
             ),
             handler=self._fs_file_info,
+            category=ToolCategory.FILESYSTEM,
         )
 
     def register_browser_tools(self) -> None:
@@ -1021,7 +1176,7 @@ class LocalHarness(Harness):
             ext_info = f" with extensions: {extensions}" if extensions else ""
             return f"Browser restarted{ext_info}, navigating to {url}"
 
-        # Register browser tools
+        # Register browser tools (BROWSER category)
         self.register_tool(
             name="browser_navigate",
             schema=ToolSchema(
@@ -1032,6 +1187,7 @@ class LocalHarness(Harness):
                 param_types={"url": "string", "tab_idx": "number"},
             ),
             handler=browser_navigate,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1044,6 +1200,7 @@ class LocalHarness(Harness):
                 param_types={"tab_idx": "number", "reload_window": "boolean"},
             ),
             handler=browser_view,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1056,6 +1213,7 @@ class LocalHarness(Harness):
                 param_types={"devinid": "string", "coordinates": "string", "tab_idx": "number"},
             ),
             handler=browser_click,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1074,6 +1232,7 @@ class LocalHarness(Harness):
                 },
             ),
             handler=browser_type,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1086,6 +1245,7 @@ class LocalHarness(Harness):
                 param_types={"direction": "string", "devinid": "string", "tab_idx": "number"},
             ),
             handler=browser_scroll,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1098,6 +1258,7 @@ class LocalHarness(Harness):
                 param_types={"tab_idx": "number"},
             ),
             handler=browser_screenshot,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1110,6 +1271,7 @@ class LocalHarness(Harness):
                 param_types={"content": "string", "tab_idx": "number"},
             ),
             handler=browser_console,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1122,6 +1284,7 @@ class LocalHarness(Harness):
                 param_types={"content": "string", "tab_idx": "number"},
             ),
             handler=browser_press_key,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1134,6 +1297,7 @@ class LocalHarness(Harness):
                 param_types={"devinid": "string", "coordinates": "string", "tab_idx": "number"},
             ),
             handler=browser_move_mouse,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1146,6 +1310,7 @@ class LocalHarness(Harness):
                 param_types={"index": "string", "devinid": "string", "tab_idx": "number"},
             ),
             handler=browser_select_option,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1158,6 +1323,7 @@ class LocalHarness(Harness):
                 param_types={"content": "string", "tab_idx": "number"},
             ),
             handler=browser_select_file,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1170,6 +1336,7 @@ class LocalHarness(Harness):
                 param_types={"enabled": "boolean", "tab_idx": "number"},
             ),
             handler=browser_set_mobile,
+            category=ToolCategory.BROWSER,
         )
 
         self.register_tool(
@@ -1182,6 +1349,7 @@ class LocalHarness(Harness):
                 param_types={"url": "string", "extensions": "string"},
             ),
             handler=browser_restart,
+            category=ToolCategory.BROWSER,
         )
 
     def _read_file(
@@ -1644,6 +1812,52 @@ class LocalHarness(Harness):
                 status, "[ ]"
             )
             lines.append(f"  {marker} {content}")
+
+        return "\n".join(lines)
+
+    def _request_tools(
+        self,
+        category: str | None = None,
+        tool_names: list[str] | None = None,
+        list_categories: bool = False,
+    ) -> str:
+        """Request additional tools to be enabled.
+
+        Args:
+            category: Enable all tools in a category (e.g., "git_local", "browser")
+            tool_names: Enable specific tools by name
+            list_categories: If True, list all available categories and their tools
+        """
+        if list_categories:
+            categories = self.get_available_categories()
+            lines = ["Available tool categories:"]
+            for cat_name, tools in sorted(categories.items()):
+                enabled = cat_name in [c.value for c in self._active_toolset._enabled_categories]
+                status = "[enabled]" if enabled else "[available]"
+                lines.append(f"\n{cat_name} {status}:")
+                for tool in sorted(tools):
+                    lines.append(f"  - {tool}")
+            return "\n".join(lines)
+
+        enabled_tools: list[str] = []
+
+        if category:
+            enabled_tools.extend(self.enable_category(category))
+
+        if tool_names:
+            enabled_tools.extend(self.enable_tools(tool_names))
+
+        if not enabled_tools:
+            if category:
+                return f"Error: Unknown category '{category}'. Use list_categories=true to see available categories."
+            return "Error: No tools specified. Provide 'category' or 'tool_names' parameter."
+
+        # Get descriptions for newly enabled tools
+        lines = [f"Enabled {len(enabled_tools)} tools:"]
+        for name in enabled_tools:
+            tool = self._tools.get(name)
+            if tool:
+                lines.append(f"  - {name}: {tool.schema.description}")
 
         return "\n".join(lines)
 
@@ -3845,6 +4059,8 @@ Permissions: {mode}"""
         name: str,
         schema: ToolSchema,
         handler: Callable[..., str],
+        category: ToolCategory = ToolCategory.CORE,
+        is_core: bool = False,
     ) -> None:
         """Register a tool with the harness."""
         envelope_type = "generic"
@@ -3858,6 +4074,8 @@ Permissions: {mode}"""
             schema=schema,
             handler=handler,
             envelope_type=envelope_type,
+            category=category,
+            is_core=is_core,
         )
 
     def validate_schema(
@@ -4103,9 +4321,21 @@ Permissions: {mode}"""
         self._event_log.clear()
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
-        """Get OpenAI-format schemas for all registered tools."""
+        """Get OpenAI-format schemas for all registered tools (ignores active toolset)."""
+        return self._build_schemas(self._tools.values())
+
+    def get_active_tool_schemas(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format schemas for only the currently active tools."""
+        active_tools = [
+            tool for tool in self._tools.values()
+            if self._active_toolset.is_enabled(tool)
+        ]
+        return self._build_schemas(active_tools)
+
+    def _build_schemas(self, tools: list[RegisteredTool] | Any) -> list[dict[str, Any]]:
+        """Build OpenAI-format schemas from a list of tools."""
         schemas = []
-        for tool in self._tools.values():
+        for tool in tools:
             properties = {}
             for param in tool.schema.required_params + tool.schema.optional_params:
                 param_type = tool.schema.param_types.get(param, "string")
@@ -4124,3 +4354,41 @@ Permissions: {mode}"""
                 },
             })
         return schemas
+
+    def get_available_categories(self) -> dict[str, list[str]]:
+        """Get all available tool categories and their tools."""
+        categories: dict[str, list[str]] = {}
+        for tool in self._tools.values():
+            cat_name = tool.category.value
+            if cat_name not in categories:
+                categories[cat_name] = []
+            categories[cat_name].append(tool.name)
+        return categories
+
+    def enable_category(self, category_name: str) -> list[str]:
+        """Enable a tool category and return the list of newly enabled tools."""
+        try:
+            category = ToolCategory(category_name)
+        except ValueError:
+            return []
+
+        self._active_toolset.enable_category(category)
+
+        # Return list of tools in this category
+        return [
+            tool.name for tool in self._tools.values()
+            if tool.category == category
+        ]
+
+    def enable_tools(self, tool_names: list[str]) -> list[str]:
+        """Enable specific tools by name and return the list of successfully enabled tools."""
+        enabled = []
+        for name in tool_names:
+            if name in self._tools:
+                self._active_toolset.enable_tool(name)
+                enabled.append(name)
+        return enabled
+
+    def reset_active_toolset(self) -> None:
+        """Reset the active toolset to default (only CORE tools)."""
+        self._active_toolset.reset()
