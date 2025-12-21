@@ -631,7 +631,7 @@ class LocalHarness(Harness):
             page_state = result.page_state
             if page_state:
                 elements_info = "\n".join(
-                    f"  [{e.element_id}] {e.tag_name}: {e.text[:50] if e.text else ''}"
+                    f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
                 )
                 return f"Navigated to {url}\n\nPage title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
@@ -645,7 +645,7 @@ class LocalHarness(Harness):
             page_state = result.page_state
             if page_state:
                 elements_info = "\n".join(
-                    f"  [{e.element_id}] {e.tag_name}: {e.text[:50] if e.text else ''}"
+                    f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
                 )
                 return f"Page title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
@@ -690,7 +690,9 @@ class LocalHarness(Harness):
             tab_idx: int | None = None,
         ) -> str:
             browser = _ensure_browser()
-            result = browser.scroll(direction=direction, element_id=devinid)
+            # "page" means scroll the whole page, not an element
+            element_id = None if devinid == "page" else devinid
+            result = browser.scroll(direction=direction, element_id=element_id)
             if result.error:
                 return f"Error: {result.error}"
             return f"Scrolled {direction}"
@@ -700,8 +702,8 @@ class LocalHarness(Harness):
             result = browser.screenshot(full_page=full_page)
             if result.error:
                 return f"Error: {result.error}"
-            if result.screenshot_path:
-                return f"Screenshot saved to: {result.screenshot_path}"
+            if result.details and result.details.get("path"):
+                return f"Screenshot saved to: {result.details['path']}"
             return "Screenshot taken"
 
         def browser_console(content: str | None = None, tab_idx: int | None = None) -> str:
@@ -710,7 +712,8 @@ class LocalHarness(Harness):
                 result = browser.execute_js(content)
                 if result.error:
                     return f"Error: {result.error}"
-                return f"Executed JS: {result.data}"
+                js_result = result.details.get("result", "") if result.details else ""
+                return f"Executed JS: {js_result}"
             return "No JS to execute"
 
         def browser_press_key(content: str, tab_idx: int | None = None) -> str:
