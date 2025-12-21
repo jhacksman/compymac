@@ -2584,6 +2584,7 @@ URL: {comment_url}"""
         """
         import base64
         import hashlib
+
         import httpx
 
         valid_commands = ["frontend", "backend", "logs", "expose"]
@@ -2693,7 +2694,7 @@ Steps to configure:
                 # Create commit
                 commit_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/commits"
                 commit_data = {
-                    "message": f"Deploy to GitHub Pages via CompyMac",
+                    "message": "Deploy to GitHub Pages via CompyMac",
                     "tree": tree_sha,
                 }
                 if parent_sha:
