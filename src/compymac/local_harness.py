@@ -609,6 +609,236 @@ class LocalHarness(Harness):
             handler=self._mcp_tool,
         )
 
+        # Git MCP tools (local git operations using GitPython)
+        self.register_tool(
+            name="git_status",
+            schema=ToolSchema(
+                name="git_status",
+                description="Get the status of a git repository",
+                required_params=["repo_path"],
+                optional_params=[],
+                param_types={"repo_path": "string"},
+            ),
+            handler=self._git_status,
+        )
+
+        self.register_tool(
+            name="git_diff_unstaged",
+            schema=ToolSchema(
+                name="git_diff_unstaged",
+                description="Get diff of unstaged changes in a git repository",
+                required_params=["repo_path"],
+                optional_params=["context_lines"],
+                param_types={"repo_path": "string", "context_lines": "number"},
+            ),
+            handler=self._git_diff_unstaged,
+        )
+
+        self.register_tool(
+            name="git_diff_staged",
+            schema=ToolSchema(
+                name="git_diff_staged",
+                description="Get diff of staged changes in a git repository",
+                required_params=["repo_path"],
+                optional_params=["context_lines"],
+                param_types={"repo_path": "string", "context_lines": "number"},
+            ),
+            handler=self._git_diff_staged,
+        )
+
+        self.register_tool(
+            name="git_diff",
+            schema=ToolSchema(
+                name="git_diff",
+                description="Get diff between current state and a target (branch, commit, tag)",
+                required_params=["repo_path", "target"],
+                optional_params=["context_lines"],
+                param_types={"repo_path": "string", "target": "string", "context_lines": "number"},
+            ),
+            handler=self._git_diff,
+        )
+
+        self.register_tool(
+            name="git_commit",
+            schema=ToolSchema(
+                name="git_commit",
+                description="Commit staged changes with a message",
+                required_params=["repo_path", "message"],
+                optional_params=[],
+                param_types={"repo_path": "string", "message": "string"},
+            ),
+            handler=self._git_commit,
+        )
+
+        self.register_tool(
+            name="git_add",
+            schema=ToolSchema(
+                name="git_add",
+                description="Stage files for commit",
+                required_params=["repo_path", "files"],
+                optional_params=[],
+                param_types={"repo_path": "string", "files": "array"},
+            ),
+            handler=self._git_add,
+        )
+
+        self.register_tool(
+            name="git_reset",
+            schema=ToolSchema(
+                name="git_reset",
+                description="Unstage all staged changes",
+                required_params=["repo_path"],
+                optional_params=[],
+                param_types={"repo_path": "string"},
+            ),
+            handler=self._git_reset,
+        )
+
+        self.register_tool(
+            name="git_log",
+            schema=ToolSchema(
+                name="git_log",
+                description="Get commit history",
+                required_params=["repo_path"],
+                optional_params=["max_count"],
+                param_types={"repo_path": "string", "max_count": "number"},
+            ),
+            handler=self._git_log,
+        )
+
+        self.register_tool(
+            name="git_create_branch",
+            schema=ToolSchema(
+                name="git_create_branch",
+                description="Create a new branch",
+                required_params=["repo_path", "branch_name"],
+                optional_params=["base_branch"],
+                param_types={"repo_path": "string", "branch_name": "string", "base_branch": "string"},
+            ),
+            handler=self._git_create_branch,
+        )
+
+        self.register_tool(
+            name="git_checkout",
+            schema=ToolSchema(
+                name="git_checkout",
+                description="Switch to a branch",
+                required_params=["repo_path", "branch_name"],
+                optional_params=[],
+                param_types={"repo_path": "string", "branch_name": "string"},
+            ),
+            handler=self._git_checkout,
+        )
+
+        self.register_tool(
+            name="git_show",
+            schema=ToolSchema(
+                name="git_show",
+                description="Show details of a commit",
+                required_params=["repo_path", "revision"],
+                optional_params=[],
+                param_types={"repo_path": "string", "revision": "string"},
+            ),
+            handler=self._git_show,
+        )
+
+        self.register_tool(
+            name="git_branch_list",
+            schema=ToolSchema(
+                name="git_branch_list",
+                description="List branches in a repository",
+                required_params=["repo_path"],
+                optional_params=["show_remote"],
+                param_types={"repo_path": "string", "show_remote": "boolean"},
+            ),
+            handler=self._git_branch_list,
+        )
+
+        # Filesystem MCP tools (local file operations)
+        self.register_tool(
+            name="fs_read_file",
+            schema=ToolSchema(
+                name="fs_read_file",
+                description="Read contents of a file",
+                required_params=["path"],
+                optional_params=[],
+                param_types={"path": "string"},
+            ),
+            handler=self._fs_read_file,
+        )
+
+        self.register_tool(
+            name="fs_write_file",
+            schema=ToolSchema(
+                name="fs_write_file",
+                description="Write contents to a file",
+                required_params=["path", "content"],
+                optional_params=[],
+                param_types={"path": "string", "content": "string"},
+            ),
+            handler=self._fs_write_file,
+        )
+
+        self.register_tool(
+            name="fs_list_directory",
+            schema=ToolSchema(
+                name="fs_list_directory",
+                description="List contents of a directory",
+                required_params=["path"],
+                optional_params=[],
+                param_types={"path": "string"},
+            ),
+            handler=self._fs_list_directory,
+        )
+
+        self.register_tool(
+            name="fs_create_directory",
+            schema=ToolSchema(
+                name="fs_create_directory",
+                description="Create a directory (and parent directories if needed)",
+                required_params=["path"],
+                optional_params=[],
+                param_types={"path": "string"},
+            ),
+            handler=self._fs_create_directory,
+        )
+
+        self.register_tool(
+            name="fs_delete",
+            schema=ToolSchema(
+                name="fs_delete",
+                description="Delete a file or empty directory",
+                required_params=["path"],
+                optional_params=[],
+                param_types={"path": "string"},
+            ),
+            handler=self._fs_delete,
+        )
+
+        self.register_tool(
+            name="fs_move",
+            schema=ToolSchema(
+                name="fs_move",
+                description="Move or rename a file or directory",
+                required_params=["source", "destination"],
+                optional_params=[],
+                param_types={"source": "string", "destination": "string"},
+            ),
+            handler=self._fs_move,
+        )
+
+        self.register_tool(
+            name="fs_file_info",
+            schema=ToolSchema(
+                name="fs_file_info",
+                description="Get metadata about a file or directory",
+                required_params=["path"],
+                optional_params=[],
+                param_types={"path": "string"},
+            ),
+            handler=self._fs_file_info,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -3281,6 +3511,334 @@ Once configured, you can:
 
             else:
                 return f"Unknown command: {command}"
+
+    def _git_status(self, repo_path: str) -> str:
+        """Get the status of a git repository."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            return repo.git.status()
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except git.NoSuchPathError:
+            return f"Error: Path '{repo_path}' does not exist"
+        except Exception as e:
+            return f"Error getting git status: {e}"
+
+    def _git_diff_unstaged(self, repo_path: str, context_lines: int = 3) -> str:
+        """Get diff of unstaged changes."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            diff = repo.git.diff(f"--unified={context_lines}")
+            return diff if diff else "No unstaged changes"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error getting unstaged diff: {e}"
+
+    def _git_diff_staged(self, repo_path: str, context_lines: int = 3) -> str:
+        """Get diff of staged changes."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            diff = repo.git.diff(f"--unified={context_lines}", "--cached")
+            return diff if diff else "No staged changes"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error getting staged diff: {e}"
+
+    def _git_diff(self, repo_path: str, target: str, context_lines: int = 3) -> str:
+        """Get diff between current state and a target."""
+        import git
+        from git.exc import BadName
+
+        try:
+            if target.startswith("-"):
+                return f"Error: Invalid target '{target}' - cannot start with '-'"
+            repo = git.Repo(repo_path)
+            repo.rev_parse(target)
+            diff = repo.git.diff(f"--unified={context_lines}", target)
+            return diff if diff else f"No differences from {target}"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except BadName:
+            return f"Error: Invalid git reference '{target}'"
+        except Exception as e:
+            return f"Error getting diff: {e}"
+
+    def _git_commit(self, repo_path: str, message: str) -> str:
+        """Commit staged changes."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            if not repo.index.diff("HEAD") and not repo.untracked_files:
+                staged = list(repo.index.diff("HEAD", staged=True))
+                if not staged:
+                    return "Error: No changes staged for commit"
+            commit = repo.index.commit(message)
+            return f"Committed: {commit.hexsha[:8]} - {message}"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error committing: {e}"
+
+    def _git_add(self, repo_path: str, files: list[str]) -> str:
+        """Stage files for commit."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            repo.index.add(files)
+            return f"Staged {len(files)} file(s): {', '.join(files)}"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error staging files: {e}"
+
+    def _git_reset(self, repo_path: str) -> str:
+        """Unstage all staged changes."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            repo.index.reset()
+            return "Unstaged all changes"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error resetting: {e}"
+
+    def _git_log(self, repo_path: str, max_count: int = 10) -> str:
+        """Get commit history."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            commits = list(repo.iter_commits(max_count=max_count))
+            if not commits:
+                return "No commits found"
+            log_lines = []
+            for c in commits:
+                date = c.committed_datetime.strftime("%Y-%m-%d %H:%M")
+                msg = c.message.split("\n")[0][:60]
+                log_lines.append(f"{c.hexsha[:8]} {date} {msg}")
+            return "\n".join(log_lines)
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error getting log: {e}"
+
+    def _git_create_branch(
+        self, repo_path: str, branch_name: str, base_branch: str | None = None
+    ) -> str:
+        """Create a new branch."""
+        import git
+
+        try:
+            if branch_name.startswith("-"):
+                return f"Error: Invalid branch name '{branch_name}' - cannot start with '-'"
+            repo = git.Repo(repo_path)
+            if base_branch:
+                if base_branch.startswith("-"):
+                    return f"Error: Invalid base branch '{base_branch}' - cannot start with '-'"
+                base = repo.refs[base_branch]
+                new_branch = repo.create_head(branch_name, base)
+            else:
+                new_branch = repo.create_head(branch_name)
+            return f"Created branch '{new_branch.name}'"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error creating branch: {e}"
+
+    def _git_checkout(self, repo_path: str, branch_name: str) -> str:
+        """Switch to a branch."""
+        import git
+
+        try:
+            if branch_name.startswith("-"):
+                return f"Error: Invalid branch name '{branch_name}' - cannot start with '-'"
+            repo = git.Repo(repo_path)
+            repo.git.checkout(branch_name)
+            return f"Switched to branch '{branch_name}'"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error checking out branch: {e}"
+
+    def _git_show(self, repo_path: str, revision: str) -> str:
+        """Show details of a commit."""
+        import git
+
+        try:
+            if revision.startswith("-"):
+                return f"Error: Invalid revision '{revision}' - cannot start with '-'"
+            repo = git.Repo(repo_path)
+            return repo.git.show(revision)
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error showing revision: {e}"
+
+    def _git_branch_list(self, repo_path: str, show_remote: bool = False) -> str:
+        """List branches in a repository."""
+        import git
+
+        try:
+            repo = git.Repo(repo_path)
+            branches = []
+            for branch in repo.heads:
+                prefix = "* " if branch == repo.active_branch else "  "
+                branches.append(f"{prefix}{branch.name}")
+            if show_remote:
+                for ref in repo.remotes.origin.refs:
+                    branches.append(f"  remotes/{ref.name}")
+            return "\n".join(branches) if branches else "No branches found"
+        except git.InvalidGitRepositoryError:
+            return f"Error: '{repo_path}' is not a valid git repository"
+        except Exception as e:
+            return f"Error listing branches: {e}"
+
+    def _fs_read_file(self, path: str) -> str:
+        """Read contents of a file."""
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            if not p.exists():
+                return f"Error: File '{path}' does not exist"
+            if not p.is_file():
+                return f"Error: '{path}' is not a file"
+            content = p.read_text(encoding="utf-8")
+            return content
+        except PermissionError:
+            return f"Error: Permission denied reading '{path}'"
+        except UnicodeDecodeError:
+            return f"Error: File '{path}' is not a valid UTF-8 text file"
+        except Exception as e:
+            return f"Error reading file: {e}"
+
+    def _fs_write_file(self, path: str, content: str) -> str:
+        """Write contents to a file."""
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return f"Wrote {len(content)} bytes to '{path}'"
+        except PermissionError:
+            return f"Error: Permission denied writing to '{path}'"
+        except Exception as e:
+            return f"Error writing file: {e}"
+
+    def _fs_list_directory(self, path: str) -> str:
+        """List contents of a directory."""
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            if not p.exists():
+                return f"Error: Directory '{path}' does not exist"
+            if not p.is_dir():
+                return f"Error: '{path}' is not a directory"
+            entries = []
+            for entry in sorted(p.iterdir()):
+                entry_type = "d" if entry.is_dir() else "f"
+                entries.append(f"[{entry_type}] {entry.name}")
+            return "\n".join(entries) if entries else "Directory is empty"
+        except PermissionError:
+            return f"Error: Permission denied accessing '{path}'"
+        except Exception as e:
+            return f"Error listing directory: {e}"
+
+    def _fs_create_directory(self, path: str) -> str:
+        """Create a directory."""
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            p.mkdir(parents=True, exist_ok=True)
+            return f"Created directory '{path}'"
+        except PermissionError:
+            return f"Error: Permission denied creating '{path}'"
+        except Exception as e:
+            return f"Error creating directory: {e}"
+
+    def _fs_delete(self, path: str) -> str:
+        """Delete a file or empty directory."""
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            if not p.exists():
+                return f"Error: '{path}' does not exist"
+            if p.is_file():
+                p.unlink()
+                return f"Deleted file '{path}'"
+            elif p.is_dir():
+                p.rmdir()
+                return f"Deleted directory '{path}'"
+            else:
+                return f"Error: '{path}' is not a file or directory"
+        except PermissionError:
+            return f"Error: Permission denied deleting '{path}'"
+        except OSError as e:
+            if "not empty" in str(e).lower() or "directory not empty" in str(e).lower():
+                return f"Error: Directory '{path}' is not empty"
+            return f"Error deleting: {e}"
+        except Exception as e:
+            return f"Error deleting: {e}"
+
+    def _fs_move(self, source: str, destination: str) -> str:
+        """Move or rename a file or directory."""
+        import shutil
+        from pathlib import Path
+
+        try:
+            src = Path(source)
+            dst = Path(destination)
+            if not src.exists():
+                return f"Error: Source '{source}' does not exist"
+            shutil.move(str(src), str(dst))
+            return f"Moved '{source}' to '{destination}'"
+        except PermissionError:
+            return "Error: Permission denied"
+        except Exception as e:
+            return f"Error moving: {e}"
+
+    def _fs_file_info(self, path: str) -> str:
+        """Get metadata about a file or directory."""
+        import stat
+        from datetime import datetime
+        from pathlib import Path
+
+        try:
+            p = Path(path)
+            if not p.exists():
+                return f"Error: '{path}' does not exist"
+            st = p.stat()
+            file_type = "directory" if p.is_dir() else "file"
+            size = st.st_size
+            modified = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            created = datetime.fromtimestamp(st.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
+            mode = stat.filemode(st.st_mode)
+            return f"""Path: {path}
+Type: {file_type}
+Size: {size} bytes
+Modified: {modified}
+Created: {created}
+Permissions: {mode}"""
+        except PermissionError:
+            return f"Error: Permission denied accessing '{path}'"
+        except Exception as e:
+            return f"Error getting file info: {e}"
 
     def register_tool(
         self,
