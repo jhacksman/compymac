@@ -556,10 +556,10 @@ class LocalHarness(Harness):
             name="deploy",
             schema=ToolSchema(
                 name="deploy",
-                description="Deploy applications: frontend (static to GitHub Pages), backend (FastAPI), logs, or expose local port",
+                description="Deploy applications: frontend (static to GitHub Pages), backend (FastAPI to Fly.io), logs (view Fly.io logs), or expose local port",
                 required_params=["command"],
-                optional_params=["dir", "port", "repo"],
-                param_types={"command": "string", "dir": "string", "port": "number", "repo": "string"},
+                optional_params=["dir", "port", "repo", "app"],
+                param_types={"command": "string", "dir": "string", "port": "number", "repo": "string", "app": "string"},
             ),
             handler=self._deploy,
         )
@@ -2570,6 +2570,7 @@ URL: {comment_url}"""
         dir: str | None = None,
         port: int | None = None,
         repo: str | None = None,
+        app: str | None = None,
     ) -> str:
         """Deploy applications using GitHub Pages, Fly.io, or ngrok.
 
@@ -2578,12 +2579,15 @@ URL: {comment_url}"""
             dir: Directory containing the build files to deploy
             port: Port to expose (for 'expose' command)
             repo: GitHub repo in owner/repo format (for 'frontend' command)
+            app: App name for Fly.io (for 'logs' command)
 
         Returns:
             Deployment result or error message
         """
         import base64
         import hashlib
+        import shutil
+        import subprocess
 
         import httpx
 
@@ -2595,6 +2599,14 @@ URL: {comment_url}"""
         github_token = os.environ.get("GITHUB_TOKEN")
         fly_token = os.environ.get("FLY_API_TOKEN")
         ngrok_token = os.environ.get("NGROK_AUTHTOKEN")
+
+        # Find flyctl binary
+        flyctl_path = shutil.which("flyctl") or shutil.which("fly")
+        if not flyctl_path:
+            # Check common installation paths
+            home_fly = os.path.expanduser("~/.fly/bin/flyctl")
+            if os.path.exists(home_fly):
+                flyctl_path = home_fly
 
         if command == "frontend":
             if not github_token:
@@ -2773,16 +2785,153 @@ Steps to configure:
 
 Alternative: You can manually deploy by running:
   flyctl launch && flyctl deploy"""
-            # TODO: Implement actual Fly.io deployment when token is available
-            return "Error: Fly.io deployment not yet implemented. Token is configured but integration pending."
+
+            if not flyctl_path:
+                return """Error: flyctl not found.
+
+Install flyctl to enable Fly.io deployment:
+  curl -L https://fly.io/install.sh | sh
+
+Then add to PATH:
+  export PATH="$HOME/.fly/bin:$PATH"
+"""
+
+            if not dir:
+                return "Error: 'dir' parameter required for backend deployment. Specify the directory containing your FastAPI app."
+
+            if not os.path.isdir(dir):
+                return f"Error: Directory not found: {dir}"
+
+            # Check for fly.toml or create one
+            fly_toml = os.path.join(dir, "fly.toml")
+            has_fly_toml = os.path.exists(fly_toml)
+
+            env = os.environ.copy()
+            env["FLY_API_TOKEN"] = fly_token
+
+            try:
+                if not has_fly_toml:
+                    # Launch new app (creates fly.toml)
+                    app_name = f"compymac-{int(time.time())}"
+                    launch_cmd = [
+                        flyctl_path, "launch",
+                        "--name", app_name,
+                        "--no-deploy",
+                        "--yes",
+                        "--region", "iad",
+                    ]
+                    result = subprocess.run(
+                        launch_cmd,
+                        cwd=dir,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    if result.returncode != 0:
+                        return f"Error launching app: {result.stderr or result.stdout}"
+
+                # Deploy the app
+                deploy_cmd = [flyctl_path, "deploy", "--yes"]
+                result = subprocess.run(
+                    deploy_cmd,
+                    cwd=dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,  # 10 minute timeout for deploy
+                )
+
+                if result.returncode != 0:
+                    return f"Deployment failed: {result.stderr or result.stdout}"
+
+                # Get the app URL
+                status_cmd = [flyctl_path, "status", "--json"]
+                status_result = subprocess.run(
+                    status_cmd,
+                    cwd=dir,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+                app_url = None
+                if status_result.returncode == 0:
+                    try:
+                        import json
+                        status_data = json.loads(status_result.stdout)
+                        app_name = status_data.get("Name", "")
+                        if app_name:
+                            app_url = f"https://{app_name}.fly.dev"
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+                output = f"Deployment successful!\n\n{result.stdout}"
+                if app_url:
+                    output += f"\n\nApp URL: {app_url}"
+                return output
+
+            except subprocess.TimeoutExpired:
+                return "Error: Deployment timed out after 10 minutes"
+            except Exception as e:
+                return f"Error during deployment: {e}"
 
         elif command == "logs":
             if not fly_token:
                 return """Error: Cannot fetch logs - deployment not configured.
 
 Set FLY_API_TOKEN to enable log fetching from Fly.io deployments."""
-            # TODO: Implement actual log fetching
-            return "Error: Log fetching not yet implemented."
+
+            if not flyctl_path:
+                return """Error: flyctl not found.
+
+Install flyctl to fetch logs:
+  curl -L https://fly.io/install.sh | sh"""
+
+            env = os.environ.copy()
+            env["FLY_API_TOKEN"] = fly_token
+
+            try:
+                # If dir is provided, use it as working directory (to find fly.toml)
+                cwd = dir if dir and os.path.isdir(dir) else None
+
+                # Build logs command with optional app name
+                logs_cmd = [flyctl_path, "logs", "--no-tail"]
+                if app:
+                    logs_cmd.extend(["-a", app])
+
+                result = subprocess.run(
+                    logs_cmd,
+                    cwd=cwd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,  # 60 second timeout for logs
+                )
+
+                if result.returncode != 0:
+                    # Try to list apps if no fly.toml found
+                    if "Could not find" in result.stderr or "no app" in result.stderr.lower() or "missing an app" in result.stderr.lower():
+                        list_cmd = [flyctl_path, "apps", "list"]
+                        list_result = subprocess.run(
+                            list_cmd,
+                            env=env,
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                        )
+                        return f"No app specified. Available apps:\n{list_result.stdout}\n\nUse 'app' parameter to specify app name, or 'dir' to specify app directory with fly.toml"
+
+                    return f"Error fetching logs: {result.stderr or result.stdout}"
+
+                app_name = app or "current app"
+                return f"Recent logs for {app_name}:\n\n{result.stdout}"
+
+            except subprocess.TimeoutExpired:
+                return "Error: Log fetch timed out"
+            except Exception as e:
+                return f"Error fetching logs: {e}"
 
         else:  # expose
             if not ngrok_token:
