@@ -198,3 +198,7 @@ class HarnessConfig:
     # Parallel execution (Experiments 7.5, 7.12)
     parallel_dispatch: bool = True
     min_parallel_calls: int = 10
+
+    # Safety policy enforcement (Gap 3)
+    # Disabled by default for backward compatibility
+    enable_safety_policies: bool = False
