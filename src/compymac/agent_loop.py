@@ -214,13 +214,15 @@ class AgentLoop:
         if self._trace_context and llm_span_id:
             from compymac.trace_store import SpanStatus
 
-            # Store LLM output as artifact
+            # Store LLM output as artifact (including token usage for total capture)
             llm_output_data = json.dumps({
                 "content": response.content,
                 "tool_calls": [
                     {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                     for tc in (response.tool_calls or [])
                 ],
+                "usage": response.usage.to_dict(),
+                "finish_reason": response.finish_reason,
             }).encode()
             llm_output_artifact = self._trace_context.store_artifact(
                 data=llm_output_data,
