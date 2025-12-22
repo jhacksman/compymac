@@ -41,6 +41,10 @@ from compymac.harness_spec import (
     truncate_output,
 )
 from compymac.types import ToolCall, ToolResult
+from compymac.verification import (
+    VerificationEngine,
+    VerificationResult,
+)
 
 if TYPE_CHECKING:
     from compymac.trace_store import TraceContext
@@ -166,6 +170,12 @@ class LocalHarness(Harness):
 
         # Active toolset for dynamic tool discovery
         self._active_toolset = ActiveToolset()
+
+        # Verification engine for contract-driven execution
+        self._verification_engine = VerificationEngine(enabled=True)
+
+        # Store last verification result for agent consumption
+        self._last_verification_result: VerificationResult | None = None
 
         # Register default tools
         self._register_default_tools()
@@ -4806,28 +4816,69 @@ Permissions: {mode}"""
             result_length=len(wrapped),
         )
 
+        # Verify tool execution using contract-driven verification
+        verification_result: VerificationResult | None = None
+        verification_info = ""
+        if self._verification_engine.enabled:
+            tool_result_for_verification = ToolResult(
+                tool_call_id=call_id,
+                content=result,
+                success=True,
+            )
+            verification_result = self._verification_engine.verify(
+                tool_call, tool_result_for_verification
+            )
+            self._last_verification_result = verification_result
+
+            if verification_result:
+                self._event_log.log_event(
+                    EventType.TOOL_RESULT_RETURNED,
+                    call_id,
+                    verification_passed=verification_result.all_checks_passed,
+                    verification_confidence=verification_result.confidence_score,
+                )
+
+                if not verification_result.all_checks_passed:
+                    verification_info = f"\n\n[VERIFICATION WARNING]\n{verification_result.format_for_agent()}"
+
         # End trace span with success if tracing
         output_artifact_hash: str | None = None
         if trace_ctx and span_id:
             from compymac.trace_store import SpanStatus
 
-            # Store output as artifact
+            # Store output as artifact (include verification info if present)
+            output_content = wrapped + verification_info
             output_artifact = trace_ctx.store_artifact(
-                data=wrapped.encode(),
+                data=output_content.encode(),
                 artifact_type="tool_output",
                 content_type="text/xml",
-                metadata={"tool_name": tool.name, "call_id": call_id},
+                metadata={
+                    "tool_name": tool.name,
+                    "call_id": call_id,
+                    "verification_passed": verification_result.all_checks_passed if verification_result else None,
+                    "verification_confidence": verification_result.confidence_score if verification_result else None,
+                },
             )
             output_artifact_hash = output_artifact.artifact_hash
 
-            trace_ctx.end_span(
-                status=SpanStatus.OK,
-                output_artifact_hash=output_artifact_hash,
-            )
+            # Set span status based on verification result
+            if verification_result and not verification_result.all_checks_passed:
+                trace_ctx.end_span(
+                    status=SpanStatus.OK,
+                    output_artifact_hash=output_artifact_hash,
+                    attributes={
+                        "verification_warning": verification_result.failure_summary(),
+                    },
+                )
+            else:
+                trace_ctx.end_span(
+                    status=SpanStatus.OK,
+                    output_artifact_hash=output_artifact_hash,
+                )
 
         return ToolResult(
             tool_call_id=call_id,
-            content=wrapped,
+            content=wrapped + verification_info,
             success=True,
         )
 
