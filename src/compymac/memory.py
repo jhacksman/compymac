@@ -34,9 +34,14 @@ class MemoryFacts:
     errors_encountered: list[str] = field(default_factory=list)
     user_requirements: list[str] = field(default_factory=list)
     decisions_made: list[str] = field(default_factory=list)
+    # Structured context schema fields (from game plan)
+    contract_goal: str = ""  # What the user wants accomplished
+    current_plan: list[str] = field(default_factory=list)  # Current plan steps
+    repo_facts: dict[str, str] = field(default_factory=dict)  # Known repo info (build cmd, test cmd, etc)
+    open_questions: list[str] = field(default_factory=list)  # Unresolved questions
 
-    def to_dict(self) -> dict[str, list[str]]:
-        return {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "files_created": self.files_created[-5:],  # Keep last 5
             "files_modified": self.files_modified[-5:],
             "files_read": self.files_read[-10:],
@@ -45,10 +50,31 @@ class MemoryFacts:
             "user_requirements": self.user_requirements,
             "decisions_made": self.decisions_made[-5:],
         }
+        # Add structured context schema fields if populated
+        if self.contract_goal:
+            result["contract_goal"] = self.contract_goal
+        if self.current_plan:
+            result["current_plan"] = self.current_plan
+        if self.repo_facts:
+            result["repo_facts"] = self.repo_facts
+        if self.open_questions:
+            result["open_questions"] = self.open_questions
+        return result
 
     def to_string(self) -> str:
         """Convert facts to a compact string representation."""
         parts = []
+        # Structured context schema fields first (highest priority)
+        if self.contract_goal:
+            parts.append(f"Goal: {self.contract_goal}")
+        if self.current_plan:
+            parts.append(f"Plan: {' -> '.join(self.current_plan[:5])}")
+        if self.open_questions:
+            parts.append(f"Open questions: {'; '.join(self.open_questions[-3:])}")
+        if self.repo_facts:
+            repo_info = [f"{k}: {v}" for k, v in list(self.repo_facts.items())[:5]]
+            parts.append(f"Repo: {', '.join(repo_info)}")
+        # Original facts
         if self.files_created:
             parts.append(f"Files created: {', '.join(self.files_created[-5:])}")
         if self.files_modified:
@@ -374,6 +400,47 @@ Summary:"""
     def reset(self) -> None:
         """Reset memory state."""
         self.state = MemoryState()
+
+    # Structured context schema setters
+    def set_contract_goal(self, goal: str) -> None:
+        """Set the contract/goal for the current task."""
+        self.state.facts.contract_goal = goal
+        logger.debug(f"Set contract goal: {goal[:100]}...")
+
+    def set_current_plan(self, plan_steps: list[str]) -> None:
+        """Set the current plan steps."""
+        self.state.facts.current_plan = plan_steps
+        logger.debug(f"Set plan with {len(plan_steps)} steps")
+
+    def add_plan_step(self, step: str) -> None:
+        """Add a step to the current plan."""
+        self.state.facts.current_plan.append(step)
+
+    def complete_plan_step(self, step_index: int) -> None:
+        """Mark a plan step as complete by removing it."""
+        if 0 <= step_index < len(self.state.facts.current_plan):
+            completed = self.state.facts.current_plan.pop(step_index)
+            logger.debug(f"Completed plan step: {completed}")
+
+    def set_repo_facts(self, facts: dict[str, str]) -> None:
+        """Set known repo facts (build cmd, test cmd, lint cmd, etc)."""
+        self.state.facts.repo_facts = facts
+        logger.debug(f"Set repo facts: {list(facts.keys())}")
+
+    def add_repo_fact(self, key: str, value: str) -> None:
+        """Add a single repo fact."""
+        self.state.facts.repo_facts[key] = value
+
+    def add_open_question(self, question: str) -> None:
+        """Add an open question that needs resolution."""
+        self.state.facts.open_questions.append(question)
+        logger.debug(f"Added open question: {question[:50]}...")
+
+    def resolve_question(self, question_index: int) -> None:
+        """Resolve an open question by removing it."""
+        if 0 <= question_index < len(self.state.facts.open_questions):
+            resolved = self.state.facts.open_questions.pop(question_index)
+            logger.debug(f"Resolved question: {resolved[:50]}...")
 
 
 class ToolOutputSummarizer:
