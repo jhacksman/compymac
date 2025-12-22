@@ -121,6 +121,15 @@ Research on parallel and concurrent execution strategies for LLM agents. Covers 
 - arXiv:2507.17061 - "Parallelism Meets Adaptiveness: Scalable Documents Understanding"
 - arXiv:2503.03505 - "Parallelized Planning-Acting for Efficient LLM-based Multi-Agent Systems"
 
+### [Total Execution Capture and Custodial Observability](execution-capture-observability.md)
+Research on complete execution capture, pause/resume capabilities, time-travel debugging, and custodial access for LLM agents. Covers total visibility into every token, every step, every tool call with database storage and drill-down capability.
+
+**Key Papers**:
+- arXiv:2411.05285 - "AgentOps: Enabling Observability of LLM Agents"
+- arXiv:2411.03455 - "Watson: A Cognitive Observability Framework"
+- arXiv:2505.17716 - "AgentRR: Record & Replay for LLM Agents"
+- arXiv:2503.06745 - "Beyond Black-Box Benchmarking: Observability, Analytics, and Optimization"
+
 ## How This Informs CompyMac
 
 | Research Area | CompyMac Implementation |
@@ -138,6 +147,7 @@ Research on parallel and concurrent execution strategies for LLM agents. Covers 
 | Tool Reliability | Error envelopes, recovery strategies |
 | Planning & Termination | Completion verification, stuckness detection |
 | Parallelization | ForkedTraceContext, ToolConflictModel, ParallelExecutor |
+| Execution Capture | TraceStore (needs: checkpoint/resume, database storage, time-travel) |
 
 ## Adding New Research
 
