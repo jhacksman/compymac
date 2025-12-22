@@ -330,9 +330,15 @@ This section lists every tool available in this session with granular detail.
 |------|-----------------|-----------------|--------|
 | **message_user** | message, block_on_user, should_use_concise_message | attachments, request_auth, request_deploy | - |
 | **wait** | seconds (max 600) | - | - |
-| **TodoWrite** | todos (array) | - | - |
+| **TodoCreate** | content | acceptance_criteria | ID and status |
+| **TodoRead** | - | - | List with IDs, status, audit |
+| **TodoStart** | id | - | Status change confirmation |
+| **TodoClaim** | id | evidence | Claim confirmation |
+| **TodoVerify** | id | - | Verification result |
 | **think** | thought | - | None (internal) |
 | **list_secrets** | - | - | Secret names only |
+
+**Note:** Todo status flow is `pending → in_progress → claimed → verified`. Only "verified" counts as done.
 
 
 

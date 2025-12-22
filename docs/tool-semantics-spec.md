@@ -201,9 +201,48 @@ Use to verify UI test results.
 
 ## Task Management
 
-### TodoWrite
-Required: todos (array)
-Use VERY frequently. Mark complete immediately.
+### Guardrailed Todo System
+
+The todo system uses a state machine with verifiable completion to prevent false claims of work done.
+
+**Status flow:** `pending → in_progress → claimed → verified`
+
+**IMPORTANT:** "claimed" is NOT done. Only "verified" counts as complete.
+
+#### TodoCreate
+Required: content (string)
+Optional: acceptance_criteria (array of {type, params} objects)
+
+Acceptance criteria types:
+- `command_exit_zero`: {"type": "command_exit_zero", "params": {"command": "ruff check"}}
+- `file_exists`: {"type": "file_exists", "params": {"path": "/path/to/file"}}
+- `file_contains`: {"type": "file_contains", "params": {"path": "/path", "text": "expected"}}
+
+#### TodoRead
+No required params. Lists all todos with IDs, status, and audit summary.
+
+#### TodoStart
+Required: id (string)
+Moves todo from `pending` to `in_progress`. Cannot skip this step.
+
+#### TodoClaim
+Required: id (string)
+Optional: evidence (array of {type, data} objects)
+Moves todo from `in_progress` to `claimed`. This is an assertion, not completion.
+
+#### TodoVerify
+Required: id (string)
+Checks acceptance criteria. If all pass, moves from `claimed` to `verified`.
+If no criteria defined, manual verification required.
+
+**Typical flow:**
+```
+TodoCreate(content="Fix lint errors", acceptance_criteria=[{"type": "command_exit_zero", "params": {"command": "ruff check"}}])
+TodoStart(id="abc123")
+# ... do the work ...
+TodoClaim(id="abc123", evidence=[{"type": "tool_call_id", "data": "call_xyz"}])
+TodoVerify(id="abc123")  # Runs ruff check, moves to verified if exit 0
+```
 
 ### message_user
 Required: message, should_use_concise_message, block_on_user
