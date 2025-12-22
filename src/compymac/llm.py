@@ -184,6 +184,38 @@ class LLMClient:
         self.close()
 
 
+class TokenUsage:
+    """Token usage statistics from an LLM response."""
+
+    def __init__(
+        self,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> None:
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+        }
+
+    @classmethod
+    def from_api_response(cls, usage: dict[str, Any] | None) -> "TokenUsage":
+        """Parse usage from API response."""
+        if not usage:
+            return cls()
+        return cls(
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+        )
+
+
 class ChatResponse:
     """
     Response from a chat completion request.
@@ -198,11 +230,13 @@ class ChatResponse:
         tool_calls: list[ToolCall] | None,
         finish_reason: str,
         raw_response: dict[str, Any],
+        usage: TokenUsage | None = None,
     ) -> None:
         self.content = content or ""
         self.tool_calls = tool_calls or []
         self.finish_reason = finish_reason
         self.raw_response = raw_response
+        self.usage = usage or TokenUsage()
 
     @classmethod
     def from_api_response(cls, data: dict[str, Any]) -> "ChatResponse":
@@ -227,11 +261,15 @@ class ChatResponse:
                     arguments=arguments,
                 ))
 
+        # Parse token usage from API response
+        usage = TokenUsage.from_api_response(data.get("usage"))
+
         return cls(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             raw_response=data,
+            usage=usage,
         )
 
     @property

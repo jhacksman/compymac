@@ -93,6 +93,14 @@ class ProvenanceRelation(str, Enum):
     WAS_INFORMED_BY = "wasInformedBy"
 
 
+class CheckpointStatus(str, Enum):
+    """Status of a checkpoint."""
+    ACTIVE = "active"
+    RESUMED = "resumed"
+    FORKED = "forked"
+    ARCHIVED = "archived"
+
+
 @dataclass
 class ToolProvenance:
     """Provenance information for tool invocations."""
@@ -243,6 +251,91 @@ class Span:
             "output_artifact_hash": self.output_artifact_hash,
             "error_class": self.error_class,
             "error_message": self.error_message,
+        }
+
+
+@dataclass
+class Checkpoint:
+    """
+    A checkpoint captures the complete agent state at a point in time.
+    
+    Checkpoints enable:
+    - Pause/resume: Stop execution and continue later
+    - Time-travel: Navigate backward and forward through execution
+    - Forking: Create alternative execution branches from any point
+    """
+    checkpoint_id: str
+    trace_id: str
+    created_ts: datetime
+    status: CheckpointStatus
+    step_number: int
+    description: str
+    state_artifact_hash: str  # Points to serialized agent state
+    parent_checkpoint_id: str | None = None  # For forked checkpoints
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "checkpoint_id": self.checkpoint_id,
+            "trace_id": self.trace_id,
+            "created_ts": self.created_ts.isoformat(),
+            "status": self.status.value,
+            "step_number": self.step_number,
+            "description": self.description,
+            "state_artifact_hash": self.state_artifact_hash,
+            "parent_checkpoint_id": self.parent_checkpoint_id,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Checkpoint":
+        return cls(
+            checkpoint_id=data["checkpoint_id"],
+            trace_id=data["trace_id"],
+            created_ts=datetime.fromisoformat(data["created_ts"]),
+            status=CheckpointStatus(data["status"]),
+            step_number=data["step_number"],
+            description=data["description"],
+            state_artifact_hash=data["state_artifact_hash"],
+            parent_checkpoint_id=data.get("parent_checkpoint_id"),
+            metadata=data.get("metadata", {}),
+        )
+
+
+@dataclass
+class SessionOverview:
+    """
+    High-level summary of a session for quick overview.
+    
+    This is the "overview" view that can be expanded into full detail.
+    """
+    trace_id: str
+    start_ts: datetime
+    end_ts: datetime | None
+    status: str
+    total_steps: int
+    total_llm_calls: int
+    total_tool_calls: int
+    total_tokens: int
+    checkpoints_available: int
+    current_step: str
+    key_milestones: list[dict[str, Any]]
+    errors: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trace_id": self.trace_id,
+            "start_ts": self.start_ts.isoformat(),
+            "end_ts": self.end_ts.isoformat() if self.end_ts else None,
+            "status": self.status,
+            "total_steps": self.total_steps,
+            "total_llm_calls": self.total_llm_calls,
+            "total_tool_calls": self.total_tool_calls,
+            "total_tokens": self.total_tokens,
+            "checkpoints_available": self.checkpoints_available,
+            "current_step": self.current_step,
+            "key_milestones": self.key_milestones,
+            "errors": self.errors,
         }
 
 
@@ -414,6 +507,26 @@ class TraceStore:
                     ON provenance(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_provenance_subject
                     ON provenance(subject_span_id);
+
+                -- Checkpoints table for pause/resume/time-travel
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    created_ts TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    step_number INTEGER NOT NULL,
+                    description TEXT NOT NULL,
+                    state_artifact_hash TEXT NOT NULL,
+                    parent_checkpoint_id TEXT,
+                    metadata TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_checkpoints_trace_id
+                    ON checkpoints(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_checkpoints_status
+                    ON checkpoints(status);
+                CREATE INDEX IF NOT EXISTS idx_checkpoints_step
+                    ON checkpoints(step_number);
             """)
 
     def _next_seq(self, actor_id: str) -> int:
@@ -767,6 +880,369 @@ class TraceStore:
     def get_artifact_data(self, artifact_hash: str) -> bytes | None:
         """Get artifact data by hash."""
         return self.artifact_store.retrieve(artifact_hash)
+
+    # =========================================================================
+    # Checkpoint Operations - Phase 1: Total Execution Capture
+    # =========================================================================
+
+    def create_checkpoint(
+        self,
+        trace_id: str,
+        step_number: int,
+        description: str,
+        state_data: bytes,
+        parent_checkpoint_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Checkpoint:
+        """
+        Create a checkpoint capturing the complete agent state.
+        
+        Args:
+            trace_id: The trace this checkpoint belongs to
+            step_number: Current step number in the execution
+            description: Human-readable description of this checkpoint
+            state_data: Serialized agent state (messages, tool state, etc.)
+            parent_checkpoint_id: If forking, the parent checkpoint
+            metadata: Additional metadata
+            
+        Returns:
+            The created Checkpoint
+        """
+        # Store state as artifact
+        state_artifact = self.store_artifact(
+            data=state_data,
+            artifact_type="checkpoint_state",
+            content_type="application/json",
+            metadata={"step_number": step_number, "description": description},
+        )
+
+        checkpoint_id = f"cp-{uuid.uuid4().hex[:16]}"
+        checkpoint = Checkpoint(
+            checkpoint_id=checkpoint_id,
+            trace_id=trace_id,
+            created_ts=datetime.now(UTC),
+            status=CheckpointStatus.ACTIVE,
+            step_number=step_number,
+            description=description,
+            state_artifact_hash=state_artifact.artifact_hash,
+            parent_checkpoint_id=parent_checkpoint_id,
+            metadata=metadata or {},
+        )
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO checkpoints 
+                (checkpoint_id, trace_id, created_ts, status, step_number, 
+                 description, state_artifact_hash, parent_checkpoint_id, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    checkpoint.checkpoint_id,
+                    checkpoint.trace_id,
+                    checkpoint.created_ts.isoformat(),
+                    checkpoint.status.value,
+                    checkpoint.step_number,
+                    checkpoint.description,
+                    checkpoint.state_artifact_hash,
+                    checkpoint.parent_checkpoint_id,
+                    json.dumps(checkpoint.metadata),
+                ),
+            )
+
+        return checkpoint
+
+    def list_checkpoints(
+        self,
+        trace_id: str,
+        status: CheckpointStatus | None = None,
+    ) -> list[Checkpoint]:
+        """
+        List all checkpoints for a trace.
+        
+        Args:
+            trace_id: The trace to list checkpoints for
+            status: Optional filter by status
+            
+        Returns:
+            List of checkpoints ordered by step number
+        """
+        query = """
+            SELECT checkpoint_id, trace_id, created_ts, status, step_number,
+                   description, state_artifact_hash, parent_checkpoint_id, metadata
+            FROM checkpoints WHERE trace_id = ?
+        """
+        params: list[Any] = [trace_id]
+
+        if status:
+            query += " AND status = ?"
+            params.append(status.value)
+
+        query += " ORDER BY step_number ASC"
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+
+        return [
+            Checkpoint(
+                checkpoint_id=row[0],
+                trace_id=row[1],
+                created_ts=datetime.fromisoformat(row[2]),
+                status=CheckpointStatus(row[3]),
+                step_number=row[4],
+                description=row[5],
+                state_artifact_hash=row[6],
+                parent_checkpoint_id=row[7],
+                metadata=json.loads(row[8]),
+            )
+            for row in rows
+        ]
+
+    def get_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
+        """
+        Get a checkpoint by ID.
+        
+        Args:
+            checkpoint_id: The checkpoint ID
+            
+        Returns:
+            The checkpoint or None if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT checkpoint_id, trace_id, created_ts, status, step_number,
+                       description, state_artifact_hash, parent_checkpoint_id, metadata
+                FROM checkpoints WHERE checkpoint_id = ?
+                """,
+                (checkpoint_id,),
+            )
+            row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Checkpoint(
+            checkpoint_id=row[0],
+            trace_id=row[1],
+            created_ts=datetime.fromisoformat(row[2]),
+            status=CheckpointStatus(row[3]),
+            step_number=row[4],
+            description=row[5],
+            state_artifact_hash=row[6],
+            parent_checkpoint_id=row[7],
+            metadata=json.loads(row[8]),
+        )
+
+    def get_checkpoint_state(self, checkpoint_id: str) -> bytes | None:
+        """
+        Get the serialized state data for a checkpoint.
+        
+        Args:
+            checkpoint_id: The checkpoint ID
+            
+        Returns:
+            The serialized state data or None if not found
+        """
+        checkpoint = self.get_checkpoint(checkpoint_id)
+        if checkpoint is None:
+            return None
+        return self.get_artifact_data(checkpoint.state_artifact_hash)
+
+    def update_checkpoint_status(
+        self,
+        checkpoint_id: str,
+        status: CheckpointStatus,
+    ) -> None:
+        """
+        Update the status of a checkpoint.
+        
+        Args:
+            checkpoint_id: The checkpoint ID
+            status: The new status
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE checkpoints SET status = ? WHERE checkpoint_id = ?",
+                (status.value, checkpoint_id),
+            )
+
+    def fork_from_checkpoint(
+        self,
+        checkpoint_id: str,
+        new_trace_id: str | None = None,
+    ) -> tuple[str, Checkpoint]:
+        """
+        Fork execution from a checkpoint, creating a new trace.
+        
+        This marks the original checkpoint as FORKED and creates a new
+        checkpoint in the forked trace that references the parent.
+        
+        Args:
+            checkpoint_id: The checkpoint to fork from
+            new_trace_id: Optional new trace ID (generated if not provided)
+            
+        Returns:
+            Tuple of (new_trace_id, new_checkpoint)
+        """
+        parent_checkpoint = self.get_checkpoint(checkpoint_id)
+        if parent_checkpoint is None:
+            raise ValueError(f"Checkpoint not found: {checkpoint_id}")
+
+        # Mark parent as forked
+        self.update_checkpoint_status(checkpoint_id, CheckpointStatus.FORKED)
+
+        # Create new trace
+        new_trace_id = new_trace_id or generate_trace_id()
+
+        # Get parent state
+        state_data = self.get_checkpoint_state(checkpoint_id)
+        if state_data is None:
+            raise ValueError(f"Checkpoint state not found: {checkpoint_id}")
+
+        # Create new checkpoint in forked trace
+        new_checkpoint = self.create_checkpoint(
+            trace_id=new_trace_id,
+            step_number=parent_checkpoint.step_number,
+            description=f"Forked from {checkpoint_id}",
+            state_data=state_data,
+            parent_checkpoint_id=checkpoint_id,
+            metadata={
+                "forked_from_trace": parent_checkpoint.trace_id,
+                "forked_from_checkpoint": checkpoint_id,
+            },
+        )
+
+        return new_trace_id, new_checkpoint
+
+    # =========================================================================
+    # Session Overview - Phase 1: Overview + Detail Drill-down
+    # =========================================================================
+
+    def get_session_overview(self, trace_id: str) -> SessionOverview:
+        """
+        Generate a high-level overview of a session.
+        
+        This is the "overview" view that can be expanded into full detail.
+        
+        Args:
+            trace_id: The trace to generate overview for
+            
+        Returns:
+            SessionOverview with summary statistics
+        """
+        spans = self.get_trace_spans(trace_id)
+        checkpoints = self.list_checkpoints(trace_id)
+
+        # Calculate statistics
+        llm_calls = [s for s in spans if s.kind == SpanKind.LLM_CALL]
+        tool_calls = [s for s in spans if s.kind == SpanKind.TOOL_CALL]
+        agent_turns = [s for s in spans if s.kind == SpanKind.AGENT_TURN]
+        errors = [s for s in spans if s.status == SpanStatus.ERROR]
+
+        # Calculate total tokens from LLM output artifacts
+        total_tokens = 0
+        for span in llm_calls:
+            if span.output_artifact_hash:
+                artifact_data = self.get_artifact_data(span.output_artifact_hash)
+                if artifact_data:
+                    try:
+                        output = json.loads(artifact_data.decode())
+                        usage = output.get("usage", {})
+                        total_tokens += usage.get("total_tokens", 0)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        pass
+
+        # Determine session status
+        if not spans:
+            status = "empty"
+        elif any(s.end_ts is None for s in spans):
+            status = "in_progress"
+        elif errors:
+            status = "completed_with_errors"
+        else:
+            status = "completed"
+
+        # Get timestamps
+        start_ts = spans[0].start_ts if spans else datetime.now(UTC)
+        end_ts = None
+        for span in reversed(spans):
+            if span.end_ts:
+                end_ts = span.end_ts
+                break
+
+        # Current step
+        current_step = "idle"
+        for span in reversed(spans):
+            if span.end_ts is None:
+                current_step = f"{span.kind.value}: {span.name}"
+                break
+            else:
+                current_step = f"completed: {span.name}"
+                break
+
+        # Key milestones (PR created, tests run, etc.)
+        milestones = []
+        for span in spans:
+            if span.kind == SpanKind.TOOL_CALL and span.tool_provenance:
+                tool_name = span.tool_provenance.tool_name
+                if tool_name in ["git_create_pr", "git_pr_checks", "bash"]:
+                    milestones.append({
+                        "timestamp": span.start_ts.isoformat(),
+                        "tool": tool_name,
+                        "status": span.status.value,
+                        "span_id": span.span_id,
+                    })
+
+        # Error details
+        error_details = [
+            {
+                "timestamp": s.start_ts.isoformat(),
+                "name": s.name,
+                "error_class": s.error_class,
+                "error_message": s.error_message,
+                "span_id": s.span_id,
+            }
+            for s in errors
+        ]
+
+        return SessionOverview(
+            trace_id=trace_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            status=status,
+            total_steps=len(agent_turns),
+            total_llm_calls=len(llm_calls),
+            total_tool_calls=len(tool_calls),
+            total_tokens=total_tokens,
+            checkpoints_available=len(checkpoints),
+            current_step=current_step,
+            key_milestones=milestones,
+            errors=error_details,
+        )
+
+    def get_session_timeline(
+        self,
+        trace_id: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get a timeline of all events in a session.
+        
+        This is the "full detail" view that shows every event.
+        
+        Args:
+            trace_id: The trace to get timeline for
+            since: Optional start time filter
+            until: Optional end time filter
+            
+        Returns:
+            List of events in chronological order
+        """
+        events = self.get_events(trace_id=trace_id, since=since, until=until)
+        return [e.to_dict() for e in events]
 
 
 class SummaryEventLog:
