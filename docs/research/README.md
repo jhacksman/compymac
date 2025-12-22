@@ -112,6 +112,15 @@ Research on when agents should stop, detecting stuckness, and enforcing completi
 - arXiv:2509.14004 - "Early Stopping Chain-of-thoughts in Large Language Models"
 - arXiv:2503.09572 - "Plan-and-Act: Improving Planning for Long-Horizon Tasks"
 
+### [Parallelization and Concurrent Execution](parallelization-concurrent-execution.md)
+Research on parallel and concurrent execution strategies for LLM agents. Covers parallel tool calls, dependency-aware scheduling, and multi-agent parallelism.
+
+**Key Papers**:
+- arXiv:2507.08944 - "M1-Parallel: Optimizing Sequential Multi-Step Tasks with Parallel LLM Agents"
+- arXiv:2510.25320 - "GAP: Graph-based Agent Planning with Parallel Tool Use"
+- arXiv:2507.17061 - "Parallelism Meets Adaptiveness: Scalable Documents Understanding"
+- arXiv:2503.03505 - "Parallelized Planning-Acting for Efficient LLM-based Multi-Agent Systems"
+
 ## How This Informs CompyMac
 
 | Research Area | CompyMac Implementation |
@@ -128,6 +137,7 @@ Research on when agents should stop, detecting stuckness, and enforcing completi
 | Human-Agent Workflow | Intervention points, handoff protocols |
 | Tool Reliability | Error envelopes, recovery strategies |
 | Planning & Termination | Completion verification, stuckness detection |
+| Parallelization | ForkedTraceContext, ToolConflictModel, ParallelExecutor |
 
 ## Adding New Research
 
