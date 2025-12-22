@@ -661,6 +661,9 @@ def run_workflow(
     test: str | None = None,
     spec: str | None = None,
     trace_dir: Path | None = None,
+    harness: "Harness | None" = None,
+    llm_client: "LLMClient | None" = None,
+    max_steps: int = 50,
 ) -> WorkflowResult:
     """
     Convenience function to run a workflow.
@@ -673,9 +676,17 @@ def run_workflow(
         test: Test identifier (for fix_failing_test)
         spec: Feature specification (for implement_feature)
         trace_dir: Optional directory for trace storage
+        harness: Optional harness for tool execution (enables agent loop)
+        llm_client: Optional LLM client (enables agent loop)
+        max_steps: Maximum agent loop steps (default 50)
 
     Returns:
         WorkflowResult with status, PR URL, test results, etc.
+
+    Note:
+        If harness and llm_client are not provided, the workflow will run
+        in "dry run" mode, logging what it would do without actually
+        executing any LLM-driven actions.
     """
     config = WorkflowConfig(
         repo_path=Path(repo),
@@ -683,7 +694,9 @@ def run_workflow(
         test_identifier=test,
         feature_spec=spec,
         trace_dir=trace_dir,
+        max_steps=max_steps,
+        use_agent_loop=harness is not None and llm_client is not None,
     )
 
-    workflow = SWEWorkflow(config)
+    workflow = SWEWorkflow(config, harness=harness, llm_client=llm_client)
     return workflow.run()
