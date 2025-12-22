@@ -40,6 +40,7 @@ from compymac.harness_spec import (
     truncate_lines,
     truncate_output,
 )
+from compymac.safety import PolicyEngine
 from compymac.types import ToolCall, ToolResult
 from compymac.verification import (
     VerificationEngine,
@@ -176,6 +177,9 @@ class LocalHarness(Harness):
 
         # Store last verification result for agent consumption
         self._last_verification_result: VerificationResult | None = None
+
+        # Safety policy engine for runtime safety enforcement
+        self._policy_engine = PolicyEngine(enabled=True)
 
         # Register default tools
         self._register_default_tools()
@@ -4697,6 +4701,39 @@ Permissions: {mode}"""
                 success=False,
                 error=error,
             )
+
+        # Safety policy enforcement
+        if self._policy_engine.enabled:
+            policy_results = self._policy_engine.evaluate(tool_call)
+
+            # Check for blocking violations
+            if self._policy_engine.should_block(policy_results):
+                blocking = self._policy_engine.get_blocking_violations(policy_results)
+                violation_msg = "; ".join(v.violation_message for v in blocking)
+
+                self._event_log.log_event(
+                    EventType.ERROR,
+                    call_id,
+                    error=f"Policy violation: {violation_msg}",
+                    policy_blocked=True,
+                )
+
+                return ToolResult(
+                    tool_call_id=call_id,
+                    content=f"[POLICY BLOCKED] {violation_msg}",
+                    success=False,
+                    error=f"Safety policy violation: {violation_msg}",
+                )
+
+            # Log warnings but allow execution
+            warnings = self._policy_engine.get_warnings(policy_results)
+            if warnings:
+                warning_msg = "; ".join(w.violation_message for w in warnings)
+                self._event_log.log_event(
+                    EventType.TOOL_CALL_RECEIVED,
+                    call_id,
+                    policy_warnings=warning_msg,
+                )
 
         # Execute
         self._event_log.log_event(EventType.TOOL_DISPATCH, call_id, tool_name=tool.name)
