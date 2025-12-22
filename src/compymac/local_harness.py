@@ -18,6 +18,7 @@ import select
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -422,17 +423,45 @@ class LocalHarness(Harness):
         )
 
         # TODO tools
-        # TodoWrite tool - task management
+        # TodoWrite tool - task management (replace entire list)
         self.register_tool(
             name="TodoWrite",
             schema=ToolSchema(
                 name="TodoWrite",
-                description="Create and manage a task list for tracking progress",
+                description="Replace the entire todo list. Each todo should have 'content' and 'status' (pending/in_progress/completed). Returns the list with stable IDs assigned.",
                 required_params=["todos"],
                 optional_params=[],
                 param_types={"todos": "array"},
             ),
             handler=self._todo_write,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoRead tool - list todos with IDs
+        self.register_tool(
+            name="TodoRead",
+            schema=ToolSchema(
+                name="TodoRead",
+                description="List all todos with their stable IDs, content, and status. Use the ID to update specific todos with TodoUpdate.",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._todo_read,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoUpdate tool - update a specific todo by ID
+        self.register_tool(
+            name="TodoUpdate",
+            schema=ToolSchema(
+                name="TodoUpdate",
+                description="Update a specific todo by its ID. Can change status (pending/in_progress/completed) and/or content.",
+                required_params=["id"],
+                optional_params=["status", "content"],
+                param_types={"id": "string", "status": "string", "content": "string"},
+            ),
+            handler=self._todo_update,
             category=ToolCategory.TODO,
         )
 
@@ -1797,22 +1826,65 @@ class LocalHarness(Harness):
         return f"Thought recorded: {thought}"
 
     def _todo_write(self, todos: list[dict[str, Any]]) -> str:
-        """Update the todo list for task tracking."""
-        # Store todos in instance state
+        """Replace the entire todo list. Assigns stable UUIDs to each todo."""
         if not hasattr(self, "_todos"):
             self._todos: list[dict[str, Any]] = []
-        self._todos = todos
 
-        # Format output
-        lines = ["Updated todo list:"]
+        new_todos: list[dict[str, Any]] = []
         for todo in todos:
+            todo_id = todo.get("id") or str(uuid.uuid4())[:8]
+            new_todos.append({
+                "id": todo_id,
+                "content": todo.get("content", ""),
+                "status": todo.get("status", "pending"),
+            })
+        self._todos = new_todos
+
+        return self._format_todo_list("Updated todo list:")
+
+    def _todo_read(self) -> str:
+        """List all todos with their stable IDs."""
+        if not hasattr(self, "_todos"):
+            self._todos: list[dict[str, Any]] = []
+
+        if not self._todos:
+            return "No todos. Use TodoWrite to create a todo list."
+
+        return self._format_todo_list("Current todo list:")
+
+    def _todo_update(
+        self,
+        id: str,
+        status: str | None = None,
+        content: str | None = None,
+    ) -> str:
+        """Update a specific todo by its ID."""
+        if not hasattr(self, "_todos"):
+            self._todos: list[dict[str, Any]] = []
+
+        for todo in self._todos:
+            if todo["id"] == id:
+                if status is not None:
+                    if status not in ("pending", "in_progress", "completed"):
+                        raise ValueError(f"Invalid status: {status}. Must be pending/in_progress/completed")
+                    todo["status"] = status
+                if content is not None:
+                    todo["content"] = content
+                return self._format_todo_list(f"Updated todo {id}:")
+
+        raise ValueError(f"Todo with id '{id}' not found. Use TodoRead to see available todos.")
+
+    def _format_todo_list(self, header: str) -> str:
+        """Format the todo list for display."""
+        lines = [header]
+        for todo in self._todos:
             status = todo.get("status", "pending")
             content = todo.get("content", "")
+            todo_id = todo.get("id", "???")
             marker = {"pending": "[ ]", "in_progress": "[*]", "completed": "[x]"}.get(
                 status, "[ ]"
             )
-            lines.append(f"  {marker} {content}")
-
+            lines.append(f"  {marker} [{todo_id}] {content}")
         return "\n".join(lines)
 
     def _request_tools(
