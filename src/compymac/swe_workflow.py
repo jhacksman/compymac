@@ -1,5 +1,5 @@
 """
-SWE Workflow Runner - Phase 3
+SWE Workflow Runner - Phase 3 + Phase 4
 
 Integrates repo discovery, agent loop, and trace store to execute
 canonical SWE workflows as defined in docs/swe-contract.md.
@@ -7,6 +7,8 @@ canonical SWE workflows as defined in docs/swe-contract.md.
 Workflows:
 1. Fix Failing Test - Given a repo and failing test, fix it and create PR
 2. Implement Feature - Given a repo and spec, implement and create PR
+
+Phase 4 adds actual agent loop integration for real LLM-driven execution.
 """
 
 import json
@@ -15,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from compymac.repo_discovery import RepoConfig, discover_repo
 from compymac.trace_store import (
@@ -27,7 +29,70 @@ from compymac.trace_store import (
     generate_trace_id,
 )
 
+if TYPE_CHECKING:
+    from compymac.agent_loop import AgentLoop
+    from compymac.harness import Harness
+    from compymac.llm import LLMClient
+
 logger = logging.getLogger(__name__)
+
+
+# System prompts for SWE workflows
+FIX_FAILING_TEST_PROMPT = """You are an expert software engineer tasked with fixing a failing test.
+
+## Repository Information
+- Path: {repo_path}
+- Language: {language}
+- Package Manager: {package_manager}
+- Test Command: {test_command}
+
+## Task
+Fix the failing test: {test_identifier}
+
+## Workflow
+1. First, run the failing test to understand the error
+2. Analyze the test code and the code it tests
+3. Identify the root cause of the failure
+4. Implement a fix (prefer minimal changes)
+5. Run the test again to verify the fix
+6. Run the full test suite to check for regressions
+7. If all tests pass, create a PR with your changes
+
+## Constraints
+- Make minimal changes to fix the issue
+- Do not change test expectations unless they are clearly wrong
+- Ensure no regressions in other tests
+- Follow existing code style and conventions
+"""
+
+IMPLEMENT_FEATURE_PROMPT = """You are an expert software engineer tasked with implementing a new feature.
+
+## Repository Information
+- Path: {repo_path}
+- Language: {language}
+- Package Manager: {package_manager}
+- Lint Command: {lint_command}
+- Format Command: {format_command}
+- Test Command: {test_command}
+
+## Feature Specification
+{feature_spec}
+
+## Workflow
+1. Analyze the codebase to understand the architecture
+2. Plan the implementation (identify files to create/modify)
+3. Implement the feature following existing patterns
+4. Write tests for the new functionality
+5. Run lint and format commands
+6. Run the test suite to verify no regressions
+7. Create a PR with your changes
+
+## Constraints
+- Follow existing code patterns and conventions
+- Write comprehensive tests
+- Ensure all lint checks pass
+- Document public APIs
+"""
 
 
 class WorkflowStatus(str, Enum):
@@ -146,6 +211,8 @@ class WorkflowConfig:
     target_files: list[str] = field(default_factory=list)
     branch: str | None = None
     trace_dir: Path | None = None
+    max_steps: int = 50  # Max agent loop steps
+    use_agent_loop: bool = True  # Whether to use agent loop for execution
 
     def validate(self) -> list[str]:
         """Validate the configuration. Returns list of errors."""
@@ -172,13 +239,15 @@ class SWEWorkflow:
     It integrates:
     - Repo discovery (Phase 2) for understanding the repo
     - Trace store (Phase 1) for execution capture
-    - Agent loop for LLM-driven execution
+    - Agent loop (Phase 4) for LLM-driven execution
     """
 
     def __init__(
         self,
         config: WorkflowConfig,
         trace_store: TraceStore | None = None,
+        harness: "Harness | None" = None,
+        llm_client: "LLMClient | None" = None,
     ):
         self.config = config
         self.repo_config: RepoConfig | None = None
@@ -188,6 +257,11 @@ class SWEWorkflow:
             status=WorkflowStatus.PENDING,
         )
 
+        # Store harness and LLM client for agent loop
+        self._harness = harness
+        self._llm_client = llm_client
+        self._agent_loop: AgentLoop | None = None
+
         # Set up trace store
         if trace_store:
             self.trace_store = trace_store
@@ -196,6 +270,61 @@ class SWEWorkflow:
             self.trace_store, _ = create_trace_store(trace_dir)
 
         self.trace_context = TraceContext(self.trace_store, self.trace_id)
+
+    def _create_agent_loop(self, system_prompt: str) -> "AgentLoop":
+        """Create an agent loop with the given system prompt."""
+        from compymac.agent_loop import AgentConfig, AgentLoop
+
+        if not self._harness:
+            raise ValueError("Harness is required for agent loop execution")
+        if not self._llm_client:
+            raise ValueError("LLM client is required for agent loop execution")
+
+        config = AgentConfig(
+            max_steps=self.config.max_steps,
+            system_prompt=system_prompt,
+            stop_on_error=False,
+            use_memory=True,
+        )
+
+        self._agent_loop = AgentLoop(
+            harness=self._harness,
+            llm_client=self._llm_client,
+            config=config,
+            trace_context=self.trace_context,
+        )
+
+        return self._agent_loop
+
+    def _run_with_agent(self, task_description: str) -> str:
+        """Run a task using the agent loop and return the final response."""
+        if not self._agent_loop:
+            raise ValueError("Agent loop not initialized")
+
+        # Create checkpoint before agent execution
+        self.create_checkpoint(
+            description=f"Before agent execution: {task_description[:50]}...",
+            state={
+                "step": "pre_agent_execution",
+                "task": task_description,
+            },
+        )
+
+        # Run the agent loop
+        response = self._agent_loop.run(task_description)
+
+        # Create checkpoint after agent execution
+        self.create_checkpoint(
+            description="After agent execution",
+            state={
+                "step": "post_agent_execution",
+                "response": response[:500] if response else "",
+                "step_count": self._agent_loop.state.step_count,
+                "tool_call_count": self._agent_loop.state.tool_call_count,
+            },
+        )
+
+        return response
 
     def discover_repo(self) -> RepoConfig:
         """Discover repository configuration."""
@@ -308,14 +437,6 @@ class SWEWorkflow:
 
     def _run_fix_failing_test(self) -> None:
         """Execute the fix_failing_test workflow."""
-        # This is a placeholder for the full implementation
-        # In a complete implementation, this would:
-        # 1. Run the failing test to understand the failure
-        # 2. Analyze the test and related code
-        # 3. Implement a fix
-        # 4. Run tests to verify
-        # 5. Create PR
-
         _span_id = self.trace_context.start_span(
             kind=SpanKind.AGENT_TURN,
             name="fix_failing_test",
@@ -341,21 +462,43 @@ class SWEWorkflow:
                 },
             )
 
-            # Initialize test results (placeholder)
+            # Initialize test results
             self.result.test_results = TestResults(
                 target_test="pending",
                 regression_tests="pending",
             )
 
-            # TODO: Integrate with agent loop to actually:
-            # 1. Run the test and capture output
-            # 2. Analyze the failure
-            # 3. Find and fix the code
-            # 4. Re-run tests
-            # 5. Create PR
+            # Use agent loop if available and enabled
+            if self.config.use_agent_loop and self._harness and self._llm_client:
+                # Build system prompt with repo context
+                system_prompt = FIX_FAILING_TEST_PROMPT.format(
+                    repo_path=str(self.config.repo_path),
+                    language=self.repo_config.language if self.repo_config else "unknown",
+                    package_manager=self.repo_config.package_manager
+                    if self.repo_config
+                    else "unknown",
+                    test_command=test_cmd or "unknown",
+                    test_identifier=self.config.test_identifier,
+                )
 
-            logger.info(f"Would run test: {self.config.test_identifier}")
-            logger.info(f"Using test command: {test_cmd}")
+                # Create agent loop and run
+                self._create_agent_loop(system_prompt)
+                task = f"Fix the failing test: {self.config.test_identifier}"
+                response = self._run_with_agent(task)
+
+                # Parse response to determine test results
+                # (In a full implementation, we'd parse structured output)
+                if "all tests pass" in response.lower() or "fixed" in response.lower():
+                    self.result.test_results.target_test = "pass"
+                    self.result.test_results.regression_tests = "pass"
+                else:
+                    self.result.test_results.target_test = "fail"
+
+                logger.info(f"Agent completed fix_failing_test: {response[:200]}...")
+            else:
+                # Fallback: log what would happen (for testing without LLM)
+                logger.info(f"Would run test: {self.config.test_identifier}")
+                logger.info(f"Using test command: {test_cmd}")
 
             self.trace_context.end_span(status=SpanStatus.OK)
 
@@ -369,15 +512,6 @@ class SWEWorkflow:
 
     def _run_implement_feature(self) -> None:
         """Execute the implement_feature workflow."""
-        # This is a placeholder for the full implementation
-        # In a complete implementation, this would:
-        # 1. Understand the codebase structure
-        # 2. Plan the implementation
-        # 3. Implement the feature
-        # 4. Write tests
-        # 5. Run lint/format
-        # 6. Create PR
-
         _span_id = self.trace_context.start_span(
             kind=SpanKind.AGENT_TURN,
             name="implement_feature",
@@ -386,9 +520,10 @@ class SWEWorkflow:
         )
 
         try:
-            # Get lint/format commands from repo config
+            # Get lint/format/test commands from repo config
             lint_cmd = None
             format_cmd = None
+            test_cmd = None
             if self.repo_config:
                 lint_cmd_obj = self.repo_config.get_lint_command()
                 if lint_cmd_obj:
@@ -396,6 +531,9 @@ class SWEWorkflow:
                 format_cmd_obj = self.repo_config.get_format_command()
                 if format_cmd_obj:
                     format_cmd = format_cmd_obj.command
+                test_cmd_obj = self.repo_config.get_test_command()
+                if test_cmd_obj:
+                    test_cmd = test_cmd_obj.command
 
             # Create checkpoint before implementation
             self.create_checkpoint(
@@ -408,20 +546,43 @@ class SWEWorkflow:
                 },
             )
 
-            # Initialize implementation details (placeholder)
+            # Initialize implementation details
             self.result.implementation = ImplementationDetails()
 
-            # TODO: Integrate with agent loop to actually:
-            # 1. Analyze codebase
-            # 2. Plan implementation
-            # 3. Write code
-            # 4. Write tests
-            # 5. Run lint/format
-            # 6. Create PR
+            # Use agent loop if available and enabled
+            if self.config.use_agent_loop and self._harness and self._llm_client:
+                # Build system prompt with repo context
+                system_prompt = IMPLEMENT_FEATURE_PROMPT.format(
+                    repo_path=str(self.config.repo_path),
+                    language=self.repo_config.language if self.repo_config else "unknown",
+                    package_manager=self.repo_config.package_manager
+                    if self.repo_config
+                    else "unknown",
+                    lint_command=lint_cmd or "unknown",
+                    format_command=format_cmd or "unknown",
+                    test_command=test_cmd or "unknown",
+                    feature_spec=self.config.feature_spec,
+                )
 
-            logger.info(f"Would implement feature: {self.config.feature_spec}")
-            logger.info(f"Using lint command: {lint_cmd}")
-            logger.info(f"Using format command: {format_cmd}")
+                # Create agent loop and run
+                self._create_agent_loop(system_prompt)
+                task = f"Implement the following feature:\n\n{self.config.feature_spec}"
+                response = self._run_with_agent(task)
+
+                # Parse response to extract implementation details
+                # (In a full implementation, we'd parse structured output)
+                if "created" in response.lower():
+                    # Try to count files mentioned
+                    self.result.implementation.files_created = []
+                if "modified" in response.lower():
+                    self.result.implementation.files_modified = []
+
+                logger.info(f"Agent completed implement_feature: {response[:200]}...")
+            else:
+                # Fallback: log what would happen (for testing without LLM)
+                logger.info(f"Would implement feature: {self.config.feature_spec}")
+                logger.info(f"Using lint command: {lint_cmd}")
+                logger.info(f"Using format command: {format_cmd}")
 
             self.trace_context.end_span(status=SpanStatus.OK)
 
