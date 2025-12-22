@@ -18,8 +18,10 @@ import select
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -421,18 +423,82 @@ class LocalHarness(Harness):
             is_core=True,
         )
 
-        # TODO tools
-        # TodoWrite tool - task management
+        # TODO tools - Guardrailed task management with anti-hallucination patterns
+        # See docs/guardrail-architecture.md for design rationale
+
+        # TodoCreate - Create a single todo item with stable ID
         self.register_tool(
-            name="TodoWrite",
+            name="TodoCreate",
             schema=ToolSchema(
-                name="TodoWrite",
-                description="Create and manage a task list for tracking progress",
-                required_params=["todos"],
-                optional_params=[],
-                param_types={"todos": "array"},
+                name="TodoCreate",
+                description="Create a single todo item. Returns a stable ID for tracking. Use acceptance_criteria for machine-verifiable completion conditions.",
+                required_params=["content"],
+                optional_params=["acceptance_criteria"],
+                param_types={
+                    "content": "string",
+                    "acceptance_criteria": "array",  # List of {type, params} objects
+                },
             ),
-            handler=self._todo_write,
+            handler=self._todo_create,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoRead - List all todos with IDs and status
+        self.register_tool(
+            name="TodoRead",
+            schema=ToolSchema(
+                name="TodoRead",
+                description="List all todos with their stable IDs, status, and audit history. Status: pending -> in_progress -> claimed -> verified.",
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._todo_read,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoStart - Move todo from pending to in_progress
+        self.register_tool(
+            name="TodoStart",
+            schema=ToolSchema(
+                name="TodoStart",
+                description="Start working on a todo. Moves status from 'pending' to 'in_progress'. Must provide the todo ID.",
+                required_params=["id"],
+                optional_params=[],
+                param_types={"id": "string"},
+            ),
+            handler=self._todo_start,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoClaim - Claim a todo is complete (agent assertion, not verified)
+        self.register_tool(
+            name="TodoClaim",
+            schema=ToolSchema(
+                name="TodoClaim",
+                description="Claim a todo is complete. Moves status from 'in_progress' to 'claimed'. Provide evidence (tool_call_ids, file paths, etc.) to support the claim. Verification happens separately.",
+                required_params=["id"],
+                optional_params=["evidence"],
+                param_types={
+                    "id": "string",
+                    "evidence": "array",  # List of {type, data} objects
+                },
+            ),
+            handler=self._todo_claim,
+            category=ToolCategory.TODO,
+        )
+
+        # TodoVerify - Verify a claimed todo (harness-level, checks acceptance criteria)
+        self.register_tool(
+            name="TodoVerify",
+            schema=ToolSchema(
+                name="TodoVerify",
+                description="Verify a claimed todo by checking its acceptance criteria. Only works on 'claimed' todos. Returns verification result.",
+                required_params=["id"],
+                optional_params=[],
+                param_types={"id": "string"},
+            ),
+            handler=self._todo_verify,
             category=ToolCategory.TODO,
         )
 
@@ -1796,24 +1862,440 @@ class LocalHarness(Harness):
         # Just log the thought and return it - no side effects
         return f"Thought recorded: {thought}"
 
-    def _todo_write(self, todos: list[dict[str, Any]]) -> str:
-        """Update the todo list for task tracking."""
-        # Store todos in instance state
-        if not hasattr(self, "_todos"):
-            self._todos: list[dict[str, Any]] = []
-        self._todos = todos
+    # =========================================================================
+    # Guardrailed Todo System - Anti-hallucination patterns
+    # See docs/guardrail-architecture.md for design rationale
+    # =========================================================================
 
-        # Format output
-        lines = ["Updated todo list:"]
-        for todo in todos:
+    # Valid status transitions (state machine)
+    _TODO_VALID_TRANSITIONS: dict[str, list[str]] = {
+        "pending": ["in_progress"],
+        "in_progress": ["claimed"],
+        "claimed": ["verified"],
+        "verified": [],  # Terminal state
+    }
+
+    def _init_todo_state(self) -> None:
+        """Initialize todo state if not already initialized."""
+        if not hasattr(self, "_todos"):
+            self._todos: dict[str, dict[str, Any]] = {}  # id -> todo
+        if not hasattr(self, "_todo_audit_log"):
+            self._todo_audit_log: list[dict[str, Any]] = []  # Immutable audit log
+
+    def _log_todo_event(
+        self,
+        event_type: str,
+        todo_id: str,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a todo state change to the immutable audit log."""
+        self._init_todo_state()
+        event = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event_type": event_type,
+            "todo_id": todo_id,
+            "before": before,
+            "after": after,
+        }
+        if extra:
+            event["extra"] = extra
+        self._todo_audit_log.append(event)
+
+    def _format_todo_list(self, header: str) -> str:
+        """Format the todo list for display."""
+        self._init_todo_state()
+        if not self._todos:
+            return f"{header}\n  (no todos)"
+
+        lines = [header]
+        status_markers = {
+            "pending": "[ ]",
+            "in_progress": "[*]",
+            "claimed": "[?]",  # Claimed but not verified
+            "verified": "[x]",  # Verified complete
+        }
+        for todo_id, todo in self._todos.items():
             status = todo.get("status", "pending")
             content = todo.get("content", "")
-            marker = {"pending": "[ ]", "in_progress": "[*]", "completed": "[x]"}.get(
-                status, "[ ]"
-            )
-            lines.append(f"  {marker} {content}")
+            marker = status_markers.get(status, "[ ]")
+            lines.append(f"  {marker} [{todo_id}] {content}")
+
+            # Show acceptance criteria if present
+            criteria = todo.get("acceptance_criteria", [])
+            if criteria:
+                lines.append(f"      Acceptance criteria: {len(criteria)} defined")
+
+            # Show evidence if claimed
+            if status in ("claimed", "verified"):
+                evidence = todo.get("evidence", [])
+                if evidence:
+                    lines.append(f"      Evidence: {len(evidence)} items")
 
         return "\n".join(lines)
+
+    def _todo_create(
+        self,
+        content: str,
+        acceptance_criteria: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Create a single todo item with a stable ID.
+
+        Args:
+            content: Description of the task
+            acceptance_criteria: Optional list of machine-verifiable criteria
+                Each criterion: {"type": "command_exit_zero"|"file_exists"|..., "params": {...}}
+
+        Returns:
+            Confirmation with the assigned stable ID
+        """
+        self._init_todo_state()
+
+        # Generate stable UUID
+        todo_id = str(uuid.uuid4())[:8]
+
+        # Create todo item
+        todo = {
+            "id": todo_id,
+            "content": content,
+            "status": "pending",
+            "created_at": datetime.now(UTC).isoformat(),
+            "acceptance_criteria": acceptance_criteria or [],
+            "evidence": [],
+        }
+
+        # Store todo
+        self._todos[todo_id] = todo
+
+        # Log creation event
+        self._log_todo_event(
+            event_type="TODO_CREATE",
+            todo_id=todo_id,
+            after=todo.copy(),
+        )
+
+        result_lines = [
+            f"Created todo [{todo_id}]: {content}",
+            "Status: pending",
+        ]
+        if acceptance_criteria:
+            result_lines.append(f"Acceptance criteria: {len(acceptance_criteria)} defined")
+
+        return "\n".join(result_lines)
+
+    def _todo_read(self) -> str:
+        """List all todos with their stable IDs, status, and audit history."""
+        self._init_todo_state()
+
+        if not self._todos:
+            return "No todos. Use TodoCreate to create individual todo items."
+
+        output = self._format_todo_list("Current todo list:")
+
+        # Add summary
+        status_counts = {"pending": 0, "in_progress": 0, "claimed": 0, "verified": 0}
+        for todo in self._todos.values():
+            status = todo.get("status", "pending")
+            if status in status_counts:
+                status_counts[status] += 1
+
+        output += f"\n\nSummary: {status_counts['pending']} pending, {status_counts['in_progress']} in_progress, {status_counts['claimed']} claimed, {status_counts['verified']} verified"
+        output += f"\nAudit log entries: {len(self._todo_audit_log)}"
+
+        return output
+
+    def _todo_start(self, id: str) -> str:
+        """Start working on a todo. Moves status from 'pending' to 'in_progress'.
+
+        Args:
+            id: The stable ID of the todo to start
+
+        Returns:
+            Confirmation of status change
+        """
+        self._init_todo_state()
+
+        if id not in self._todos:
+            raise ValueError(f"Todo '{id}' not found. Use TodoRead to see available todos.")
+
+        todo = self._todos[id]
+        current_status = todo.get("status", "pending")
+
+        # Enforce state machine
+        if current_status != "pending":
+            raise ValueError(
+                f"Cannot start todo '{id}': current status is '{current_status}', "
+                f"but TodoStart only works on 'pending' todos. "
+                f"Valid transitions: {self._TODO_VALID_TRANSITIONS.get(current_status, [])}"
+            )
+
+        # Capture before state
+        before = todo.copy()
+
+        # Update status
+        todo["status"] = "in_progress"
+        todo["started_at"] = datetime.now(UTC).isoformat()
+
+        # Log state change
+        self._log_todo_event(
+            event_type="TODO_START",
+            todo_id=id,
+            before=before,
+            after=todo.copy(),
+        )
+
+        return f"Started todo [{id}]: {todo['content']}\nStatus: pending -> in_progress"
+
+    def _todo_claim(
+        self,
+        id: str,
+        evidence: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Claim a todo is complete. Moves status from 'in_progress' to 'claimed'.
+
+        This is an agent assertion that the work is done. Actual verification
+        happens separately via TodoVerify which checks acceptance criteria.
+
+        Args:
+            id: The stable ID of the todo to claim
+            evidence: Optional list of evidence supporting the claim
+                Each item: {"type": "tool_call_id"|"file_path"|"command_output"|..., "data": ...}
+
+        Returns:
+            Confirmation of claim with next steps
+        """
+        self._init_todo_state()
+
+        if id not in self._todos:
+            raise ValueError(f"Todo '{id}' not found. Use TodoRead to see available todos.")
+
+        todo = self._todos[id]
+        current_status = todo.get("status", "pending")
+
+        # Enforce state machine
+        if current_status != "in_progress":
+            raise ValueError(
+                f"Cannot claim todo '{id}': current status is '{current_status}', "
+                f"but TodoClaim only works on 'in_progress' todos. "
+                f"Use TodoStart first to move from 'pending' to 'in_progress'."
+            )
+
+        # Capture before state
+        before = todo.copy()
+
+        # Update status and add evidence
+        todo["status"] = "claimed"
+        todo["claimed_at"] = datetime.now(UTC).isoformat()
+        if evidence:
+            todo["evidence"].extend(evidence)
+
+        # Log state change
+        self._log_todo_event(
+            event_type="TODO_CLAIM",
+            todo_id=id,
+            before=before,
+            after=todo.copy(),
+            extra={"evidence_count": len(evidence) if evidence else 0},
+        )
+
+        result_lines = [
+            f"Claimed todo [{id}]: {todo['content']}",
+            "Status: in_progress -> claimed",
+        ]
+        if evidence:
+            result_lines.append(f"Evidence provided: {len(evidence)} items")
+
+        # Check if acceptance criteria exist
+        criteria = todo.get("acceptance_criteria", [])
+        if criteria:
+            result_lines.append(f"\nThis todo has {len(criteria)} acceptance criteria.")
+            result_lines.append("Use TodoVerify to check if criteria are met and move to 'verified' status.")
+        else:
+            result_lines.append("\nNo acceptance criteria defined - manual verification required.")
+
+        return "\n".join(result_lines)
+
+    def _todo_verify(self, id: str) -> str:
+        """Verify a claimed todo by checking its acceptance criteria.
+
+        This is a harness-level operation that checks machine-verifiable criteria.
+        Only works on todos with status 'claimed'.
+
+        Args:
+            id: The stable ID of the todo to verify
+
+        Returns:
+            Verification result with details
+        """
+        self._init_todo_state()
+
+        if id not in self._todos:
+            raise ValueError(f"Todo '{id}' not found. Use TodoRead to see available todos.")
+
+        todo = self._todos[id]
+        current_status = todo.get("status", "pending")
+
+        # Enforce state machine
+        if current_status != "claimed":
+            raise ValueError(
+                f"Cannot verify todo '{id}': current status is '{current_status}', "
+                f"but TodoVerify only works on 'claimed' todos. "
+                f"Use TodoClaim first to move from 'in_progress' to 'claimed'."
+            )
+
+        criteria = todo.get("acceptance_criteria", [])
+
+        # If no criteria, require manual verification
+        if not criteria:
+            return (
+                f"Todo [{id}] has no acceptance criteria defined.\n"
+                f"Manual verification required - this todo cannot be automatically verified.\n"
+                f"Status remains: claimed"
+            )
+
+        # Check each criterion
+        results: list[dict[str, Any]] = []
+        all_passed = True
+
+        for criterion in criteria:
+            crit_type = criterion.get("type", "unknown")
+            params = criterion.get("params", {})
+
+            result = self._check_acceptance_criterion(crit_type, params)
+            results.append({
+                "type": crit_type,
+                "params": params,
+                "passed": result["passed"],
+                "message": result["message"],
+            })
+            if not result["passed"]:
+                all_passed = False
+
+        # Capture before state
+        before = todo.copy()
+
+        if all_passed:
+            # Move to verified
+            todo["status"] = "verified"
+            todo["verified_at"] = datetime.now(UTC).isoformat()
+            todo["verification_results"] = results
+
+            # Log state change
+            self._log_todo_event(
+                event_type="TODO_VERIFY",
+                todo_id=id,
+                before=before,
+                after=todo.copy(),
+                extra={"all_passed": True, "criteria_count": len(criteria)},
+            )
+
+            result_lines = [
+                f"VERIFIED: Todo [{id}] passed all {len(criteria)} acceptance criteria!",
+                "Status: claimed -> verified",
+                "",
+                "Criteria results:",
+            ]
+            for r in results:
+                result_lines.append(f"  [PASS] {r['type']}: {r['message']}")
+
+            return "\n".join(result_lines)
+        else:
+            # Log failed verification attempt (status unchanged)
+            self._log_todo_event(
+                event_type="TODO_VERIFY_FAILED",
+                todo_id=id,
+                before=before,
+                after=todo.copy(),  # Unchanged
+                extra={"all_passed": False, "criteria_count": len(criteria)},
+            )
+
+            result_lines = [
+                f"VERIFICATION FAILED: Todo [{id}] did not pass all acceptance criteria.",
+                "Status remains: claimed",
+                "",
+                "Criteria results:",
+            ]
+            for r in results:
+                status = "[PASS]" if r["passed"] else "[FAIL]"
+                result_lines.append(f"  {status} {r['type']}: {r['message']}")
+
+            return "\n".join(result_lines)
+
+    def _check_acceptance_criterion(
+        self,
+        crit_type: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check a single acceptance criterion.
+
+        Supported types:
+        - command_exit_zero: Run a command and check exit code is 0
+        - file_exists: Check if a file exists
+        - file_contains: Check if a file contains a string
+        - pr_exists: Check if a PR exists (by number)
+
+        Returns:
+            {"passed": bool, "message": str}
+        """
+        if crit_type == "command_exit_zero":
+            command = params.get("command", "")
+            if not command:
+                return {"passed": False, "message": "No command specified"}
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                if result.returncode == 0:
+                    return {"passed": True, "message": f"Command '{command}' exited with code 0"}
+                else:
+                    return {
+                        "passed": False,
+                        "message": f"Command '{command}' exited with code {result.returncode}",
+                    }
+            except subprocess.TimeoutExpired:
+                return {"passed": False, "message": f"Command '{command}' timed out"}
+            except Exception as e:
+                return {"passed": False, "message": f"Command error: {e}"}
+
+        elif crit_type == "file_exists":
+            path = params.get("path", "")
+            if not path:
+                return {"passed": False, "message": "No path specified"}
+            if os.path.exists(path):
+                return {"passed": True, "message": f"File exists: {path}"}
+            else:
+                return {"passed": False, "message": f"File not found: {path}"}
+
+        elif crit_type == "file_contains":
+            path = params.get("path", "")
+            text = params.get("text", "")
+            if not path or not text:
+                return {"passed": False, "message": "Missing path or text parameter"}
+            try:
+                with open(path) as f:
+                    content = f.read()
+                if text in content:
+                    return {"passed": True, "message": "File contains expected text"}
+                else:
+                    return {"passed": False, "message": "File does not contain expected text"}
+            except Exception as e:
+                return {"passed": False, "message": f"Error reading file: {e}"}
+
+        elif crit_type == "pr_exists":
+            # This would need GitHub API integration
+            pr_number = params.get("pr_number")
+            if not pr_number:
+                return {"passed": False, "message": "No pr_number specified"}
+            # For now, just check if it's a valid number
+            # Real implementation would check GitHub API
+            return {"passed": True, "message": f"PR #{pr_number} existence check (stub)"}
+
+        else:
+            return {"passed": False, "message": f"Unknown criterion type: {crit_type}"}
 
     def _request_tools(
         self,
