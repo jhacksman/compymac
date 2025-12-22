@@ -258,7 +258,7 @@ class Span:
 class Checkpoint:
     """
     A checkpoint captures the complete agent state at a point in time.
-    
+
     Checkpoints enable:
     - Pause/resume: Stop execution and continue later
     - Time-travel: Navigate backward and forward through execution
@@ -288,7 +288,7 @@ class Checkpoint:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Checkpoint":
+    def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
         return cls(
             checkpoint_id=data["checkpoint_id"],
             trace_id=data["trace_id"],
@@ -306,7 +306,7 @@ class Checkpoint:
 class SessionOverview:
     """
     High-level summary of a session for quick overview.
-    
+
     This is the "overview" view that can be expanded into full detail.
     """
     trace_id: str
@@ -896,7 +896,7 @@ class TraceStore:
     ) -> Checkpoint:
         """
         Create a checkpoint capturing the complete agent state.
-        
+
         Args:
             trace_id: The trace this checkpoint belongs to
             step_number: Current step number in the execution
@@ -904,7 +904,7 @@ class TraceStore:
             state_data: Serialized agent state (messages, tool state, etc.)
             parent_checkpoint_id: If forking, the parent checkpoint
             metadata: Additional metadata
-            
+
         Returns:
             The created Checkpoint
         """
@@ -932,8 +932,8 @@ class TraceStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO checkpoints 
-                (checkpoint_id, trace_id, created_ts, status, step_number, 
+                INSERT INTO checkpoints
+                (checkpoint_id, trace_id, created_ts, status, step_number,
                  description, state_artifact_hash, parent_checkpoint_id, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -959,11 +959,11 @@ class TraceStore:
     ) -> list[Checkpoint]:
         """
         List all checkpoints for a trace.
-        
+
         Args:
             trace_id: The trace to list checkpoints for
             status: Optional filter by status
-            
+
         Returns:
             List of checkpoints ordered by step number
         """
@@ -1002,10 +1002,10 @@ class TraceStore:
     def get_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
         """
         Get a checkpoint by ID.
-        
+
         Args:
             checkpoint_id: The checkpoint ID
-            
+
         Returns:
             The checkpoint or None if not found
         """
@@ -1038,10 +1038,10 @@ class TraceStore:
     def get_checkpoint_state(self, checkpoint_id: str) -> bytes | None:
         """
         Get the serialized state data for a checkpoint.
-        
+
         Args:
             checkpoint_id: The checkpoint ID
-            
+
         Returns:
             The serialized state data or None if not found
         """
@@ -1057,7 +1057,7 @@ class TraceStore:
     ) -> None:
         """
         Update the status of a checkpoint.
-        
+
         Args:
             checkpoint_id: The checkpoint ID
             status: The new status
@@ -1075,14 +1075,14 @@ class TraceStore:
     ) -> tuple[str, Checkpoint]:
         """
         Fork execution from a checkpoint, creating a new trace.
-        
+
         This marks the original checkpoint as FORKED and creates a new
         checkpoint in the forked trace that references the parent.
-        
+
         Args:
             checkpoint_id: The checkpoint to fork from
             new_trace_id: Optional new trace ID (generated if not provided)
-            
+
         Returns:
             Tuple of (new_trace_id, new_checkpoint)
         """
@@ -1123,12 +1123,12 @@ class TraceStore:
     def get_session_overview(self, trace_id: str) -> SessionOverview:
         """
         Generate a high-level overview of a session.
-        
+
         This is the "overview" view that can be expanded into full detail.
-        
+
         Args:
             trace_id: The trace to generate overview for
-            
+
         Returns:
             SessionOverview with summary statistics
         """
@@ -1230,14 +1230,14 @@ class TraceStore:
     ) -> list[dict[str, Any]]:
         """
         Get a timeline of all events in a session.
-        
+
         This is the "full detail" view that shows every event.
-        
+
         Args:
             trace_id: The trace to get timeline for
             since: Optional start time filter
             until: Optional end time filter
-            
+
         Returns:
             List of events in chronological order
         """
