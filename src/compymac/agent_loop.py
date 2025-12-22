@@ -45,6 +45,7 @@ class AgentConfig:
     memory_compression_threshold: float = 0.80  # Compress when utilization exceeds this
     memory_keep_recent_turns: int = 4  # Number of recent turns to always keep
     trace_base_path: Path | None = None  # Base path for trace storage (enables tracing if set)
+    summarize_tool_output: bool = True  # Enable tool output summarization to reduce context
 
 
 @dataclass
@@ -291,10 +292,24 @@ class AgentLoop:
             result = self.harness.execute(tool_call)
             tool_results.append(result)
 
+            # Summarize tool output if enabled to reduce context bloat
+            content_for_message = result.content
+            if self.config.summarize_tool_output and result.content:
+                from compymac.memory import ToolOutputSummarizer
+                original_len = len(result.content)
+                content_for_message = ToolOutputSummarizer.summarize(
+                    tool_call.name, result.content
+                )
+                if len(content_for_message) < original_len:
+                    logger.debug(
+                        f"Summarized {tool_call.name} output: "
+                        f"{original_len} -> {len(content_for_message)} chars"
+                    )
+
             # Add tool result to messages
             self.state.messages.append(Message(
                 role="tool",
-                content=result.content,
+                content=content_for_message,
                 tool_call_id=result.tool_call_id,
             ))
 

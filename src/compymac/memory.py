@@ -34,9 +34,14 @@ class MemoryFacts:
     errors_encountered: list[str] = field(default_factory=list)
     user_requirements: list[str] = field(default_factory=list)
     decisions_made: list[str] = field(default_factory=list)
+    # Structured context schema fields (from game plan)
+    contract_goal: str = ""  # What the user wants accomplished
+    current_plan: list[str] = field(default_factory=list)  # Current plan steps
+    repo_facts: dict[str, str] = field(default_factory=dict)  # Known repo info (build cmd, test cmd, etc)
+    open_questions: list[str] = field(default_factory=list)  # Unresolved questions
 
-    def to_dict(self) -> dict[str, list[str]]:
-        return {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "files_created": self.files_created[-5:],  # Keep last 5
             "files_modified": self.files_modified[-5:],
             "files_read": self.files_read[-10:],
@@ -45,10 +50,31 @@ class MemoryFacts:
             "user_requirements": self.user_requirements,
             "decisions_made": self.decisions_made[-5:],
         }
+        # Add structured context schema fields if populated
+        if self.contract_goal:
+            result["contract_goal"] = self.contract_goal
+        if self.current_plan:
+            result["current_plan"] = self.current_plan
+        if self.repo_facts:
+            result["repo_facts"] = self.repo_facts
+        if self.open_questions:
+            result["open_questions"] = self.open_questions
+        return result
 
     def to_string(self) -> str:
         """Convert facts to a compact string representation."""
         parts = []
+        # Structured context schema fields first (highest priority)
+        if self.contract_goal:
+            parts.append(f"Goal: {self.contract_goal}")
+        if self.current_plan:
+            parts.append(f"Plan: {' -> '.join(self.current_plan[:5])}")
+        if self.open_questions:
+            parts.append(f"Open questions: {'; '.join(self.open_questions[-3:])}")
+        if self.repo_facts:
+            repo_info = [f"{k}: {v}" for k, v in list(self.repo_facts.items())[:5]]
+            parts.append(f"Repo: {', '.join(repo_info)}")
+        # Original facts
         if self.files_created:
             parts.append(f"Files created: {', '.join(self.files_created[-5:])}")
         if self.files_modified:
@@ -374,3 +400,240 @@ Summary:"""
     def reset(self) -> None:
         """Reset memory state."""
         self.state = MemoryState()
+
+    # Structured context schema setters
+    def set_contract_goal(self, goal: str) -> None:
+        """Set the contract/goal for the current task."""
+        self.state.facts.contract_goal = goal
+        logger.debug(f"Set contract goal: {goal[:100]}...")
+
+    def set_current_plan(self, plan_steps: list[str]) -> None:
+        """Set the current plan steps."""
+        self.state.facts.current_plan = plan_steps
+        logger.debug(f"Set plan with {len(plan_steps)} steps")
+
+    def add_plan_step(self, step: str) -> None:
+        """Add a step to the current plan."""
+        self.state.facts.current_plan.append(step)
+
+    def complete_plan_step(self, step_index: int) -> None:
+        """Mark a plan step as complete by removing it."""
+        if 0 <= step_index < len(self.state.facts.current_plan):
+            completed = self.state.facts.current_plan.pop(step_index)
+            logger.debug(f"Completed plan step: {completed}")
+
+    def set_repo_facts(self, facts: dict[str, str]) -> None:
+        """Set known repo facts (build cmd, test cmd, lint cmd, etc)."""
+        self.state.facts.repo_facts = facts
+        logger.debug(f"Set repo facts: {list(facts.keys())}")
+
+    def add_repo_fact(self, key: str, value: str) -> None:
+        """Add a single repo fact."""
+        self.state.facts.repo_facts[key] = value
+
+    def add_open_question(self, question: str) -> None:
+        """Add an open question that needs resolution."""
+        self.state.facts.open_questions.append(question)
+        logger.debug(f"Added open question: {question[:50]}...")
+
+    def resolve_question(self, question_index: int) -> None:
+        """Resolve an open question by removing it."""
+        if 0 <= question_index < len(self.state.facts.open_questions):
+            resolved = self.state.facts.open_questions.pop(question_index)
+            logger.debug(f"Resolved question: {resolved[:50]}...")
+
+
+class ToolOutputSummarizer:
+    """
+    Summarizes large tool outputs to reduce context bloat.
+
+    Tool outputs are often the biggest source of context pressure:
+    - File reads can be thousands of lines
+    - Grep results can return hundreds of matches
+    - Shell output can be verbose
+
+    This summarizer applies heuristics to compress outputs while
+    preserving the most important information.
+    """
+
+    # Maximum characters for different output types
+    MAX_FILE_CONTENT = 8000  # ~2000 tokens
+    MAX_GREP_RESULTS = 4000  # ~1000 tokens
+    MAX_SHELL_OUTPUT = 4000  # ~1000 tokens
+    MAX_GENERIC_OUTPUT = 6000  # ~1500 tokens
+
+    @classmethod
+    def summarize(cls, tool_name: str, output: str) -> str:
+        """
+        Summarize tool output based on tool type.
+
+        Args:
+            tool_name: Name of the tool that produced the output
+            output: Raw tool output
+
+        Returns:
+            Summarized output (may be unchanged if already small)
+        """
+        if not output:
+            return output
+
+        # Route to appropriate summarizer based on tool
+        if tool_name in ("Read", "fs_read_file"):
+            return cls._summarize_file_content(output)
+        elif tool_name == "grep":
+            return cls._summarize_grep_results(output)
+        elif tool_name in ("bash", "bash_output"):
+            return cls._summarize_shell_output(output)
+        elif tool_name == "glob":
+            return cls._summarize_glob_results(output)
+        elif tool_name in ("web_search", "web_get_contents"):
+            return cls._summarize_web_content(output)
+        else:
+            return cls._summarize_generic(output)
+
+    @classmethod
+    def _summarize_file_content(cls, content: str) -> str:
+        """Summarize file content, keeping structure visible."""
+        if len(content) <= cls.MAX_FILE_CONTENT:
+            return content
+
+        lines = content.split('\n')
+        total_lines = len(lines)
+
+        # Keep first 50 lines and last 20 lines
+        head_lines = 50
+        tail_lines = 20
+
+        if total_lines <= head_lines + tail_lines:
+            return content
+
+        head = '\n'.join(lines[:head_lines])
+        tail = '\n'.join(lines[-tail_lines:])
+        omitted = total_lines - head_lines - tail_lines
+
+        return f"{head}\n\n[... {omitted} lines omitted ...]\n\n{tail}"
+
+    @classmethod
+    def _summarize_grep_results(cls, content: str) -> str:
+        """Summarize grep results, keeping unique files and sample matches."""
+        if len(content) <= cls.MAX_GREP_RESULTS:
+            return content
+
+        lines = content.split('\n')
+
+        # For files_with_matches mode, just truncate the list
+        if not any(':' in line and len(line.split(':')) >= 2 for line in lines[:10]):
+            # Looks like just file paths
+            if len(lines) > 50:
+                return '\n'.join(lines[:50]) + f"\n\n[... {len(lines) - 50} more files ...]"
+            return content
+
+        # For content mode, group by file and show samples
+        files_seen: dict[str, list[str]] = {}
+        for line in lines:
+            if ':' in line:
+                parts = line.split(':', 2)
+                if len(parts) >= 2:
+                    file_path = parts[0]
+                    if file_path not in files_seen:
+                        files_seen[file_path] = []
+                    if len(files_seen[file_path]) < 3:  # Keep max 3 matches per file
+                        files_seen[file_path].append(line)
+
+        # Build summary
+        result_lines = []
+        for file_path, matches in list(files_seen.items())[:20]:  # Max 20 files
+            result_lines.extend(matches)
+            if len(files_seen[file_path]) > 3:
+                result_lines.append(f"  [... {len(files_seen[file_path]) - 3} more matches in {file_path} ...]")
+
+        if len(files_seen) > 20:
+            result_lines.append(f"\n[... {len(files_seen) - 20} more files with matches ...]")
+
+        return '\n'.join(result_lines)
+
+    @classmethod
+    def _summarize_shell_output(cls, content: str) -> str:
+        """Summarize shell output, keeping errors and key info."""
+        if len(content) <= cls.MAX_SHELL_OUTPUT:
+            return content
+
+        lines = content.split('\n')
+
+        # Prioritize error lines
+        error_lines = [line for line in lines if any(e in line.lower() for e in ['error', 'failed', 'exception', 'warning'])]
+
+        # Keep first 30 and last 20 lines
+        head_lines = 30
+        tail_lines = 20
+
+        head = '\n'.join(lines[:head_lines])
+        tail = '\n'.join(lines[-tail_lines:])
+        omitted = len(lines) - head_lines - tail_lines
+
+        result = f"{head}\n\n[... {omitted} lines omitted ...]"
+
+        # Add error summary if there were errors in omitted section
+        omitted_errors = [line for line in lines[head_lines:-tail_lines] if line in error_lines]
+        if omitted_errors:
+            result += f"\n[Errors in omitted section: {len(omitted_errors)} error lines]"
+
+        result += f"\n\n{tail}"
+        return result
+
+    @classmethod
+    def _summarize_glob_results(cls, content: str) -> str:
+        """Summarize glob results, grouping by directory."""
+        if len(content) <= cls.MAX_GENERIC_OUTPUT:
+            return content
+
+        lines = content.split('\n')
+        if len(lines) <= 100:
+            return content
+
+        # Group by directory
+        dirs: dict[str, int] = {}
+        for line in lines:
+            if '/' in line:
+                dir_path = '/'.join(line.split('/')[:-1])
+                dirs[dir_path] = dirs.get(dir_path, 0) + 1
+
+        # Show first 50 files and directory summary
+        result = '\n'.join(lines[:50])
+        result += f"\n\n[... {len(lines) - 50} more files ...]\n"
+        result += "\nFiles by directory:\n"
+        for dir_path, count in sorted(dirs.items(), key=lambda x: -x[1])[:10]:
+            result += f"  {dir_path}: {count} files\n"
+
+        return result
+
+    @classmethod
+    def _summarize_web_content(cls, content: str) -> str:
+        """Summarize web content, keeping structure."""
+        if len(content) <= cls.MAX_GENERIC_OUTPUT:
+            return content
+
+        # For web content, keep first portion with note about truncation
+        truncated = content[:cls.MAX_GENERIC_OUTPUT]
+        # Try to end at a sentence boundary
+        last_period = truncated.rfind('.')
+        if last_period > cls.MAX_GENERIC_OUTPUT * 0.8:
+            truncated = truncated[:last_period + 1]
+
+        return truncated + f"\n\n[... content truncated, {len(content) - len(truncated)} chars omitted ...]"
+
+    @classmethod
+    def _summarize_generic(cls, content: str) -> str:
+        """Generic summarization for unknown tool types."""
+        if len(content) <= cls.MAX_GENERIC_OUTPUT:
+            return content
+
+        # Simple head/tail truncation
+        head_chars = int(cls.MAX_GENERIC_OUTPUT * 0.7)
+        tail_chars = int(cls.MAX_GENERIC_OUTPUT * 0.25)
+
+        head = content[:head_chars]
+        tail = content[-tail_chars:]
+        omitted = len(content) - head_chars - tail_chars
+
+        return f"{head}\n\n[... {omitted} chars omitted ...]\n\n{tail}"

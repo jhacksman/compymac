@@ -26,9 +26,9 @@ class LLMConfig:
     def from_env(cls) -> "LLMConfig":
         """Load configuration from environment variables."""
         return cls(
-            base_url=os.getenv("LLM_BASE_URL", "http://localhost:11434/v1"),
-            api_key=os.getenv("LLM_API_KEY", "ollama"),
-            model=os.getenv("LLM_MODEL", "llama3.2"),
+            base_url=os.getenv("LLM_BASE_URL", "http://localhost:8000/v1"),
+            api_key=os.getenv("LLM_API_KEY", ""),
+            model=os.getenv("LLM_MODEL", ""),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         )

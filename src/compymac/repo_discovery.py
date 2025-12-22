@@ -20,7 +20,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from compymac.memory import MemoryManager
 
 try:
     import tomllib
@@ -645,3 +648,50 @@ def discover_repo(repo_path: Path | str) -> RepoConfig:
     """Convenience function to discover repo configuration."""
     discovery = RepoDiscovery(repo_path)
     return discovery.discover()
+
+
+def populate_memory_with_repo_facts(
+    memory_manager: "MemoryManager",
+    repo_config: RepoConfig,
+) -> None:
+    """
+    Populate memory manager with discovered repo facts.
+
+    This integrates repo_discovery with the structured context schema,
+    automatically setting repo_facts in the memory system based on
+    discovered commands.
+
+    Args:
+        memory_manager: The MemoryManager instance to populate
+        repo_config: Discovered repo configuration from discover_repo()
+    """
+    repo_facts: dict[str, str] = {}
+
+    # Add language and package manager
+    if repo_config.language:
+        repo_facts["language"] = repo_config.language
+    if repo_config.package_manager:
+        repo_facts["package_manager"] = repo_config.package_manager
+
+    # Add primary commands
+    test_cmd = repo_config.get_test_command()
+    if test_cmd:
+        repo_facts["test_cmd"] = test_cmd.command
+
+    lint_cmd = repo_config.get_lint_command()
+    if lint_cmd:
+        repo_facts["lint_cmd"] = lint_cmd.command
+
+    build_cmd = repo_config.get_build_command()
+    if build_cmd:
+        repo_facts["build_cmd"] = build_cmd.command
+
+    format_cmd = repo_config.get_format_command()
+    if format_cmd:
+        repo_facts["format_cmd"] = format_cmd.command
+
+    # Add repo path
+    repo_facts["repo_path"] = str(repo_config.repo_path)
+
+    # Set the facts in memory
+    memory_manager.set_repo_facts(repo_facts)
