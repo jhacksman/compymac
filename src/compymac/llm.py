@@ -2,9 +2,9 @@
 LLM Client - Abstraction over LLM backends.
 
 This client works with any OpenAI-compatible API:
-- vLLM (http://localhost:8000/v1)
-- Ollama (http://localhost:11434/v1)
-- Venice.ai
+- vLLM (http://localhost:8000/v1) - DEFAULT, optimized for high-throughput serving
+- Venice.ai (https://api.venice.ai/api/v1) - hosted option
+- Ollama (http://localhost:11434/v1) - local development option
 - OpenAI itself
 
 The abstraction is intentionally thin - we're not hiding complexity,
