@@ -179,7 +179,8 @@ class LocalHarness(Harness):
         self._last_verification_result: VerificationResult | None = None
 
         # Safety policy engine for runtime safety enforcement
-        self._policy_engine = PolicyEngine(enabled=True)
+        # Respects config setting (disabled by default for backward compatibility)
+        self._policy_engine = PolicyEngine(enabled=self.config.enable_safety_policies)
 
         # Register default tools
         self._register_default_tools()
