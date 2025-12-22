@@ -61,7 +61,7 @@ class ToolCategory(Enum):
     MCP = "mcp"  # mcp_tool
     AI = "ai"  # ask_smart_friend, visual_checker
     SECRETS = "secrets"  # list_secrets
-    TODO = "todo"  # TodoWrite
+    TODO = "todo"  # TodoCreate, TodoRead, TodoStart, TodoClaim, TodoVerify
 
 
 @dataclass
@@ -431,7 +431,13 @@ class LocalHarness(Harness):
             name="TodoCreate",
             schema=ToolSchema(
                 name="TodoCreate",
-                description="Create a single todo item. Returns a stable ID for tracking. Use acceptance_criteria for machine-verifiable completion conditions.",
+                description=(
+                    "Create a single todo item with a stable ID. "
+                    "Flow: TodoCreate -> TodoStart -> TodoClaim -> TodoVerify. "
+                    "Use acceptance_criteria for machine-verifiable completion: "
+                    "[{\"type\": \"command_exit_zero\", \"params\": {\"command\": \"ruff check\"}}, "
+                    "{\"type\": \"file_exists\", \"params\": {\"path\": \"/path/to/file\"}}]"
+                ),
                 required_params=["content"],
                 optional_params=["acceptance_criteria"],
                 param_types={
@@ -476,7 +482,13 @@ class LocalHarness(Harness):
             name="TodoClaim",
             schema=ToolSchema(
                 name="TodoClaim",
-                description="Claim a todo is complete. Moves status from 'in_progress' to 'claimed'. Provide evidence (tool_call_ids, file paths, etc.) to support the claim. Verification happens separately.",
+                description=(
+                    "Claim a todo is complete. IMPORTANT: 'claimed' is NOT done - only 'verified' counts as complete. "
+                    "Moves status from 'in_progress' to 'claimed'. Provide evidence to support the claim. "
+                    "Evidence format: [{\"type\": \"tool_call_id\", \"data\": \"call_xyz\"}, "
+                    "{\"type\": \"file_path\", \"data\": \"/path/to/output\"}]. "
+                    "Use TodoVerify next to check acceptance criteria."
+                ),
                 required_params=["id"],
                 optional_params=["evidence"],
                 param_types={
@@ -493,7 +505,11 @@ class LocalHarness(Harness):
             name="TodoVerify",
             schema=ToolSchema(
                 name="TodoVerify",
-                description="Verify a claimed todo by checking its acceptance criteria. Only works on 'claimed' todos. Returns verification result.",
+                description=(
+                    "Verify a claimed todo by checking its acceptance criteria. "
+                    "Only works on 'claimed' todos. If all criteria pass, moves to 'verified' (the only true completion state). "
+                    "If criteria fail, status remains 'claimed' - fix the issue and verify again."
+                ),
                 required_params=["id"],
                 optional_params=[],
                 param_types={"id": "string"},

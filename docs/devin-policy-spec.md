@@ -26,9 +26,16 @@ Absolutely NO emojis unless explicitly requested.
 Do NOT output any white check marks. If anything did NOT work, explain that carefully.
 
 ### 5. Task Management
-Use the TodoWrite tool VERY frequently to track tasks and give the user visibility.
+Use the guardrailed todo tools to track tasks with verifiable completion:
+- TodoCreate: Create individual todos with optional acceptance criteria
+- TodoStart: Move todo from pending to in_progress
+- TodoClaim: Assert work is done (claimed is NOT complete - only verified is complete)
+- TodoVerify: Check acceptance criteria to move from claimed to verified
+
+Typical flow: TodoCreate → TodoStart → TodoClaim → TodoVerify
+
 Maintain requirements in ~/.devin/requirements.md
-Mark todos as completed as soon as you are done with a task.
+Only "verified" todos count as done. "Claimed" is just an assertion.
 
 ### 6. Software Engineering Workflow
 Use search and lsp tools to understand the codebase.
