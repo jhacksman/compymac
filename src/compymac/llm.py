@@ -2,15 +2,18 @@
 LLM Client - Abstraction over LLM backends.
 
 This client works with any OpenAI-compatible API:
-- vLLM (http://localhost:8000/v1)
-- Ollama (http://localhost:11434/v1)
-- Venice.ai
-- OpenAI itself
+- vLLM (http://localhost:8000/v1) - DEFAULT, optimized for high-throughput serving
+- Venice.ai (https://api.venice.ai/api/v1) - hosted option with function calling
+- Ollama (http://localhost:11434/v1) - local development, simpler setup
+- OpenAI (https://api.openai.com/v1) - original API
 
 The abstraction is intentionally thin - we're not hiding complexity,
 we're just making the backend swappable via configuration.
 
-Includes timeout and retry logic for resilience against API hangs.
+Includes:
+- Fail-fast validation for required config (LLM_MODEL, LLM_BASE_URL)
+- Connection refused detection (no 60s retry waits)
+- Timeout and retry logic for transient errors
 """
 
 import json
@@ -52,6 +55,7 @@ class LLMClient:
         config: LLMConfig | None = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_delay: float = DEFAULT_RETRY_DELAY,
+        validate_config: bool = True,
     ) -> None:
         """Initialize the client with configuration.
 
@@ -59,10 +63,18 @@ class LLMClient:
             config: LLM configuration (model, API key, etc.)
             max_retries: Maximum number of retries for timeout/network errors
             retry_delay: Seconds to wait before retrying after a timeout
+            validate_config: If True, validate required config fields on init
+
+        Raises:
+            LLMConfigError: If required configuration is missing
         """
         self.config = config or LLMConfig.from_env()
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+
+        # Fail-fast validation for required configuration
+        if validate_config:
+            self._validate_config()
 
         # Use layered timeouts for better control
         timeout = httpx.Timeout(
@@ -72,14 +84,47 @@ class LLMClient:
             pool=DEFAULT_POOL_TIMEOUT,
         )
 
+        # Only include Authorization header if api_key is set
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+
         self._client = httpx.Client(
             base_url=self.config.base_url,
-            headers={
-                "Authorization": f"Bearer {self.config.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=timeout,
         )
+
+    def _validate_config(self) -> None:
+        """Validate required configuration fields.
+
+        Raises:
+            LLMConfigError: If required configuration is missing
+        """
+        errors: list[str] = []
+
+        if not self.config.model:
+            errors.append(
+                "LLM_MODEL is not set. Set it to the model name your LLM server is serving.\n"
+                "  Examples:\n"
+                "    - vLLM: LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct\n"
+                "    - Venice.ai: LLM_MODEL=qwen3-coder-480b-a35b-instruct\n"
+                "    - Ollama: LLM_MODEL=llama3.2"
+            )
+
+        if not self.config.base_url:
+            errors.append(
+                "LLM_BASE_URL is not set. Set it to your LLM server's API endpoint.\n"
+                "  Examples:\n"
+                "    - vLLM: LLM_BASE_URL=http://localhost:8000/v1\n"
+                "    - Venice.ai: LLM_BASE_URL=https://api.venice.ai/api/v1\n"
+                "    - Ollama: LLM_BASE_URL=http://localhost:11434/v1"
+            )
+
+        if errors:
+            raise LLMConfigError(
+                "LLM configuration is incomplete:\n\n" + "\n\n".join(errors)
+            )
 
     def chat(
         self,
@@ -163,8 +208,28 @@ class LLMClient:
                 logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
                 raise LLMError(f"HTTP {e.response.status_code}: {e.response.text}") from e
 
+            except httpx.ConnectError as e:
+                # Connection refused - fail fast, don't retry
+                # This usually means the server isn't running
+                error_str = str(e)
+                if "Connection refused" in error_str or "ConnectError" in error_str:
+                    raise LLMConnectionError(
+                        f"Cannot connect to LLM server at {self.config.base_url}\n\n"
+                        f"The server appears to be offline or not listening.\n\n"
+                        f"Troubleshooting:\n"
+                        f"  1. Check if your LLM server is running\n"
+                        f"  2. Verify LLM_BASE_URL is correct: {self.config.base_url}\n"
+                        f"  3. For vLLM: python -m vllm.entrypoints.openai.api_server --model <model>\n"
+                        f"  4. For Ollama: ollama serve\n"
+                        f"  5. For Venice.ai: Use LLM_BASE_URL=https://api.venice.ai/api/v1"
+                    ) from e
+                # Other connect errors might be transient
+                logger.warning(f"Connect error (attempt {attempt + 1}): {e}")
+                last_error = e
+                continue
+
             except httpx.RequestError as e:
-                # Network errors are retryable
+                # Other network errors are retryable
                 logger.warning(f"Request error (attempt {attempt + 1}): {e}")
                 last_error = e
                 continue
@@ -285,4 +350,14 @@ class ChatResponse:
 
 class LLMError(Exception):
     """Error from the LLM client."""
+    pass
+
+
+class LLMConfigError(LLMError):
+    """Error from missing or invalid LLM configuration."""
+    pass
+
+
+class LLMConnectionError(LLMError):
+    """Error connecting to the LLM server (e.g., connection refused)."""
     pass

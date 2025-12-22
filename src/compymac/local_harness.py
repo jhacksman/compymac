@@ -2302,13 +2302,44 @@ class LocalHarness(Harness):
                 return {"passed": False, "message": f"Error reading file: {e}"}
 
         elif crit_type == "pr_exists":
-            # This would need GitHub API integration
+            # Check PR existence using GitHub API
             pr_number = params.get("pr_number")
+            repo = params.get("repo")
             if not pr_number:
                 return {"passed": False, "message": "No pr_number specified"}
-            # For now, just check if it's a valid number
-            # Real implementation would check GitHub API
-            return {"passed": True, "message": f"PR #{pr_number} existence check (stub)"}
+            if not repo:
+                return {"passed": False, "message": "No repo specified (format: owner/repo)"}
+
+            # Use GitHub API to verify PR exists
+            import httpx
+            token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+            if not token:
+                return {"passed": False, "message": "GITHUB_TOKEN not set - cannot verify PR existence"}
+
+            # Normalize repo format
+            if repo.startswith("github.com/"):
+                repo = repo[11:]
+
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.get(
+                        f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Accept": "application/vnd.github+json",
+                        },
+                    )
+                    if response.status_code == 200:
+                        pr_data = response.json()
+                        state = pr_data.get("state", "unknown")
+                        title = pr_data.get("title", "")[:50]
+                        return {"passed": True, "message": f"PR #{pr_number} exists ({state}): {title}"}
+                    elif response.status_code == 404:
+                        return {"passed": False, "message": f"PR #{pr_number} not found in {repo}"}
+                    else:
+                        return {"passed": False, "message": f"GitHub API error: {response.status_code}"}
+            except Exception as e:
+                return {"passed": False, "message": f"Error checking PR: {e}"}
 
         else:
             return {"passed": False, "message": f"Unknown criterion type: {crit_type}"}
@@ -3888,8 +3919,29 @@ Steps to configure:
 
 Alternative: You can manually expose by running:
   ngrok http {port or 3000}"""
-            # TODO: Implement actual ngrok tunnel
-            return "Error: ngrok tunnel not yet implemented. Token is configured but integration pending."
+            # ngrok integration requires the pyngrok library
+            try:
+                from pyngrok import ngrok as pyngrok_client
+
+                # Start tunnel
+                tunnel = pyngrok_client.connect(port, "http")
+                public_url = tunnel.public_url
+
+                return f"""Port {port} exposed to the internet.
+
+Public URL: {public_url}
+
+This tunnel will remain active until you kill the process or call recording_stop.
+Share this URL with users to let them access your local server."""
+            except ImportError:
+                return """Error: pyngrok library not installed.
+
+To enable port exposure, install pyngrok:
+  pip install pyngrok
+
+Then set NGROK_AUTHTOKEN and try again."""
+            except Exception as e:
+                return f"Error creating ngrok tunnel: {e}"
 
     def _recording_start(self) -> str:
         """Start a new screen recording using ffmpeg.
