@@ -53,6 +53,7 @@ class AgentConfig:
     # ACI-style grounding (SWE-agent research)
     force_complete_on_last_step: bool = False  # If True, inject "must call complete" on last step
     grounding_context: dict | None = None  # Context to re-inject every turn (repo_path, cwd, etc.)
+    use_active_toolset: bool = False  # If True, use harness.get_active_tool_schemas() instead of get_tool_schemas()
 
 
 @dataclass
@@ -156,7 +157,11 @@ class AgentLoop:
             )
 
         # Get tool schemas from harness
-        tools = self.harness.get_tool_schemas()
+        # Use active toolset if configured (for ACI-style closed action space)
+        if self.config.use_active_toolset and hasattr(self.harness, 'get_active_tool_schemas'):
+            tools = self.harness.get_active_tool_schemas()
+        else:
+            tools = self.harness.get_tool_schemas()
 
         # Call LLM
         self._event_log.log_event(

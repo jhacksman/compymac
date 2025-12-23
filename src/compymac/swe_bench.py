@@ -509,6 +509,7 @@ Tests that must pass: {test_names}
                 "repo_path": str(repo_path),
                 "failing_tests": task.fail_to_pass[:3],
             },
+            use_active_toolset=True,  # Use filtered tool schemas (ACI-style closed action space)
         )
 
         total_tool_calls = 0
