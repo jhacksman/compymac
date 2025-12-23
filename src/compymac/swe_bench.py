@@ -469,25 +469,32 @@ PROBLEM:
 
 {f"HINTS: {task.hints_text}" if task.hints_text else ""}
 
-CRITICAL REQUIREMENTS:
-1. You MUST modify the SOURCE CODE to fix the bug, not just add tests
-2. The following tests must pass after your fix: {test_names}
-3. Do NOT declare the task complete until you have:
-   a) Modified source code (not just test files)
-   b) Run the failing tests and confirmed they pass
+AVAILABLE TOOLS:
+- Read: Read file contents (MUST be called before Edit)
+- Edit: Modify files by replacing old_string with new_string
+- bash: Run shell commands
+- grep: Search for patterns in files
+- glob: Find files by pattern
 
-INSTRUCTIONS:
-1. Explore the repository at {repo_path}
-2. Understand the issue by reading the problem statement carefully
-3. Locate the bug in the SOURCE CODE (not test files)
-4. Fix the bug by modifying the source code
-5. Run the specific failing tests to verify: {task.fail_to_pass}
+CRITICAL REQUIREMENTS:
+1. You MUST use the Edit tool to modify SOURCE CODE files
+2. You MUST Read a file BEFORE you can Edit it
+3. The following tests must pass after your fix: {test_names}
+4. Do NOT declare the task complete until you have:
+   a) Used Edit to modify source code (not just test files)
+   b) Run the failing tests with bash and confirmed they pass
+
+STEP-BY-STEP INSTRUCTIONS:
+1. Use grep/glob to find relevant source files in {repo_path}
+2. Use Read to examine the source code
+3. Identify the bug location
+4. Use Edit to fix the bug (Read the file first!)
+5. Run pytest to verify: python -m pytest {task.fail_to_pass[0]} -v
 6. Only declare done when tests pass
 
 The repository is at: {repo_path}
 
-IMPORTANT: Your fix must modify source code files, not just test files.
-When tests pass, create a git diff of your changes.
+IMPORTANT: You MUST call the Edit tool to make changes. Just describing a fix is NOT enough.
 """
 
         # Create agent config with system prompt
@@ -498,8 +505,12 @@ When tests pass, create a git diff of your changes.
 
         total_tool_calls = 0
         last_error = ""
+        import logging
+        logger = logging.getLogger(__name__)
 
         for attempt in range(self.max_verification_attempts):
+            logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
+
             # Create fresh agent for each attempt (but repo state persists)
             agent = AgentLoop(
                 harness=self.harness,
@@ -519,11 +530,22 @@ VERIFICATION FAILED (attempt {attempt}/{self.max_verification_attempts}):
 {last_error}
 
 Please analyze what went wrong and try a different approach.
-Remember: You must modify SOURCE CODE, not just test files.
+Remember: You MUST use the Edit tool to modify SOURCE CODE files.
 """
                 agent.run(user_input)
                 total_tool_calls += len(agent.state.messages)
+
+                # Log tool usage summary
+                tool_counts: dict[str, int] = {}
+                for msg in agent.state.messages:
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            tool_name = tc.get('function', {}).get('name', 'unknown')
+                            tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+                logger.info(f"Attempt {attempt + 1} tool usage: {tool_counts}")
+
             except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed with error: {e}")
                 last_error = str(e)
                 continue
 
