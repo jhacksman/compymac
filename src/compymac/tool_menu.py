@@ -48,32 +48,34 @@ META_TOOLS = [
 ]
 
 
-# Mode definitions based on user requirements
+# Mode definitions with narrative priming and behavioral guidance
+# Based on research: arxiv:2505.03961 (narrative priming), arxiv:2505.11584 (nudge sensitivity)
+# Ordered by frequency: most common modes first to leverage hypersensitivity to ordering
 TOOL_MODES: dict[str, ToolMode] = {
     "swe": ToolMode(
         name="swe",
-        display_name="SWE Mode",
+        display_name="Software Engineering",
         tool_list=[
             "Read", "Edit", "Write", "bash", "grep", "glob",
             "lsp_tool", "git_status", "git_diff_unstaged", "git_diff_staged",
             "git_commit", "git_add",
             "web_search", "web_get_contents",  # Research capabilities
         ],
-        description="Software engineering: read, edit, search code, run commands, git operations, web research",
+        description="You are working as a skilled software engineer in a codebase. Your goal is to understand existing code, make targeted improvements, verify changes with tests, and commit your work. This mode provides tools to read source code files, search for implementations, edit code precisely, run tests and builds, manage git commits, and research documentation when needed. Use this when you need to fix bugs, implement features, refactor code, or investigate how existing code works. Remember: Read files before editing them, verify changes with tests, and commit with clear messages.",
     ),
     "browser": ToolMode(
         name="browser",
-        display_name="Browser Mode",
+        display_name="Browser Automation",
         tool_list=[
             "browser_navigate", "browser_view", "browser_click",
             "browser_type", "browser_scroll", "browser_screenshot",
             "browser_console", "browser_press_key", "browser_select_option",
         ],
-        description="Browser automation: navigate, interact with web pages, take screenshots",
+        description="You are interacting with a live web application in a real browser to test, verify, or automate user interactions. Your goal is to navigate pages, interact with UI elements, and verify that the application behaves correctly from a user's perspective. This mode provides tools to navigate to URLs, view page content with screenshots, click elements, type text, scroll pages, and execute JavaScript in the browser console. Use this when you need to test a web UI, verify visual appearance, automate form submissions, or investigate how a web application behaves. Remember: Use browser_view after navigation to see what's on the page, prefer clicking elements by devinid over coordinates, and take screenshots when reporting visual issues.",
     ),
     "git": ToolMode(
         name="git",
-        display_name="Git Mode",
+        display_name="Version Control",
         tool_list=[
             # GIT_LOCAL tools
             "git_status", "git_diff_unstaged", "git_diff_staged", "git_diff",
@@ -83,41 +85,41 @@ TOOL_MODES: dict[str, ToolMode] = {
             "git_view_pr", "git_create_pr", "git_update_pr_description",
             "git_pr_checks", "git_ci_job_logs", "git_comment_on_pr", "list_repos",
         ],
-        description="Git operations: local and remote repository management, PRs, CI",
-    ),
-    "deploy": ToolMode(
-        name="deploy",
-        display_name="Deploy Mode",
-        tool_list=[
-            "deploy", "git_ci_job_logs", "git_pr_checks",
-        ],
-        description="Deployment: deploy apps, check CI status, view logs",
+        description="You are managing code changes and pull requests in a git repository. Your goal is to create well-structured commits, manage branches effectively, and collaborate through pull requests with clear communication. This mode provides tools for local git operations (status, diff, commit, branch management) and remote operations (creating/viewing PRs, checking CI status, commenting). Use this when you need to create pull requests, review changes across branches, manage complex git workflows, or debug CI failures. Remember: Check git_status before committing, write clear commit messages explaining what changed and why, and review diffs before pushing.",
     ),
     "search": ToolMode(
         name="search",
-        display_name="Search Mode",
+        display_name="Web Research",
         tool_list=[
             "web_search", "web_get_contents", "browser_navigate", "browser_view",
         ],
-        description="Web search: search the web, fetch page contents",
-    ),
-    "ai": ToolMode(
-        name="ai",
-        display_name="AI Mode",
-        tool_list=[
-            "ask_smart_friend", "visual_checker", "TodoCreate", "TodoRead",
-        ],
-        description="AI assistance: smart friend, visual analysis, task management",
+        description="You are researching information on the web to find documentation, Stack Overflow answers, or current information not in your training data. Your goal is to find relevant, accurate information efficiently and extract what's needed for the task. This mode provides tools to search the web, fetch webpage content, and navigate to documentation sites for detailed reading. Use this when you need to find error message solutions on Stack Overflow, read API documentation, research library usage, or get current information beyond your knowledge cutoff. Remember: Start with web_search to find relevant pages, then use web_get_contents for simple pages or browser_navigate for complex documentation sites.",
     ),
     "data": ToolMode(
         name="data",
-        display_name="Data Mode",
+        display_name="File Management",
         tool_list=[
             # FILESYSTEM tools
             "fs_read_file", "fs_write_file", "fs_list_directory",
             "fs_create_directory", "fs_delete", "fs_move", "fs_copy",
         ],
-        description="Data/filesystem: file operations, directory management",
+        description="You are managing files and directories in the filesystem for organization, backup, or data processing. Your goal is to organize files, manage directory structures, and handle non-code files efficiently. This mode provides tools to read/write files, list directories, create/delete/move files and folders. Use this when you need to organize configuration files, manage data files (.json, .yaml, .csv), handle logs, or perform bulk file operations. This is for NON-CODE files - use 'swe' mode for reading/editing source code. Remember: Check if directories exist before creating them, and be cautious with delete operations.",
+    ),
+    "deploy": ToolMode(
+        name="deploy",
+        display_name="Deployment",
+        tool_list=[
+            "deploy", "git_ci_job_logs", "git_pr_checks",
+        ],
+        description="You are deploying and monitoring applications in production or staging environments. Your goal is to deploy applications safely, verify deployment health, and debug deployment failures. This mode provides tools to deploy frontend/backend applications, check CI/CD status, and view deployment logs. Use this when you need to deploy new versions, verify deployment succeeded, or investigate why a deployment failed. Remember: Check git_pr_checks to verify CI passed before deploying, and review git_ci_job_logs if deployment fails to identify the root cause.",
+    ),
+    "ai": ToolMode(
+        name="ai",
+        display_name="AI Assistance",
+        tool_list=[
+            "ask_smart_friend", "visual_checker", "TodoCreate", "TodoRead",
+        ],
+        description="You are using advanced AI capabilities for complex analysis, visual verification, or task decomposition. Your goal is to leverage specialized AI for tasks that benefit from additional intelligence or task management. This mode provides tools to consult specialized AI for complex questions, verify visual/UI elements, and break down complex tasks into subtasks. Use this when you need expert-level analysis beyond your capabilities, visual verification of screenshots, or help managing complex multi-step tasks. Remember: Use ask_smart_friend for truly complex questions where you need another perspective, not for simple lookups.",
     ),
 }
 
