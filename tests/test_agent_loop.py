@@ -235,6 +235,223 @@ class TestScriptedPolicy:
         assert result == "Done with policy!"
 
 
+class TestActionGatedProtocol:
+    """Tests for action-gated dialogue protocol (MUD-style agent control)."""
+
+    def test_action_gated_config_defaults(self):
+        """Test that action-gated config options have correct defaults."""
+        config = AgentConfig()
+        assert config.action_gated is False
+        assert config.max_invalid_moves == 5
+        assert config.require_complete_tool is False
+
+    def test_action_gated_with_complete_tool_success(self):
+        """Test that calling complete tool ends the loop successfully."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Task done!"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert result == "Task done!"
+        assert loop.state.is_complete is True
+
+    def test_action_gated_prose_only_triggers_invalid_move(self):
+        """Test that prose-only response triggers invalid move and corrective message."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            # First response: prose only (invalid)
+            ChatResponse(content="I'm thinking...", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Second response: valid tool call
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done after retry"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        # Should succeed after retry
+        assert result == "Done after retry"
+        # Check that corrective message was injected
+        user_messages = [m for m in loop.state.messages if m.role == "user"]
+        assert any("Invalid move" in m.content for m in user_messages)
+
+    def test_action_gated_max_invalid_moves_fails(self):
+        """Test that exceeding max_invalid_moves returns failure."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        # All responses are prose-only (invalid)
+        llm = MockLLMClient(responses=[
+            ChatResponse(content="Thinking 1", tool_calls=[], finish_reason="stop", raw_response={}),
+            ChatResponse(content="Thinking 2", tool_calls=[], finish_reason="stop", raw_response={}),
+            ChatResponse(content="Thinking 3", tool_calls=[], finish_reason="stop", raw_response={}),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True, max_invalid_moves=3)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert "Failed" in result
+        assert "3 consecutive invalid moves" in result
+
+    def test_action_gated_valid_tool_resets_invalid_count(self):
+        """Test that valid tool call resets invalid move counter."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            # Invalid move 1
+            ChatResponse(content="Thinking 1", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Invalid move 2
+            ChatResponse(content="Thinking 2", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Valid tool call (resets counter)
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="think", arguments={"thought": "Let me think"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+            # Invalid move 1 (counter reset)
+            ChatResponse(content="Thinking 3", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Invalid move 2
+            ChatResponse(content="Thinking 4", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Complete
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_2", name="complete", arguments={"final_answer": "Finally done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True, max_invalid_moves=3)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        # Should succeed because counter was reset
+        assert result == "Finally done"
+
+    def test_action_gated_without_require_complete_tool(self):
+        """Test action-gated mode without require_complete_tool still enforces tool usage."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            # Invalid move
+            ChatResponse(content="Thinking", tool_calls=[], finish_reason="stop", raw_response={}),
+            # Valid tool call then complete
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=False)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert result == "Done"
+        # Check that corrective message was injected for the invalid move
+        user_messages = [m for m in loop.state.messages if m.role == "user"]
+        assert any("Invalid move" in m.content for m in user_messages)
+
+    def test_action_gated_max_steps_returns_failure(self):
+        """Test that hitting max_steps in action-gated mode returns failure message."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        # Keep making valid tool calls but never call complete
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id=f"call_{i}", name="think", arguments={"thought": f"Thought {i}"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            )
+            for i in range(10)
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True, max_steps=3)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert "Failed" in result
+        assert "Max steps reached" in result
+
+    def test_standard_mode_prose_completes(self):
+        """Test that standard mode (non-action-gated) completes on prose response."""
+        harness = create_default_simulator()
+        llm = MockLLMClient(responses=[
+            ChatResponse(content="All done!", tool_calls=[], finish_reason="stop", raw_response={}),
+        ])
+        config = AgentConfig(action_gated=False)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert result == "All done!"
+        assert loop.state.is_complete is True
+
+    def test_complete_tool_with_status(self):
+        """Test that complete tool accepts status parameter."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="complete",
+                        arguments={"final_answer": "Partial result", "status": "partial"},
+                    ),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(action_gated=True, require_complete_tool=True)
+        loop = AgentLoop(harness, llm, config)
+
+        result = loop.run("Do something")
+
+        assert result == "Partial result"
+        assert harness._completion_status == "partial"
+
+
 class TestEventLogging:
     """Tests for event logging in agent loop."""
 
