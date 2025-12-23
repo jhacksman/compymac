@@ -112,7 +112,7 @@ class TestMenuManager:
         manager = MenuManager()
         success, message = manager.enter_mode("swe")
         assert success
-        assert "Entered SWE Mode" in message
+        assert "Entered Software Engineering" in message
         assert manager.current_mode == "swe"
         assert manager.state == MenuState.IN_MODE
         assert not manager.is_at_root()
@@ -151,7 +151,7 @@ class TestMenuManager:
         mode = manager.get_current_mode()
         assert mode is not None
         assert mode.name == "browser"
-        assert mode.display_name == "Browser Mode"
+        assert mode.display_name == "Browser Automation"
 
     def test_get_visible_tools_at_root(self):
         """Test that only meta-tools are visible at ROOT."""
@@ -200,7 +200,7 @@ class TestMenuManager:
         manager = MenuManager()
         manager.enter_mode("swe")
         output = manager.list_menu()
-        assert "SWE Mode" in output
+        assert "Software Engineering" in output
         assert "Available tools" in output
         assert "Read" in output
         assert "Edit" in output
@@ -294,7 +294,7 @@ class TestLocalHarnessIntegration:
         """Test the menu_enter tool handler."""
         harness = LocalHarness()
         result = harness._menu_enter("swe")
-        assert "Entered SWE Mode" in result
+        assert "Entered Software Engineering" in result
         assert harness._menu_manager.current_mode == "swe"
 
     def test_menu_exit_tool(self):
