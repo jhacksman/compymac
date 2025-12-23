@@ -48,9 +48,10 @@ class TestToolMode:
             "Read", "Edit", "Write", "bash", "grep", "glob",
             "lsp_tool", "git_status", "git_diff_unstaged", "git_diff_staged",
             "git_commit", "git_add",
+            "web_search", "web_get_contents",  # Research capabilities
         ]
         assert swe_mode.tool_list == expected_tools
-        assert len(swe_mode.tool_list) == 12
+        assert len(swe_mode.tool_list) == 14  # 12 core + 2 research tools
 
     def test_browser_mode_tools(self):
         """Test that browser mode has the expected tools."""
@@ -182,7 +183,7 @@ class TestMenuManager:
         manager = MenuManager()
         manager.enter_mode("swe")
         visible = manager.get_visible_tools()
-        assert len(visible) == 18  # 12 SWE tools + 6 meta-tools
+        assert len(visible) == 20  # 14 SWE tools + 6 meta-tools
 
     def test_list_menu_at_root(self):
         """Test list_menu output at ROOT."""
@@ -316,14 +317,14 @@ class TestLocalHarnessIntegration:
             assert meta_tool in tool_names
 
     def test_get_menu_tool_schemas_in_swe_mode(self):
-        """Test get_menu_tool_schemas in SWE mode returns 18 tools."""
+        """Test get_menu_tool_schemas in SWE mode returns 20 tools."""
         harness = LocalHarness()
         harness._menu_enter("swe")
         schemas = harness.get_menu_tool_schemas()
 
         tool_names = [s["function"]["name"] for s in schemas]
-        # 12 SWE tools + 6 meta-tools = 18
-        assert len(tool_names) == 18
+        # 14 SWE tools + 6 meta-tools = 20
+        assert len(tool_names) == 20
 
         # Check meta-tools are present
         for meta_tool in META_TOOLS:
