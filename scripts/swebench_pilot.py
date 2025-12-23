@@ -240,12 +240,12 @@ async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEB
     print("=" * 60)
 
     report = dashboard.generate_report()
-    print(f"\nTotal tasks: {report['total_tasks']}")
-    print(f"Resolved: {report['resolved']} ({report['resolve_rate']:.1%})")
-    print(f"Partial: {report['partial']} ({report['partial_rate']:.1%})")
-    print(f"Failed: {report['failed']}")
-    print(f"\nAvg tool calls: {report['avg_tool_calls']:.1f}")
-    print(f"Avg time: {report['avg_time_sec']:.1f}s")
+    print(f"\nTotal tasks: {report.total_tasks}")
+    print(f"Resolved: {report.resolved} ({report.resolve_rate:.1%})")
+    print(f"Partial: {report.partial} ({report.partial_rate:.1%})")
+    print(f"Failed: {report.failed}")
+    print(f"\nAvg tool calls: {report.avg_tool_calls:.1f}")
+    print(f"Avg time: {report.avg_time_sec:.1f}s")
 
     # Save results
     results_file = config.output_dir / "pilot_results.json"

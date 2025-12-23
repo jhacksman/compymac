@@ -442,7 +442,7 @@ class SWEBenchRunner:
     ) -> dict[str, Any]:
         """Run agent on the task."""
         # Import here to avoid circular imports
-        from compymac.agent_loop import AgentLoop
+        from compymac.agent_loop import AgentConfig, AgentLoop
 
         prompt = f"""You are a software engineering agent tasked with fixing a bug in {task.repo}.
 
@@ -464,16 +464,24 @@ The repository is at: {repo_path}
 When you're done, create a git diff of your changes.
 """
 
+        # Create agent config with system prompt
+        config = AgentConfig(
+            system_prompt=prompt,
+            max_steps=50,
+        )
+
         # Create agent and run
         agent = AgentLoop(
-            system_prompt=prompt,
             harness=self.harness,
             llm_client=self.llm_client,
+            config=config,
         )
 
         # Run agent (simplified - in practice would track tool calls and tokens)
         try:
-            await agent.run(max_turns=50)
+            # AgentLoop.run() is synchronous and takes user_input as first arg
+            # The system_prompt is already set in config, so we just need to start the agent
+            agent.run("Please analyze the repository and fix the bug described above.")
         except Exception as e:
             return {"patch": "", "tool_calls": 0, "tokens": 0, "error": str(e)}
 
@@ -487,7 +495,7 @@ When you're done, create a git diff of your changes.
 
         return {
             "patch": patch,
-            "tool_calls": len(agent.messages),  # Approximate
+            "tool_calls": len(agent.state.messages),  # Approximate
             "tokens": 0,  # Would need to track from LLM client
         }
 
