@@ -50,6 +50,9 @@ class AgentConfig:
     action_gated: bool = False  # If True, agent must call a tool every turn (no prose-only responses)
     max_invalid_moves: int = 5  # Max consecutive turns without tool calls before failing
     require_complete_tool: bool = False  # If True, agent must call 'complete' tool to finish
+    # ACI-style grounding (SWE-agent research)
+    force_complete_on_last_step: bool = False  # If True, inject "must call complete" on last step
+    grounding_context: dict | None = None  # Context to re-inject every turn (repo_path, cwd, etc.)
 
 
 @dataclass
@@ -347,11 +350,25 @@ class AgentLoop:
         - Agent must call a tool every turn (prose-only responses are invalid)
         - If config.require_complete_tool=True, agent must call 'complete' tool to finish
         - Invalid moves trigger a corrective message and retry (up to max_invalid_moves)
+
+        ACI-style grounding (based on SWE-agent research):
+        - If config.force_complete_on_last_step=True, inject "must call complete" on last step
+        - If config.grounding_context is set, re-inject context every turn
         """
         self.add_user_message(user_input)
         invalid_move_count = 0
 
         while self.state.step_count < self.config.max_steps:
+            # ACI-style: Check if this is the last step and inject forced complete message
+            steps_remaining = self.config.max_steps - self.state.step_count
+            if self.config.force_complete_on_last_step and steps_remaining == 1:
+                self.state.messages.append(Message(
+                    role="user",
+                    content=(
+                        '{"status": "FINAL_TURN", "instruction": "This is your LAST turn. '
+                        'You MUST call complete() now with your final answer. No other action is allowed."}'
+                    ),
+                ))
             text_response, tool_results = self.run_step()
 
             # Check if 'complete' tool was called (signals task completion)
@@ -440,6 +457,24 @@ class AgentLoop:
                 else:
                     # Valid tool call - reset invalid move counter
                     invalid_move_count = 0
+
+            # ACI-style: Re-ground the agent after tool results (SWE-agent research)
+            # This helps the agent stay oriented in the task
+            if self.config.grounding_context and tool_results:
+                ctx = self.config.grounding_context
+                steps_remaining = self.config.max_steps - self.state.step_count
+                grounding_msg = json.dumps({
+                    "status": "TURN_COMPLETE",
+                    "repo_path": ctx.get("repo_path", ""),
+                    "failing_tests": ctx.get("failing_tests", []),
+                    "steps_remaining": steps_remaining,
+                    "available_actions": ["Read", "Edit", "bash", "grep", "glob", "complete"],
+                    "reminder": "Call complete() when tests pass. Respond ONLY with a tool call.",
+                })
+                self.state.messages.append(Message(
+                    role="user",
+                    content=grounding_msg,
+                ))
 
             # If we hit max tool calls, stop
             if self.state.tool_call_count >= self.config.max_steps * self.config.max_tool_calls_per_step:

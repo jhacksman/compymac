@@ -462,44 +462,65 @@ class SWEBenchRunner:
         if len(task.fail_to_pass) > 3:
             test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
-        prompt = f"""Fix a bug in {task.repo}. Repository at: {repo_path}
+        # ACI-style prompt: JSON format, minimal verb set, clear grounding
+        # Based on SWE-agent research (NeurIPS 2024)
+        prompt = f'''You are a code-fixing agent. Respond ONLY with tool calls in JSON format.
 
-PROBLEM: {task.problem_statement}
-{f"HINTS: {task.hints_text}" if task.hints_text else ""}
+TASK: {json.dumps({
+    "repo": task.repo,
+    "repo_path": str(repo_path),
+    "problem": task.problem_statement[:500],  # Truncate for context
+    "failing_tests": task.fail_to_pass[:3],
+})}
 
-ACTIONS (choose one each turn):
-- grep/glob: Find relevant files
-- Read: Examine file (required before Edit)
-- Edit: Fix the bug
-- bash: Run tests
-- complete: Signal done (call when tests pass)
+ACTIONS (choose exactly ONE per turn):
+- grep: Search for patterns in files
+- glob: Find files by pattern
+- Read: View file contents (REQUIRED before Edit)
+- Edit: Modify file (old_string -> new_string)
+- bash: Run shell commands (e.g., pytest)
+- complete: Signal task done (call when tests pass)
 
-WORKFLOW:
-1. Find source files with grep/glob
-2. Read the relevant code
-3. Edit to fix the bug
-4. Run: python -m pytest {task.fail_to_pass[0]} -v
-5. Call complete(final_answer="...") when tests pass
+RULES:
+1. Respond ONLY with a tool call - no prose
+2. Read a file BEFORE editing it
+3. Run tests after editing: bash(command="python -m pytest {task.fail_to_pass[0]} -v", exec_dir="{repo_path}", bash_id="test")
+4. Call complete(final_answer="description of fix") when tests pass
+5. If tests fail, analyze output and try a different fix
 
 Tests that must pass: {test_names}
-"""
+'''
 
         # Create agent config with system prompt
         # Use action-gated mode for MUD-style control:
         # - Agent must call a tool every turn (no prose-only responses)
         # - Agent must call 'complete' tool to finish
+        # ACI-style grounding (based on SWE-agent research):
+        # - Force complete on last step
+        # - Re-ground every turn with repo_path, failing_tests, steps_remaining
         config = AgentConfig(
             system_prompt=prompt,
             max_steps=50,
             action_gated=True,
             require_complete_tool=True,
             max_invalid_moves=5,
+            force_complete_on_last_step=True,
+            grounding_context={
+                "repo_path": str(repo_path),
+                "failing_tests": task.fail_to_pass[:3],
+            },
         )
 
         total_tool_calls = 0
         last_error = ""
         import logging
         logger = logging.getLogger(__name__)
+
+        # ACI-style: Configure harness to only expose SWE-bench tools
+        # This prevents the agent from using message_user, list_repos, web_search, etc.
+        if hasattr(self.harness, 'set_swe_bench_toolset'):
+            enabled_tools = self.harness.set_swe_bench_toolset()
+            logger.info(f"ACI toolset configured: {enabled_tools}")
 
         for attempt in range(self.max_verification_attempts):
             logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")

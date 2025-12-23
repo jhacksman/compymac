@@ -5067,3 +5067,51 @@ Permissions: {mode}"""
     def reset_active_toolset(self) -> None:
         """Reset the active toolset to default (only CORE tools)."""
         self._active_toolset.reset()
+
+    def set_swe_bench_toolset(self) -> list[str]:
+        """
+        Configure toolset for SWE-bench tasks (ACI-style minimal verb set).
+
+        Based on SWE-agent research (NeurIPS 2024), successful agents use a small,
+        closed action space with simple, composable verbs. This method:
+        1. Disables all non-essential tools (no message_user, list_repos, web_search, etc.)
+        2. Enables only the tools needed for code fixing: Read, Edit, bash, grep, glob, complete
+
+        Returns list of enabled tool names.
+        """
+        # Reset to clean state
+        self._active_toolset.reset()
+
+        # Disable all core tools first, then selectively enable SWE-bench tools
+        # This prevents the agent from using message_user, request_tools, etc.
+        core_tools_to_disable = [
+            "message_user", "request_tools", "think", "TodoWrite",
+            "list_repos", "web_search", "web_get_contents",
+            "ask_smart_friend", "visual_checker", "list_secrets",
+        ]
+        for tool_name in core_tools_to_disable:
+            self._active_toolset.disable_tool(tool_name)
+
+        # Explicitly enable only SWE-bench tools
+        swe_bench_tools = ["Read", "Edit", "bash", "grep", "glob", "complete"]
+        enabled = []
+        for tool_name in swe_bench_tools:
+            if tool_name in self._tools:
+                self._active_toolset.enable_tool(tool_name)
+                enabled.append(tool_name)
+
+        return enabled
+
+    def get_swe_bench_tool_schemas(self) -> list[dict[str, Any]]:
+        """
+        Get OpenAI-format schemas for SWE-bench tools only.
+
+        This is the ACI (Agent-Computer Interface) for SWE-bench tasks.
+        Returns a minimal, closed action space.
+        """
+        swe_bench_tools = ["Read", "Edit", "bash", "grep", "glob", "complete"]
+        tools = [
+            self._tools[name] for name in swe_bench_tools
+            if name in self._tools
+        ]
+        return self._build_schemas(tools)
