@@ -453,6 +453,9 @@ class SWEBenchRunner:
         2. We verify by running fail_to_pass tests
         3. If tests fail, we tell the agent and let it try again
         4. Repeat until tests pass or max_verification_attempts reached
+
+        Uses the standard CompyMac agent with menu system - no hardcoded tools.
+        The agent must discover and navigate to the appropriate mode on its own.
         """
         # Import here to avoid circular imports
         from compymac.agent_loop import AgentConfig, AgentLoop
@@ -462,66 +465,39 @@ class SWEBenchRunner:
         if len(task.fail_to_pass) > 3:
             test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
-        # ACI-style prompt: JSON format, minimal verb set, clear grounding
-        # Based on SWE-agent research (NeurIPS 2024)
-        prompt = f'''You are a code-fixing agent. Respond ONLY with tool calls in JSON format.
+        # Standard CompyMac prompt - no hardcoded tool list
+        # Let the agent discover tools through the menu system
+        prompt = f'''You are a software engineering assistant. Fix the bug described below.
 
-TASK: {json.dumps({
-    "repo": task.repo,
-    "repo_path": str(repo_path),
-    "problem": task.problem_statement[:500],
-    "failing_tests": task.fail_to_pass[:3],
-})}
+Repository: {task.repo}
+Path: {repo_path}
 
-ACTIONS (choose exactly ONE per turn):
-- grep: Search for patterns in files
-- glob: Find files by pattern
-- Read: View file contents (REQUIRED before Edit)
-- Edit: Modify file (old_string -> new_string)
-- bash: Run shell commands (e.g., pytest)
-- complete: Signal task done (call when tests pass)
+Problem Statement:
+{task.problem_statement}
 
-RULES:
-1. Respond ONLY with a tool call - no prose
-2. Read a file BEFORE editing it
-3. Run tests after editing: bash(command="python -m pytest {task.fail_to_pass[0]} -v", exec_dir="{repo_path}", bash_id="test")
-4. Call complete(final_answer="description of fix") when tests pass
-5. If tests fail, analyze output and try a different fix
+Tests that must pass after your fix: {test_names}
 
-Tests that must pass: {test_names}
+Instructions:
+1. Explore the codebase to understand the issue
+2. Make the necessary code changes to fix the bug
+3. Verify your fix by running the failing tests
+4. When the tests pass, call complete with a description of your fix
 '''
 
-        # Create agent config with system prompt
-        # Use action-gated mode for MUD-style control:
-        # - Agent must call a tool every turn (no prose-only responses)
-        # - Agent must call 'complete' tool to finish
-        # ACI-style grounding (based on SWE-agent research):
-        # - Force complete on last step
-        # - Re-ground every turn with repo_path, failing_tests, steps_remaining
+        # Standard CompyMac agent config with menu system enabled
+        # No hardcoded tool restrictions - agent discovers tools through menu
         config = AgentConfig(
             system_prompt=prompt,
             max_steps=50,
-            action_gated=True,
+            use_menu_system=True,  # Enable hierarchical menu system
             require_complete_tool=True,
-            max_invalid_moves=5,
             force_complete_on_last_step=True,
-            grounding_context={
-                "repo_path": str(repo_path),
-                "failing_tests": task.fail_to_pass[:3],
-            },
-            use_active_toolset=True,  # Use filtered tool schemas (ACI-style closed action space)
         )
 
         total_tool_calls = 0
         last_error = ""
         import logging
         logger = logging.getLogger(__name__)
-
-        # ACI-style: Configure harness to only expose SWE-bench tools
-        # This prevents the agent from using message_user, list_repos, web_search, etc.
-        if hasattr(self.harness, 'set_swe_bench_toolset'):
-            enabled_tools = self.harness.set_swe_bench_toolset()
-            logger.info(f"ACI toolset configured: {enabled_tools}")
 
         for attempt in range(self.max_verification_attempts):
             logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
