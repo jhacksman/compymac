@@ -503,7 +503,7 @@ When you're done, create a git diff of your changes.
         self, repo_path: Path, task: SWEBenchTask, patch: str
     ) -> TestResults:
         """Run tests on the current repo state.
-        
+
         Note: The agent already made changes to the working tree, so we don't
         need to apply the patch again. We just run tests on the current state.
         The patch parameter is kept for logging/verification purposes.
@@ -540,12 +540,12 @@ When you're done, create a git diff of your changes.
         self, repo_path: Path, test_name: str, log_output: bool = True
     ) -> bool:
         """Run a single test and return whether it passed.
-        
+
         Args:
             repo_path: Path to the repository
             test_name: Name of the test to run (pytest format)
             log_output: Whether to log test output for debugging
-            
+
         Returns:
             True if the test passed, False otherwise
         """
@@ -555,16 +555,16 @@ When you're done, create a git diff of your changes.
             capture_output=True,
             text=True,
         )
-        
+
         # Log test output for debugging
         if log_output and result.returncode != 0:
             log_dir = repo_path / ".swebench_logs"
             log_dir.mkdir(exist_ok=True)
-            
+
             # Sanitize test name for filename
             safe_name = test_name.replace("/", "_").replace("::", "__")
             log_file = log_dir / f"{safe_name}.log"
-            
+
             with open(log_file, "w") as f:
                 f.write(f"=== Test: {test_name} ===\n")
                 f.write(f"Return code: {result.returncode}\n\n")
@@ -572,7 +572,7 @@ When you're done, create a git diff of your changes.
                 f.write(result.stdout or "(empty)\n")
                 f.write("\n=== STDERR ===\n")
                 f.write(result.stderr or "(empty)\n")
-        
+
         return result.returncode == 0
 
     async def _cleanup_repository(self, repo_path: Path) -> None:
