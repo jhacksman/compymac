@@ -481,3 +481,105 @@ class TestEventLogging:
         assert "llm_request" in event_types
         assert "llm_response" in event_types
         assert "tool_call_received" in event_types
+
+
+class TestToolFiltering:
+    """Tests for ACI-style tool filtering (use_active_toolset config)."""
+
+    def test_use_active_toolset_filters_tools(self):
+        """Test that use_active_toolset=True sends only active tools to LLM."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        # Configure SWE-bench toolset (only Read, Edit, bash, grep, glob, complete)
+        enabled_tools = harness.set_swe_bench_toolset()
+        assert set(enabled_tools) == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(
+            action_gated=True,
+            require_complete_tool=True,
+            use_active_toolset=True,  # This is the key config
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        loop.run("Test task")
+
+        # Check what tools were sent to the LLM
+        assert len(llm._calls) == 1
+        tools_sent = llm._calls[0]["tools"]
+        tool_names = {t["function"]["name"] for t in tools_sent}
+
+        # Should only have SWE-bench tools
+        assert tool_names == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+
+        # Should NOT have these tools
+        forbidden_tools = {"message_user", "list_repos", "web_search", "request_tools", "think", "TodoWrite"}
+        assert tool_names.isdisjoint(forbidden_tools), f"Found forbidden tools: {tool_names & forbidden_tools}"
+
+    def test_use_active_toolset_false_sends_all_tools(self):
+        """Test that use_active_toolset=False sends all tools to LLM."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        # Even if we configure SWE-bench toolset, without use_active_toolset=True
+        # the agent loop should still send all tools
+        harness.set_swe_bench_toolset()
+
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(
+            action_gated=True,
+            require_complete_tool=True,
+            use_active_toolset=False,  # Default - sends all tools
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        loop.run("Test task")
+
+        # Check what tools were sent to the LLM
+        assert len(llm._calls) == 1
+        tools_sent = llm._calls[0]["tools"]
+        tool_names = {t["function"]["name"] for t in tools_sent}
+
+        # Should have more than just SWE-bench tools
+        assert len(tool_names) > 6, f"Expected more than 6 tools, got {len(tool_names)}: {tool_names}"
+        # Should include some of the "forbidden" tools
+        assert "message_user" in tool_names or "think" in tool_names or "TodoWrite" in tool_names
+
+    def test_swe_bench_toolset_configuration(self):
+        """Test that set_swe_bench_toolset correctly configures the harness."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+
+        # Before configuration, get_active_tool_schemas should return all tools
+        all_schemas = harness.get_tool_schemas()
+        all_tool_names = {t["function"]["name"] for t in all_schemas}
+        assert len(all_tool_names) > 6
+
+        # Configure SWE-bench toolset
+        enabled = harness.set_swe_bench_toolset()
+        assert set(enabled) == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+
+        # After configuration, get_active_tool_schemas should return only SWE-bench tools
+        active_schemas = harness.get_active_tool_schemas()
+        active_tool_names = {t["function"]["name"] for t in active_schemas}
+        assert active_tool_names == {"Read", "Edit", "bash", "grep", "glob", "complete"}
