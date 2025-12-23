@@ -462,45 +462,38 @@ class SWEBenchRunner:
         if len(task.fail_to_pass) > 3:
             test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
-        prompt = f"""You are a software engineering agent tasked with fixing a bug in {task.repo}.
+        prompt = f"""Fix a bug in {task.repo}. Repository at: {repo_path}
 
-PROBLEM:
-{task.problem_statement}
-
+PROBLEM: {task.problem_statement}
 {f"HINTS: {task.hints_text}" if task.hints_text else ""}
 
-AVAILABLE TOOLS:
-- Read: Read file contents (MUST be called before Edit)
-- Edit: Modify files by replacing old_string with new_string
-- bash: Run shell commands
-- grep: Search for patterns in files
-- glob: Find files by pattern
+ACTIONS (choose one each turn):
+- grep/glob: Find relevant files
+- Read: Examine file (required before Edit)
+- Edit: Fix the bug
+- bash: Run tests
+- complete: Signal done (call when tests pass)
 
-CRITICAL REQUIREMENTS:
-1. You MUST use the Edit tool to modify SOURCE CODE files
-2. You MUST Read a file BEFORE you can Edit it
-3. The following tests must pass after your fix: {test_names}
-4. Do NOT declare the task complete until you have:
-   a) Used Edit to modify source code (not just test files)
-   b) Run the failing tests with bash and confirmed they pass
+WORKFLOW:
+1. Find source files with grep/glob
+2. Read the relevant code
+3. Edit to fix the bug
+4. Run: python -m pytest {task.fail_to_pass[0]} -v
+5. Call complete(final_answer="...") when tests pass
 
-STEP-BY-STEP INSTRUCTIONS:
-1. Use grep/glob to find relevant source files in {repo_path}
-2. Use Read to examine the source code
-3. Identify the bug location
-4. Use Edit to fix the bug (Read the file first!)
-5. Run pytest to verify: python -m pytest {task.fail_to_pass[0]} -v
-6. Only declare done when tests pass
-
-The repository is at: {repo_path}
-
-IMPORTANT: You MUST call the Edit tool to make changes. Just describing a fix is NOT enough.
+Tests that must pass: {test_names}
 """
 
         # Create agent config with system prompt
+        # Use action-gated mode for MUD-style control:
+        # - Agent must call a tool every turn (no prose-only responses)
+        # - Agent must call 'complete' tool to finish
         config = AgentConfig(
             system_prompt=prompt,
             max_steps=50,
+            action_gated=True,
+            require_complete_tool=True,
+            max_invalid_moves=5,
         )
 
         total_tool_calls = 0
