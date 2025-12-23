@@ -462,8 +462,7 @@ class SWEBenchRunner:
         if len(task.fail_to_pass) > 3:
             test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
-        # ACI-style prompt: JSON format, minimal verb set, clear grounding
-        # Based on SWE-agent research (NeurIPS 2024)
+        # Prompt-guided approach: All tools available, but prompt directs agent to use only relevant ones
         prompt = f'''You are a code-fixing agent. Respond ONLY with tool calls in JSON format.
 
 TASK: {json.dumps({
@@ -473,13 +472,20 @@ TASK: {json.dumps({
     "failing_tests": task.fail_to_pass[:3],
 })}
 
-ACTIONS (choose exactly ONE per turn):
+PRIMARY TOOLS (use ONLY these for this task):
 - grep: Search for patterns in files
-- glob: Find files by pattern
+- glob: Find files by pattern  
 - Read: View file contents (REQUIRED before Edit)
 - Edit: Modify file (old_string -> new_string)
 - bash: Run shell commands (e.g., pytest)
 - complete: Signal task done (call when tests pass)
+
+DO NOT USE these tools - they will not help you fix code:
+- message_user (no human to message)
+- web_search, web_get_contents (no internet needed)
+- list_repos, git_* (repo already cloned)
+- request_tools, TodoWrite, think (unnecessary overhead)
+- deploy, recording_*, browser_* (not relevant)
 
 RULES:
 1. Respond ONLY with a tool call - no prose
@@ -487,6 +493,7 @@ RULES:
 3. Run tests after editing: bash(command="python -m pytest {task.fail_to_pass[0]} -v", exec_dir="{repo_path}", bash_id="test")
 4. Call complete(final_answer="description of fix") when tests pass
 5. If tests fail, analyze output and try a different fix
+6. Stay focused: grep -> Read -> Edit -> bash(test) -> complete
 
 Tests that must pass: {test_names}
 '''
@@ -509,7 +516,7 @@ Tests that must pass: {test_names}
                 "repo_path": str(repo_path),
                 "failing_tests": task.fail_to_pass[:3],
             },
-            use_active_toolset=True,  # Use filtered tool schemas (ACI-style closed action space)
+            # All tools available - prompt guides agent to use only relevant ones
         )
 
         total_tool_calls = 0
@@ -517,11 +524,8 @@ Tests that must pass: {test_names}
         import logging
         logger = logging.getLogger(__name__)
 
-        # ACI-style: Configure harness to only expose SWE-bench tools
-        # This prevents the agent from using message_user, list_repos, web_search, etc.
-        if hasattr(self.harness, 'set_swe_bench_toolset'):
-            enabled_tools = self.harness.set_swe_bench_toolset()
-            logger.info(f"ACI toolset configured: {enabled_tools}")
+        # All tools available - prompt guides agent to use only relevant ones
+        # (No artificial tool restriction - agent has full access but prompt directs behavior)
 
         for attempt in range(self.max_verification_attempts):
             logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
