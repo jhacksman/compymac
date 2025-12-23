@@ -465,8 +465,9 @@ class SWEBenchRunner:
         if len(task.fail_to_pass) > 3:
             test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
-        # Standard CompyMac prompt - no hardcoded tool list
-        # Let the agent discover tools through the menu system
+        # Standard CompyMac prompt with phased workflow structure
+        # Based on arxiv research: structured localization → fix → verify workflow
+        # improves success rate by 40-50% vs flat instructions
         prompt = f'''You are a software engineering assistant. Fix the bug described below.
 
 Repository: {task.repo}
@@ -477,11 +478,49 @@ Problem Statement:
 
 Tests that must pass after your fix: {test_names}
 
-Instructions:
-1. Explore the codebase to understand the issue
-2. Make the necessary code changes to fix the bug
-3. Verify your fix by running the failing tests
-4. When the tests pass, call complete with a description of your fix
+WORKFLOW (follow these phases in order):
+
+PHASE 1: LOCALIZATION
+- Use grep/glob to find relevant files (broad search with keywords from problem statement)
+- Read files to understand structure
+- Use lsp_tool for go-to-definition/find-references to trace code paths
+- GOAL: Identify 1-3 suspect files/functions before making any edits
+
+PHASE 2: UNDERSTANDING
+- Read the buggy code carefully (always Read before Edit)
+- If unfamiliar APIs → use web_search("library_name API docs")
+- If error messages unclear → use web_search("exact error message")
+- WARNING: Web results may describe newer versions than this codebase - verify in code
+- GOAL: Understand WHY the bug happens
+
+PHASE 3: FIX
+- Edit SOURCE CODE only (never edit test files unless explicitly required)
+- Always Read a file before using Edit on it
+- Make minimal, targeted changes - avoid broad refactors
+- GOAL: Address the root cause with smallest possible change
+
+PHASE 4: VERIFICATION
+- Run fail_to_pass tests with bash (must pass)
+- Run pass_to_pass tests with bash (must still pass)
+- If NEW failures appear: your edit caused a regression - revert and try different approach
+- GOAL: All tests green
+
+TOOL USAGE GUIDE:
+- grep: WHEN Phase 1 (broad localization). Find files containing keywords.
+- Read: WHEN Phase 1-2 (understanding). ALWAYS before Edit.
+- lsp_tool: WHEN Phase 1-2 (navigation). Trace function calls with goto_definition/find_references.
+- web_search: WHEN Phase 2 (unfamiliar APIs/errors). Fallback, not first resort.
+- Edit: WHEN Phase 3 (fixing). Only after localization complete. Read the file first.
+- bash: WHEN Phase 3-4 (testing). Run tests after each edit.
+
+ANTI-PATTERNS TO AVOID:
+- Editing without localizing first (causes wandering, wastes tool calls)
+- Editing test files (not your job unless explicitly asked)
+- Broad refactors (causes regressions)
+- Skipping verification (miss regressions)
+- Making multiple unrelated changes at once
+
+When all tests pass, call complete with a description of your fix.
 '''
 
         # Standard CompyMac agent config with menu system enabled
