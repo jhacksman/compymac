@@ -5074,7 +5074,7 @@ Permissions: {mode}"""
 
         Based on SWE-agent research (NeurIPS 2024), successful agents use a small,
         closed action space with simple, composable verbs. This method:
-        1. Disables all non-essential tools (no message_user, list_repos, web_search, etc.)
+        1. Disables ALL tools first (including core tools)
         2. Enables only the tools needed for code fixing: Read, Edit, bash, grep, glob, complete
 
         Returns list of enabled tool names.
@@ -5082,14 +5082,9 @@ Permissions: {mode}"""
         # Reset to clean state
         self._active_toolset.reset()
 
-        # Disable all core tools first, then selectively enable SWE-bench tools
-        # This prevents the agent from using message_user, request_tools, etc.
-        core_tools_to_disable = [
-            "message_user", "request_tools", "think", "TodoWrite",
-            "list_repos", "web_search", "web_get_contents",
-            "ask_smart_friend", "visual_checker", "list_secrets",
-        ]
-        for tool_name in core_tools_to_disable:
+        # Disable ALL registered tools first (allow-list approach)
+        # This ensures only explicitly enabled tools are available
+        for tool_name in self._tools:
             self._active_toolset.disable_tool(tool_name)
 
         # Explicitly enable only SWE-bench tools
