@@ -1091,6 +1091,26 @@ class LocalHarness(Harness):
             category=ToolCategory.FILESYSTEM,
         )
 
+        # AGENT CONTROL tools - for action-gated dialogue protocol
+        # complete tool - the ONLY way to finish in action-gated mode
+        self.register_tool(
+            name="complete",
+            schema=ToolSchema(
+                name="complete",
+                description=(
+                    "Signal that you have completed the task. "
+                    "This is the ONLY way to finish - you cannot end by just returning text. "
+                    "Call this when you have accomplished the goal or determined it cannot be done."
+                ),
+                required_params=["final_answer"],
+                optional_params=["status"],
+                param_types={"final_answer": "string", "status": "string"},
+            ),
+            handler=self._complete,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -1892,6 +1912,22 @@ class LocalHarness(Harness):
         """Record a thought without taking action. Useful for reasoning."""
         # Just log the thought and return it - no side effects
         return f"Thought recorded: {thought}"
+
+    def _complete(self, final_answer: str, status: str = "success") -> str:
+        """Signal task completion. This is the ONLY way to finish in action-gated mode.
+
+        Args:
+            final_answer: The final answer or result of the task
+            status: Optional status indicator (success/failure/partial)
+
+        Returns:
+            Confirmation message with the final answer
+        """
+        # Store completion state for the agent loop to detect
+        self._completion_signaled = True
+        self._completion_answer = final_answer
+        self._completion_status = status
+        return f"Task completed with status '{status}': {final_answer}"
 
     # =========================================================================
     # Guardrailed Todo System - Anti-hallucination patterns
