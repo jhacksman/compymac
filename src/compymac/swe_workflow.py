@@ -213,6 +213,7 @@ class WorkflowConfig:
     trace_dir: Path | None = None
     max_steps: int = 50  # Max agent loop steps
     use_agent_loop: bool = True  # Whether to use agent loop for execution
+    use_menu_system: bool = True  # Whether to use hierarchical menu system for tool selection
 
     def validate(self) -> list[str]:
         """Validate the configuration. Returns list of errors."""
@@ -285,6 +286,7 @@ class SWEWorkflow:
             system_prompt=system_prompt,
             stop_on_error=False,
             use_memory=True,
+            use_menu_system=self.config.use_menu_system,
         )
 
         self._agent_loop = AgentLoop(
