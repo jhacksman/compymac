@@ -502,25 +502,22 @@ When you're done, create a git diff of your changes.
     async def _evaluate_patch(
         self, repo_path: Path, task: SWEBenchTask, patch: str
     ) -> TestResults:
-        """Apply patch and run tests."""
+        """Run tests on the current repo state.
+        
+        Note: The agent already made changes to the working tree, so we don't
+        need to apply the patch again. We just run tests on the current state.
+        The patch parameter is kept for logging/verification purposes.
+        """
         if not patch:
             return TestResults(
                 fail_to_pass=dict.fromkeys(task.fail_to_pass, False),
                 pass_to_pass=dict.fromkeys(task.pass_to_pass, False),
             )
 
-        # Apply patch
-        apply_result = subprocess.run(
-            ["git", "-C", str(repo_path), "apply", "--"],
-            input=patch,
-            capture_output=True,
-            text=True,
-        )
-        if apply_result.returncode != 0:
-            return TestResults(
-                fail_to_pass=dict.fromkeys(task.fail_to_pass, False),
-                pass_to_pass=dict.fromkeys(task.pass_to_pass, False),
-            )
+        # Note: We do NOT apply the patch here because the agent already made
+        # the changes directly to the working tree. The patch was captured via
+        # `git diff` after the agent finished, so it's already applied.
+        # Trying to `git apply` again would fail with "patch already applied".
 
         # Run fail_to_pass tests
         fail_to_pass_results = {}
@@ -539,14 +536,43 @@ When you're done, create a git diff of your changes.
             pass_to_pass=pass_to_pass_results,
         )
 
-    async def _run_test(self, repo_path: Path, test_name: str) -> bool:
-        """Run a single test and return whether it passed."""
+    async def _run_test(
+        self, repo_path: Path, test_name: str, log_output: bool = True
+    ) -> bool:
+        """Run a single test and return whether it passed.
+        
+        Args:
+            repo_path: Path to the repository
+            test_name: Name of the test to run (pytest format)
+            log_output: Whether to log test output for debugging
+            
+        Returns:
+            True if the test passed, False otherwise
+        """
         result = subprocess.run(
-            ["python", "-m", "pytest", test_name, "-v"],
+            ["python", "-m", "pytest", test_name, "-v", "--tb=short"],
             cwd=str(repo_path),
             capture_output=True,
             text=True,
         )
+        
+        # Log test output for debugging
+        if log_output and result.returncode != 0:
+            log_dir = repo_path / ".swebench_logs"
+            log_dir.mkdir(exist_ok=True)
+            
+            # Sanitize test name for filename
+            safe_name = test_name.replace("/", "_").replace("::", "__")
+            log_file = log_dir / f"{safe_name}.log"
+            
+            with open(log_file, "w") as f:
+                f.write(f"=== Test: {test_name} ===\n")
+                f.write(f"Return code: {result.returncode}\n\n")
+                f.write("=== STDOUT ===\n")
+                f.write(result.stdout or "(empty)\n")
+                f.write("\n=== STDERR ===\n")
+                f.write(result.stderr or "(empty)\n")
+        
         return result.returncode == 0
 
     async def _cleanup_repository(self, repo_path: Path) -> None:
