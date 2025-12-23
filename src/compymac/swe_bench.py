@@ -509,7 +509,7 @@ Tests that must pass: {test_names}
                 "repo_path": str(repo_path),
                 "failing_tests": task.fail_to_pass[:3],
             },
-            use_active_toolset=True,  # Use filtered tool schemas (ACI-style closed action space)
+            use_menu_system=True,  # Use hierarchical menu system (pre-entered SWE mode)
         )
 
         total_tool_calls = 0
@@ -517,11 +517,12 @@ Tests that must pass: {test_names}
         import logging
         logger = logging.getLogger(__name__)
 
-        # ACI-style: Configure harness to only expose SWE-bench tools
-        # This prevents the agent from using message_user, list_repos, web_search, etc.
-        if hasattr(self.harness, 'set_swe_bench_toolset'):
-            enabled_tools = self.harness.set_swe_bench_toolset()
-            logger.info(f"ACI toolset configured: {enabled_tools}")
+        # Configure harness to use hierarchical menu system in SWE mode
+        # This reduces context from 58 tools to 18 (SWE tools + meta-tools)
+        if hasattr(self.harness, 'get_menu_manager'):
+            menu_manager = self.harness.get_menu_manager()
+            menu_manager.enter_mode("swe")
+            logger.info(f"Menu system configured: SWE mode with {len(menu_manager.get_visible_tools())} tools")
 
         for attempt in range(self.max_verification_attempts):
             logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
