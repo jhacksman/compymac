@@ -46,6 +46,10 @@ class AgentConfig:
     memory_keep_recent_turns: int = 4  # Number of recent turns to always keep
     trace_base_path: Path | None = None  # Base path for trace storage (enables tracing if set)
     summarize_tool_output: bool = True  # Enable tool output summarization to reduce context
+    # Action-gated dialogue protocol (MUD-style)
+    action_gated: bool = False  # If True, agent must call a tool every turn (no prose-only responses)
+    max_invalid_moves: int = 5  # Max consecutive turns without tool calls before failing
+    require_complete_tool: bool = False  # If True, agent must call 'complete' tool to finish
 
 
 @dataclass
@@ -338,24 +342,117 @@ class AgentLoop:
         Run the agent loop until completion or max steps.
 
         Returns the final text response from the agent.
+
+        In action-gated mode (config.action_gated=True):
+        - Agent must call a tool every turn (prose-only responses are invalid)
+        - If config.require_complete_tool=True, agent must call 'complete' tool to finish
+        - Invalid moves trigger a corrective message and retry (up to max_invalid_moves)
         """
         self.add_user_message(user_input)
+        invalid_move_count = 0
 
         while self.state.step_count < self.config.max_steps:
             text_response, tool_results = self.run_step()
 
-            # If we got a text response with no tool calls, we're done
-            if text_response is not None and not tool_results:
-                self.state.is_complete = True
-                self.state.final_response = text_response
-                return text_response
+            # Check if 'complete' tool was called (signals task completion)
+            complete_called = False
+            complete_answer = ""
+            for _result in tool_results:
+                # Check if this was a 'complete' tool call
+                if hasattr(self.harness, '_completion_signaled') and self.harness._completion_signaled:
+                    complete_called = True
+                    complete_answer = getattr(self.harness, '_completion_answer', text_response or "")
+                    # Reset the flag for potential future runs
+                    self.harness._completion_signaled = False
+                    break
+
+            # In action-gated mode with require_complete_tool, only finish on 'complete' call
+            if self.config.action_gated and self.config.require_complete_tool:
+                if complete_called:
+                    self.state.is_complete = True
+                    self.state.final_response = complete_answer
+                    return complete_answer
+
+                # If no tool calls at all, this is an invalid move
+                if text_response is not None and not tool_results:
+                    invalid_move_count += 1
+                    logger.warning(f"Invalid move {invalid_move_count}/{self.config.max_invalid_moves}: "
+                                   "Agent returned text without tool call")
+
+                    if invalid_move_count >= self.config.max_invalid_moves:
+                        error_msg = (f"Failed: {invalid_move_count} consecutive invalid moves. "
+                                     "Agent must call a tool each turn.")
+                        self.state.final_response = error_msg
+                        return error_msg
+
+                    # Inject corrective message and continue
+                    self.state.messages.append(Message(
+                        role="user",
+                        content=(
+                            "Invalid move. You MUST choose exactly ONE action by calling a tool. "
+                            "If you want to finish, call complete(final_answer=...). "
+                            "Available actions: Read, Edit, bash, grep, glob, think, complete."
+                        ),
+                    ))
+                    continue
+                else:
+                    # Valid tool call - reset invalid move counter
+                    invalid_move_count = 0
+
+            # Standard mode (non-action-gated) or action-gated without require_complete_tool
+            elif not self.config.action_gated:
+                # If we got a text response with no tool calls, we're done
+                if text_response is not None and not tool_results:
+                    self.state.is_complete = True
+                    self.state.final_response = text_response
+                    return text_response
+
+            # Action-gated mode without require_complete_tool
+            # Accept 'complete' tool OR prose-only response as completion
+            else:
+                if complete_called:
+                    self.state.is_complete = True
+                    self.state.final_response = complete_answer
+                    return complete_answer
+
+                # If no tool calls, this is an invalid move - inject corrective message
+                if text_response is not None and not tool_results:
+                    invalid_move_count += 1
+                    logger.warning(f"Invalid move {invalid_move_count}/{self.config.max_invalid_moves}: "
+                                   "Agent returned text without tool call")
+
+                    if invalid_move_count >= self.config.max_invalid_moves:
+                        error_msg = (f"Failed: {invalid_move_count} consecutive invalid moves. "
+                                     "Agent must call a tool each turn.")
+                        self.state.final_response = error_msg
+                        return error_msg
+
+                    # Inject corrective message and continue
+                    self.state.messages.append(Message(
+                        role="user",
+                        content=(
+                            "Invalid move. You MUST choose exactly ONE action by calling a tool. "
+                            "If you want to finish, call complete(final_answer=...). "
+                            "Available actions: Read, Edit, bash, grep, glob, think, complete."
+                        ),
+                    ))
+                    continue
+                else:
+                    # Valid tool call - reset invalid move counter
+                    invalid_move_count = 0
 
             # If we hit max tool calls, stop
             if self.state.tool_call_count >= self.config.max_steps * self.config.max_tool_calls_per_step:
                 logger.warning("Max tool calls reached")
                 break
 
-        # If we exit the loop without a final response, return last content
+        # If we exit the loop without a final response, return failure in action-gated mode
+        if self.config.action_gated:
+            error_msg = "Failed: Max steps reached without calling complete() tool."
+            self.state.final_response = error_msg
+            return error_msg
+
+        # Standard mode: return last content
         for msg in reversed(self.state.messages):
             if msg.role == "assistant" and msg.content:
                 self.state.final_response = msg.content
