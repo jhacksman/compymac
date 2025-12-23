@@ -4940,9 +4940,6 @@ Permissions: {mode}"""
                 trace_ctx.end_span(
                     status=SpanStatus.OK,
                     output_artifact_hash=output_artifact_hash,
-                    attributes={
-                        "verification_warning": verification_result.failure_summary(),
-                    },
                 )
             else:
                 trace_ctx.end_span(
