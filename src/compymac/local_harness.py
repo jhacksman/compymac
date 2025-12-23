@@ -41,6 +41,7 @@ from compymac.harness_spec import (
     truncate_output,
 )
 from compymac.safety import PolicyEngine
+from compymac.tool_menu import MenuManager
 from compymac.types import ToolCall, ToolResult
 from compymac.verification import (
     VerificationEngine,
@@ -181,6 +182,9 @@ class LocalHarness(Harness):
         # Safety policy engine for runtime safety enforcement
         # Respects config setting (disabled by default for backward compatibility)
         self._policy_engine = PolicyEngine(enabled=self.config.enable_safety_policies)
+
+        # Menu manager for hierarchical tool discovery
+        self._menu_manager = MenuManager()
 
         # Register default tools
         self._register_default_tools()
@@ -1111,6 +1115,63 @@ class LocalHarness(Harness):
             is_core=True,
         )
 
+        # MENU NAVIGATION tools - for hierarchical tool discovery
+        self.register_tool(
+            name="menu_list",
+            schema=ToolSchema(
+                name="menu_list",
+                description=(
+                    "List the current menu state and available options. "
+                    "Shows current mode (if any) and available modes to enter. "
+                    "Use this to see what tools are available in the current context."
+                ),
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._menu_list,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        self.register_tool(
+            name="menu_enter",
+            schema=ToolSchema(
+                name="menu_enter",
+                description=(
+                    "Enter a specific tool mode to access its tools. "
+                    "Available modes: swe (code editing), browser (web automation), "
+                    "git (version control), deploy (deployment), search (web search), "
+                    "ai (AI assistance), data (filesystem). "
+                    "Once in a mode, you can use that mode's tools plus meta-tools."
+                ),
+                required_params=["mode"],
+                optional_params=[],
+                param_types={"mode": "string"},
+            ),
+            handler=self._menu_enter,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        self.register_tool(
+            name="menu_exit",
+            schema=ToolSchema(
+                name="menu_exit",
+                description=(
+                    "Exit the current mode and return to ROOT. "
+                    "Use this when you need to switch to a different mode. "
+                    "At ROOT, only meta-tools are available."
+                ),
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._menu_exit,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -1928,6 +1989,49 @@ class LocalHarness(Harness):
         self._completion_answer = final_answer
         self._completion_status = status
         return f"Task completed with status '{status}': {final_answer}"
+
+    # =========================================================================
+    # Menu Navigation System - Hierarchical tool discovery
+    # See tool_menu.py for design rationale
+    # =========================================================================
+
+    def _menu_list(self) -> str:
+        """List the current menu state and available options."""
+        return self._menu_manager.list_menu()
+
+    def _menu_enter(self, mode: str) -> str:
+        """Enter a specific tool mode to access its tools."""
+        success, message = self._menu_manager.enter_mode(mode)
+        return message
+
+    def _menu_exit(self) -> str:
+        """Exit the current mode and return to ROOT."""
+        success, message = self._menu_manager.exit_mode()
+        return message
+
+    def get_menu_tool_schemas(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format schemas for only the tools visible in the current menu state.
+
+        This is the key method for hierarchical tool discovery. It returns:
+        - At ROOT: only meta-tools (menu_list, menu_enter, menu_exit, complete, think, message_user)
+        - In a mode: meta-tools + that mode's tools
+
+        This dramatically reduces context size compared to exposing all 60+ tools.
+        """
+        visible_tool_names = self._menu_manager.get_visible_tools()
+        visible_tools = [
+            self._tools[name] for name in visible_tool_names
+            if name in self._tools
+        ]
+        return self._build_schemas(visible_tools)
+
+    def get_menu_manager(self) -> MenuManager:
+        """Get the menu manager for external access (e.g., by agent loop)."""
+        return self._menu_manager
+
+    def reset_menu(self) -> None:
+        """Reset the menu to ROOT state."""
+        self._menu_manager.reset()
 
     # =========================================================================
     # Guardrailed Todo System - Anti-hallucination patterns

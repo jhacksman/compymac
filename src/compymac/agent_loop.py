@@ -54,6 +54,8 @@ class AgentConfig:
     force_complete_on_last_step: bool = False  # If True, inject "must call complete" on last step
     grounding_context: dict | None = None  # Context to re-inject every turn (repo_path, cwd, etc.)
     use_active_toolset: bool = False  # If True, use harness.get_active_tool_schemas() instead of get_tool_schemas()
+    # Hierarchical tool menu system (reduces context size by only showing relevant tools)
+    use_menu_system: bool = False  # If True, use harness.get_menu_tool_schemas() for hierarchical tool discovery
 
 
 @dataclass
@@ -157,8 +159,12 @@ class AgentLoop:
             )
 
         # Get tool schemas from harness
-        # Use active toolset if configured (for ACI-style closed action space)
-        if self.config.use_active_toolset and hasattr(self.harness, 'get_active_tool_schemas'):
+        # Priority: menu system > active toolset > all tools
+        if self.config.use_menu_system and hasattr(self.harness, 'get_menu_tool_schemas'):
+            # Hierarchical tool discovery - only show tools for current menu state
+            tools = self.harness.get_menu_tool_schemas()
+        elif self.config.use_active_toolset and hasattr(self.harness, 'get_active_tool_schemas'):
+            # ACI-style closed action space
             tools = self.harness.get_active_tool_schemas()
         else:
             tools = self.harness.get_tool_schemas()
