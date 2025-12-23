@@ -280,6 +280,8 @@ class SWEBenchRunner:
         harness: Harness,
         llm_client: LLMClient,
         workspace_base: Path | None = None,
+        max_verification_attempts: int = 3,
+        require_source_modification: bool = True,
     ):
         """
         Initialize runner.
@@ -288,11 +290,15 @@ class SWEBenchRunner:
             harness: The harness for tool execution
             llm_client: The LLM client for agent
             workspace_base: Base directory for task workspaces
+            max_verification_attempts: Max times to retry if tests fail (default: 3)
+            require_source_modification: Require patch to modify source, not just tests
         """
         self.harness = harness
         self.llm_client = llm_client
         self.workspace_base = workspace_base or Path("/tmp/swebench")
         self.results: list[SWEBenchResult] = []
+        self.max_verification_attempts = max_verification_attempts
+        self.require_source_modification = require_source_modification
 
     async def run_task(self, task: SWEBenchTask) -> SWEBenchResult:
         """
@@ -440,9 +446,21 @@ class SWEBenchRunner:
     async def _run_agent(
         self, task: SWEBenchTask, repo_path: Path, trace_id: str
     ) -> dict[str, Any]:
-        """Run agent on the task."""
+        """Run agent on the task with verification loop.
+
+        The agent runs iteratively:
+        1. Agent attempts to fix the bug
+        2. We verify by running fail_to_pass tests
+        3. If tests fail, we tell the agent and let it try again
+        4. Repeat until tests pass or max_verification_attempts reached
+        """
         # Import here to avoid circular imports
         from compymac.agent_loop import AgentConfig, AgentLoop
+
+        # Build test names for the prompt
+        test_names = ", ".join(task.fail_to_pass[:3])  # Show first 3 tests
+        if len(task.fail_to_pass) > 3:
+            test_names += f" (and {len(task.fail_to_pass) - 3} more)"
 
         prompt = f"""You are a software engineering agent tasked with fixing a bug in {task.repo}.
 
@@ -451,17 +469,25 @@ PROBLEM:
 
 {f"HINTS: {task.hints_text}" if task.hints_text else ""}
 
+CRITICAL REQUIREMENTS:
+1. You MUST modify the SOURCE CODE to fix the bug, not just add tests
+2. The following tests must pass after your fix: {test_names}
+3. Do NOT declare the task complete until you have:
+   a) Modified source code (not just test files)
+   b) Run the failing tests and confirmed they pass
+
 INSTRUCTIONS:
 1. Explore the repository at {repo_path}
-2. Understand the issue
-3. Locate the bug
-4. Fix the bug
-5. Run tests to verify the fix
-6. When done, output your changes as a unified diff patch
+2. Understand the issue by reading the problem statement carefully
+3. Locate the bug in the SOURCE CODE (not test files)
+4. Fix the bug by modifying the source code
+5. Run the specific failing tests to verify: {task.fail_to_pass}
+6. Only declare done when tests pass
 
 The repository is at: {repo_path}
 
-When you're done, create a git diff of your changes.
+IMPORTANT: Your fix must modify source code files, not just test files.
+When tests pass, create a git diff of your changes.
 """
 
         # Create agent config with system prompt
@@ -470,22 +496,70 @@ When you're done, create a git diff of your changes.
             max_steps=50,
         )
 
-        # Create agent and run
-        agent = AgentLoop(
-            harness=self.harness,
-            llm_client=self.llm_client,
-            config=config,
-        )
+        total_tool_calls = 0
+        last_error = ""
 
-        # Run agent (simplified - in practice would track tool calls and tokens)
-        try:
-            # AgentLoop.run() is synchronous and takes user_input as first arg
-            # The system_prompt is already set in config, so we just need to start the agent
-            agent.run("Please analyze the repository and fix the bug described above.")
-        except Exception as e:
-            return {"patch": "", "tool_calls": 0, "tokens": 0, "error": str(e)}
+        for attempt in range(self.max_verification_attempts):
+            # Create fresh agent for each attempt (but repo state persists)
+            agent = AgentLoop(
+                harness=self.harness,
+                llm_client=self.llm_client,
+                config=config,
+            )
 
-        # Get patch from git diff
+            # Run agent
+            try:
+                if attempt == 0:
+                    user_input = "Please analyze the repository and fix the bug described above."
+                else:
+                    # Provide feedback from previous attempt
+                    user_input = f"""Your previous fix attempt did not pass the tests.
+
+VERIFICATION FAILED (attempt {attempt}/{self.max_verification_attempts}):
+{last_error}
+
+Please analyze what went wrong and try a different approach.
+Remember: You must modify SOURCE CODE, not just test files.
+"""
+                agent.run(user_input)
+                total_tool_calls += len(agent.state.messages)
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+            # Get current patch
+            diff_result = subprocess.run(
+                ["git", "-C", str(repo_path), "diff"],
+                capture_output=True,
+                text=True,
+            )
+            patch = diff_result.stdout if diff_result.returncode == 0 else ""
+
+            # Verify patch modifies source code (not just tests)
+            if self.require_source_modification and patch:
+                if not self._patch_modifies_source(patch, task):
+                    last_error = (
+                        "Patch only modifies test files. "
+                        "You must fix the SOURCE CODE, not just add tests."
+                    )
+                    continue
+
+            # Run verification tests
+            verification_results = await self._verify_tests(repo_path, task)
+            if verification_results["all_passed"]:
+                # Success! Return the patch
+                return {
+                    "patch": patch,
+                    "tool_calls": total_tool_calls,
+                    "tokens": 0,
+                    "attempts": attempt + 1,
+                }
+
+            # Build error message for next attempt
+            failed_tests = verification_results["failed_tests"]
+            last_error = f"Tests still failing: {', '.join(failed_tests)}"
+
+        # All attempts exhausted
         diff_result = subprocess.run(
             ["git", "-C", str(repo_path), "diff"],
             capture_output=True,
@@ -495,8 +569,55 @@ When you're done, create a git diff of your changes.
 
         return {
             "patch": patch,
-            "tool_calls": len(agent.state.messages),  # Approximate
-            "tokens": 0,  # Would need to track from LLM client
+            "tool_calls": total_tool_calls,
+            "tokens": 0,
+            "error": f"Failed after {self.max_verification_attempts} attempts: {last_error}",
+        }
+
+    def _patch_modifies_source(self, patch: str, task: SWEBenchTask) -> bool:
+        """Check if patch modifies source code, not just test files."""
+        # Parse diff to find modified files
+        modified_files = []
+        for line in patch.split("\n"):
+            if line.startswith("diff --git"):
+                # Extract filename from "diff --git a/path/file b/path/file"
+                parts = line.split()
+                if len(parts) >= 4:
+                    filename = parts[2].lstrip("a/")
+                    modified_files.append(filename)
+
+        # Check if any non-test file is modified
+        for f in modified_files:
+            # Common test file patterns
+            is_test = (
+                "test" in f.lower()
+                or f.startswith("tests/")
+                or f.startswith("test_")
+                or "_test.py" in f
+            )
+            if not is_test:
+                return True
+
+        return False
+
+    async def _verify_tests(
+        self, repo_path: Path, task: SWEBenchTask
+    ) -> dict[str, Any]:
+        """Run fail_to_pass tests and return verification results."""
+        failed_tests = []
+        passed_tests = []
+
+        for test in task.fail_to_pass:
+            passed = await self._run_test(repo_path, test, log_output=True)
+            if passed:
+                passed_tests.append(test)
+            else:
+                failed_tests.append(test)
+
+        return {
+            "all_passed": len(failed_tests) == 0 and len(passed_tests) > 0,
+            "passed_tests": passed_tests,
+            "failed_tests": failed_tests,
         }
 
     async def _evaluate_patch(
