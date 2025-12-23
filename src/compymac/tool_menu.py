@@ -57,8 +57,9 @@ TOOL_MODES: dict[str, ToolMode] = {
             "Read", "Edit", "Write", "bash", "grep", "glob",
             "lsp_tool", "git_status", "git_diff_unstaged", "git_diff_staged",
             "git_commit", "git_add",
+            "web_search", "web_get_contents",  # Research capabilities
         ],
-        description="Software engineering: read, edit, search code, run commands, git operations",
+        description="Software engineering: read, edit, search code, run commands, git operations, web research",
     ),
     "browser": ToolMode(
         name="browser",
