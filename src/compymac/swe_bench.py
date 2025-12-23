@@ -469,7 +469,7 @@ class SWEBenchRunner:
 TASK: {json.dumps({
     "repo": task.repo,
     "repo_path": str(repo_path),
-    "problem": task.problem_statement[:500],  # Truncate for context
+    "problem": task.problem_statement[:500],
     "failing_tests": task.fail_to_pass[:3],
 })}
 
