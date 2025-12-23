@@ -474,7 +474,7 @@ TASK: {json.dumps({
 
 PRIMARY TOOLS (use ONLY these for this task):
 - grep: Search for patterns in files
-- glob: Find files by pattern  
+- glob: Find files by pattern
 - Read: View file contents (REQUIRED before Edit)
 - Edit: Modify file (old_string -> new_string)
 - bash: Run shell commands (e.g., pytest)
