@@ -118,17 +118,28 @@ class SWEPhase(str, Enum):
     Based on analysis: natural language prompts are advisory, not constraints.
     Agents deviate under cognitive load. This enum enables hard enforcement
     of phase transitions via the advance_phase() tool.
+
+    V2 (regression-aware): Split VERIFICATION into REGRESSION_CHECK + TARGET_FIX_VERIFICATION
+    to prevent test overfitting (fixing target bug but breaking existing tests).
+    Research: https://arxiv.org/html/2511.16858v1 shows LLMs overfit on fail_to_pass tests.
     """
 
     LOCALIZATION = "localization"  # Find suspect files, form hypothesis
     UNDERSTANDING = "understanding"  # Read code, understand root cause
     FIX = "fix"  # Edit files to implement fix
-    VERIFICATION = "verification"  # Run tests to verify fix
+    REGRESSION_CHECK = "regression_check"  # Run pass_to_pass tests (no regressions)
+    TARGET_FIX_VERIFICATION = "target_fix_verification"  # Run fail_to_pass tests (bug fixed)
     COMPLETE = "complete"  # Task finished
 
 
 # Phase budget configuration: max tool calls and allowed tools per phase
 # Budget-neutral tools (not counted): menu_*, think, git_diff_*, git_commit, complete, advance_phase
+#
+# V2 changes (regression-aware verification):
+# - FIX: 10 -> 15 (more room for regression fixes)
+# - VERIFICATION split into REGRESSION_CHECK (10) + TARGET_FIX_VERIFICATION (5)
+# - REGRESSION_CHECK requires pass_to_pass_status output (mandatory)
+# - TARGET_FIX_VERIFICATION requires fail_to_pass_status output (mandatory)
 PHASE_BUDGETS: dict[SWEPhase, dict[str, Any]] = {
     SWEPhase.LOCALIZATION: {
         "max_tool_calls": 15,
@@ -143,16 +154,22 @@ PHASE_BUDGETS: dict[SWEPhase, dict[str, Any]] = {
         "description": "Read code to understand the root cause of the bug",
     },
     SWEPhase.FIX: {
-        "max_tool_calls": 10,
+        "max_tool_calls": 15,  # Increased from 10 for regression fixes
         "required_outputs": ["modified_files"],
         "allowed_tools": ["Edit", "Read"],
         "description": "Edit files to implement the fix",
     },
-    SWEPhase.VERIFICATION: {
+    SWEPhase.REGRESSION_CHECK: {
+        "max_tool_calls": 10,
+        "required_outputs": ["pass_to_pass_status"],  # MANDATORY: must verify no regressions
+        "allowed_tools": ["bash", "Read", "analyze_test_failure"],
+        "description": "Run pass_to_pass tests to verify no regressions. If any fail, return to FIX phase.",
+    },
+    SWEPhase.TARGET_FIX_VERIFICATION: {
         "max_tool_calls": 5,
-        "required_outputs": [],
+        "required_outputs": ["fail_to_pass_status"],  # MANDATORY: must verify bug is fixed
         "allowed_tools": ["bash"],
-        "description": "Run tests to verify the fix works",
+        "description": "Run fail_to_pass tests to verify the bug is fixed",
     },
     SWEPhase.COMPLETE: {
         "max_tool_calls": 0,
@@ -179,6 +196,9 @@ class SWEPhaseState:
 
     This enables intra-attempt budget enforcement: hard limits on tool calls
     per phase to prevent endless wandering.
+
+    V2 (regression-aware): Added pass_to_pass_status and fail_to_pass_status
+    to track verification results and prevent test overfitting.
     """
 
     current_phase: SWEPhase = SWEPhase.LOCALIZATION
@@ -191,6 +211,11 @@ class SWEPhaseState:
     hypothesis: str = ""
     root_cause: str = ""
     modified_files: list[str] = field(default_factory=list)
+
+    # V2: Regression-aware verification outputs
+    pass_to_pass_status: str = ""  # "all_passed" | "N_failed" (from REGRESSION_CHECK)
+    fail_to_pass_status: str = ""  # "all_passed" | "N_failed" (from TARGET_FIX_VERIFICATION)
+    broke_pass_to_pass: list[str] = field(default_factory=list)  # Tests that regressed
 
     def increment_tool_call(self, tool_name: str) -> None:
         """Increment tool call count for current phase (if not budget-neutral)."""
@@ -222,6 +247,8 @@ class SWEPhaseState:
         """Validate that required outputs are present for current phase.
 
         Returns (is_valid, missing_outputs).
+
+        V2 (regression-aware): Added validation for pass_to_pass_status and fail_to_pass_status.
         """
         required = self.get_required_outputs()
         missing = []
@@ -235,6 +262,11 @@ class SWEPhaseState:
                 missing.append("root_cause")
             elif output == "modified_files" and not self.modified_files:
                 missing.append("modified_files")
+            # V2: Regression-aware verification outputs
+            elif output == "pass_to_pass_status" and not self.pass_to_pass_status:
+                missing.append("pass_to_pass_status")
+            elif output == "fail_to_pass_status" and not self.fail_to_pass_status:
+                missing.append("fail_to_pass_status")
 
         return len(missing) == 0, missing
 
@@ -242,16 +274,21 @@ class SWEPhaseState:
         """Advance to the next phase if outputs are valid.
 
         Returns (success, message).
+
+        V2 (regression-aware): Updated phase order to include REGRESSION_CHECK and
+        TARGET_FIX_VERIFICATION. Also supports returning to FIX phase if regressions detected.
         """
         is_valid, missing = self.validate_phase_outputs()
         if not is_valid:
             return False, f"Cannot advance: missing required outputs: {', '.join(missing)}"
 
+        # V2: Updated phase order with split verification
         phase_order = [
             SWEPhase.LOCALIZATION,
             SWEPhase.UNDERSTANDING,
             SWEPhase.FIX,
-            SWEPhase.VERIFICATION,
+            SWEPhase.REGRESSION_CHECK,
+            SWEPhase.TARGET_FIX_VERIFICATION,
             SWEPhase.COMPLETE,
         ]
 
@@ -264,6 +301,26 @@ class SWEPhaseState:
         budget = PHASE_BUDGETS[next_phase]["max_tool_calls"]
         return True, f"Advanced to {next_phase.value} phase. Budget: {budget} tool calls."
 
+    def return_to_fix_phase(self, reason: str) -> tuple[bool, str]:
+        """Return to FIX phase when regressions are detected.
+
+        This is called when REGRESSION_CHECK finds broken pass_to_pass tests.
+        The agent must fix the regression before proceeding.
+
+        Args:
+            reason: Description of why we're returning to FIX (e.g., which tests broke)
+
+        Returns (success, message).
+        """
+        if self.current_phase != SWEPhase.REGRESSION_CHECK:
+            return False, "Can only return to FIX from REGRESSION_CHECK phase"
+
+        self.current_phase = SWEPhase.FIX
+        # Reset FIX phase budget for regression fix
+        self.phase_tool_calls[SWEPhase.FIX] = 0
+        budget = PHASE_BUDGETS[SWEPhase.FIX]["max_tool_calls"]
+        return True, f"Returned to FIX phase to address regression: {reason}. Budget: {budget} tool calls."
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -273,6 +330,10 @@ class SWEPhaseState:
             "hypothesis": self.hypothesis,
             "root_cause": self.root_cause,
             "modified_files": self.modified_files,
+            # V2: Regression-aware verification outputs
+            "pass_to_pass_status": self.pass_to_pass_status,
+            "fail_to_pass_status": self.fail_to_pass_status,
+            "broke_pass_to_pass": self.broke_pass_to_pass,
         }
 
 
@@ -284,6 +345,10 @@ class AttemptState:
     attempt restarts from scratch without learning from previous findings.
     This dataclass captures what was learned and what failed so attempt 2+
     can build on previous work instead of repeating it.
+
+    V2 (regression-aware): Added fail_to_pass_results, pass_to_pass_results,
+    broke_pass_to_pass, regression_summary, and changes_that_caused_regression
+    to enable learning from regressions across attempts.
     """
 
     attempt_number: int = 1
@@ -304,11 +369,29 @@ class AttemptState:
     modified_files: list[str] = field(default_factory=list)
     git_diff_summary: str = ""
 
+    # V2: Regression-aware tracking - separate fail_to_pass vs pass_to_pass
+    fail_to_pass_results: dict[str, bool] = field(default_factory=dict)  # {test: passed}
+    pass_to_pass_results: dict[str, bool] = field(default_factory=dict)  # {test: passed}
+
+    # V2: Regression analysis
+    broke_pass_to_pass: list[str] = field(default_factory=list)  # Tests that regressed
+    regression_summary: str = ""  # e.g., "Broke 17 tests related to pytest parsing"
+    changes_that_caused_regression: str = ""  # What to avoid in next attempt
+
     def to_grounding_context(self) -> dict[str, Any]:
         """Convert to grounding context for injection into agent prompt.
 
         This is injected into attempt 2+ to provide cross-attempt learning.
+
+        V2: Now includes regression-aware test results to help agent understand
+        which tests broke and why, enabling targeted fixes without re-breaking.
         """
+        # V2: Calculate pass/fail summary for fail_to_pass and pass_to_pass
+        f2p_passed = sum(1 for v in self.fail_to_pass_results.values() if v)
+        f2p_total = len(self.fail_to_pass_results)
+        p2p_passed = sum(1 for v in self.pass_to_pass_results.values() if v)
+        p2p_total = len(self.pass_to_pass_results)
+
         return {
             "attempt_number": self.attempt_number,
             "previous_findings": {
@@ -325,6 +408,15 @@ class AttemptState:
                 "modified_files": self.modified_files,
                 "has_uncommitted_changes": bool(self.git_diff_summary),
             },
+            # V2: Regression-aware test results
+            "test_results": {
+                "fail_to_pass": f"{f2p_passed}/{f2p_total} passed" if f2p_total else "not run",
+                "pass_to_pass": f"{p2p_passed}/{p2p_total} passed" if p2p_total else "not run",
+                "broke_tests": self.broke_pass_to_pass[:10],  # Limit to 10 for context
+                "regression_summary": self.regression_summary,
+            },
+            # V2: What to avoid in next attempt
+            "avoid": self.changes_that_caused_regression if self.changes_that_caused_regression else None,
         }
 
     def to_prompt_injection(self) -> str:
@@ -332,6 +424,9 @@ class AttemptState:
 
         This is a compact, structured summary that helps the agent
         avoid repeating previous mistakes.
+
+        V2: Now includes regression-aware test results with specific guidance
+        on which tests broke and what changes to avoid.
         """
         lines = [
             f"## Previous Attempt Summary (Attempt {self.attempt_number - 1})",
@@ -356,6 +451,41 @@ class AttemptState:
             lines.append(f"### What Failed: {self.what_failed}")
             lines.append("")
 
+        # V2: Add regression-aware test results
+        if self.fail_to_pass_results or self.pass_to_pass_results:
+            lines.append("### Test Results from Previous Attempt")
+            if self.fail_to_pass_results:
+                f2p_passed = sum(1 for v in self.fail_to_pass_results.values() if v)
+                f2p_total = len(self.fail_to_pass_results)
+                status = "PASSED" if f2p_passed == f2p_total else "FAILED"
+                lines.append(f"- fail_to_pass: {f2p_passed}/{f2p_total} {status}")
+            if self.pass_to_pass_results:
+                p2p_passed = sum(1 for v in self.pass_to_pass_results.values() if v)
+                p2p_total = len(self.pass_to_pass_results)
+                status = "PASSED" if p2p_passed == p2p_total else "REGRESSION"
+                lines.append(f"- pass_to_pass: {p2p_passed}/{p2p_total} {status}")
+            lines.append("")
+
+        # V2: Highlight broken tests (regressions)
+        if self.broke_pass_to_pass:
+            lines.append("### REGRESSIONS DETECTED - Tests That Broke")
+            for test in self.broke_pass_to_pass[:10]:  # Limit to 10
+                lines.append(f"- {test}")
+            if len(self.broke_pass_to_pass) > 10:
+                lines.append(f"- ... and {len(self.broke_pass_to_pass) - 10} more")
+            lines.append("")
+
+        # V2: Add regression summary
+        if self.regression_summary:
+            lines.append(f"### Regression Summary: {self.regression_summary}")
+            lines.append("")
+
+        # V2: Add specific guidance on what to avoid
+        if self.changes_that_caused_regression:
+            lines.append("### AVOID THESE CHANGES (caused regressions)")
+            lines.append(self.changes_that_caused_regression)
+            lines.append("")
+
         if self.next_approach:
             lines.append(f"### Suggested Next Approach: {self.next_approach}")
             lines.append("")
@@ -366,6 +496,8 @@ class AttemptState:
             lines.append("")
 
         lines.append("DO NOT repeat the same approach that failed. Try something different.")
+        if self.broke_pass_to_pass:
+            lines.append("CRITICAL: Your fix must NOT break any pass_to_pass tests.")
 
         return "\n".join(lines)
 
@@ -381,6 +513,12 @@ class AttemptState:
             "next_approach": self.next_approach,
             "modified_files": self.modified_files,
             "git_diff_summary": self.git_diff_summary,
+            # V2: Regression-aware fields
+            "fail_to_pass_results": self.fail_to_pass_results,
+            "pass_to_pass_results": self.pass_to_pass_results,
+            "broke_pass_to_pass": self.broke_pass_to_pass,
+            "regression_summary": self.regression_summary,
+            "changes_that_caused_regression": self.changes_that_caused_regression,
         }
 
     @classmethod
@@ -393,12 +531,25 @@ class AttemptState:
         next_approach: str,
         modified_files: list[str],
         git_diff_summary: str,
+        # V2: Regression-aware parameters
+        fail_to_pass_results: dict[str, bool] | None = None,
+        pass_to_pass_results: dict[str, bool] | None = None,
+        regression_summary: str = "",
+        changes_that_caused_regression: str = "",
     ) -> "AttemptState":
         """Create AttemptState from a completed SWEPhaseState.
 
         This is called at the end of each failed attempt to capture
         what was learned for the next attempt.
+
+        V2: Now accepts regression-aware parameters to track which tests
+        broke and why, enabling targeted fixes in subsequent attempts.
         """
+        # V2: Calculate broke_pass_to_pass from pass_to_pass_results
+        broke_tests = []
+        if pass_to_pass_results:
+            broke_tests = [test for test, passed in pass_to_pass_results.items() if not passed]
+
         return cls(
             attempt_number=attempt_number + 1,
             localization_findings=[
@@ -412,6 +563,12 @@ class AttemptState:
             next_approach=next_approach,
             modified_files=modified_files,
             git_diff_summary=git_diff_summary,
+            # V2: Regression-aware fields
+            fail_to_pass_results=fail_to_pass_results or {},
+            pass_to_pass_results=pass_to_pass_results or {},
+            broke_pass_to_pass=broke_tests,
+            regression_summary=regression_summary,
+            changes_that_caused_regression=changes_that_caused_regression,
         )
 
 

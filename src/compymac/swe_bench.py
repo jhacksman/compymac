@@ -692,13 +692,21 @@ DO NOT repeat the same approach that failed.
                 self.harness.disable_swe_phase_enforcement()
 
     def _capture_attempt_state(
-        self, attempt_number: int, what_failed: str, patch: str, repo_path: Path
+        self,
+        attempt_number: int,
+        what_failed: str,
+        patch: str,
+        repo_path: Path,
+        test_results: TestResults | None = None,
     ) -> AttemptState:
         """Capture state from a failed attempt for cross-attempt learning.
 
         This is CRITICAL for Mechanism 2 (inter-attempt state persistence).
         It captures what was learned and what failed so attempt 2+ can build
         on previous work instead of repeating it.
+
+        V2 (regression-aware): Now accepts test_results to capture fail_to_pass
+        and pass_to_pass results for regression-aware learning.
         """
         # Get current phase state from harness (if available)
         phase_state: SWEPhaseState | None = None
@@ -728,6 +736,27 @@ DO NOT repeat the same approach that failed.
         except Exception as e:
             logger.warning(f"Failed to get git diff: {e}")
 
+        # V2: Extract regression-aware test results
+        fail_to_pass_results: dict[str, bool] = {}
+        pass_to_pass_results: dict[str, bool] = {}
+        regression_summary = ""
+        changes_that_caused_regression = ""
+
+        if test_results:
+            fail_to_pass_results = test_results.fail_to_pass
+            pass_to_pass_results = test_results.pass_to_pass
+
+            # Calculate regression summary
+            broke_tests = [t for t, passed in pass_to_pass_results.items() if not passed]
+            if broke_tests:
+                regression_summary = f"Broke {len(broke_tests)} pass_to_pass tests"
+                # Suggest what to avoid based on modified files
+                if modified_files:
+                    changes_that_caused_regression = (
+                        f"Changes to {', '.join(modified_files[:3])} may have caused regressions. "
+                        f"Consider a more targeted fix that doesn't affect existing functionality."
+                    )
+
         # Build AttemptState
         if phase_state:
             return AttemptState.from_phase_state(
@@ -738,6 +767,11 @@ DO NOT repeat the same approach that failed.
                 next_approach="Try a different approach based on the error message.",
                 modified_files=modified_files,
                 git_diff_summary=git_diff_summary,
+                # V2: Regression-aware parameters
+                fail_to_pass_results=fail_to_pass_results,
+                pass_to_pass_results=pass_to_pass_results,
+                regression_summary=regression_summary,
+                changes_that_caused_regression=changes_that_caused_regression,
             )
         else:
             # No phase state available, create minimal AttemptState
@@ -748,6 +782,12 @@ DO NOT repeat the same approach that failed.
                 next_approach="Try a different approach based on the error message.",
                 modified_files=modified_files,
                 git_diff_summary=git_diff_summary,
+                # V2: Regression-aware fields
+                fail_to_pass_results=fail_to_pass_results,
+                pass_to_pass_results=pass_to_pass_results,
+                broke_pass_to_pass=[t for t, p in pass_to_pass_results.items() if not p],
+                regression_summary=regression_summary,
+                changes_that_caused_regression=changes_that_caused_regression,
             )
 
     def _patch_modifies_source(self, patch: str, task: SWEBenchTask) -> bool:

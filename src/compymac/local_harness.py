@@ -1133,22 +1133,67 @@ class LocalHarness(Harness):
                 name="advance_phase",
                 description=(
                     "Advance to the next SWE-bench workflow phase. "
-                    "Phases: LOCALIZATION -> UNDERSTANDING -> FIX -> VERIFICATION -> COMPLETE. "
+                    "Phases: LOCALIZATION -> UNDERSTANDING -> FIX -> REGRESSION_CHECK -> TARGET_FIX_VERIFICATION -> COMPLETE. "
                     "You MUST call this with required outputs before using tools from the next phase. "
                     "LOCALIZATION requires: suspect_files, hypothesis. "
                     "UNDERSTANDING requires: root_cause. "
-                    "FIX requires: modified_files."
+                    "FIX requires: modified_files. "
+                    "REGRESSION_CHECK requires: pass_to_pass_status (all_passed or N_failed). "
+                    "TARGET_FIX_VERIFICATION requires: fail_to_pass_status (all_passed or N_failed)."
                 ),
                 required_params=[],
-                optional_params=["suspect_files", "hypothesis", "root_cause", "modified_files"],
+                optional_params=[
+                    "suspect_files", "hypothesis", "root_cause", "modified_files",
+                    "pass_to_pass_status", "fail_to_pass_status",
+                ],
                 param_types={
                     "suspect_files": "array",
                     "hypothesis": "string",
                     "root_cause": "string",
                     "modified_files": "array",
+                    "pass_to_pass_status": "string",
+                    "fail_to_pass_status": "string",
                 },
             ),
             handler=self._advance_phase,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        # return_to_fix_phase - return to FIX phase when regressions detected
+        self.register_tool(
+            name="return_to_fix_phase",
+            schema=ToolSchema(
+                name="return_to_fix_phase",
+                description=(
+                    "Return to FIX phase when REGRESSION_CHECK finds broken pass_to_pass tests. "
+                    "Use this when your fix broke existing tests and you need to fix the regression. "
+                    "This resets the FIX phase budget so you can make additional changes."
+                ),
+                required_params=["reason"],
+                optional_params=[],
+                param_types={"reason": "string"},
+            ),
+            handler=self._return_to_fix_phase,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        # analyze_test_failure - differential debugging for regressions
+        self.register_tool(
+            name="analyze_test_failure",
+            schema=ToolSchema(
+                name="analyze_test_failure",
+                description=(
+                    "Analyze why a test failed. Use this during REGRESSION_CHECK to understand "
+                    "why a pass_to_pass test broke. Optionally compare against baseline code "
+                    "to see the difference in behavior."
+                ),
+                required_params=["test_name"],
+                optional_params=["compare_baseline"],
+                param_types={"test_name": "string", "compare_baseline": "boolean"},
+            ),
+            handler=self._analyze_test_failure,
             category=ToolCategory.CORE,
             is_core=True,
         )
@@ -2076,6 +2121,8 @@ class LocalHarness(Harness):
         hypothesis: str | None = None,
         root_cause: str | None = None,
         modified_files: list[str] | None = None,
+        pass_to_pass_status: str | None = None,
+        fail_to_pass_status: str | None = None,
     ) -> str:
         """Advance to the next SWE-bench workflow phase.
 
@@ -2088,6 +2135,8 @@ class LocalHarness(Harness):
             hypothesis: Your hypothesis about the bug (required for LOCALIZATION)
             root_cause: The root cause of the bug (required for UNDERSTANDING)
             modified_files: Files you modified to fix the bug (required for FIX)
+            pass_to_pass_status: Status of pass_to_pass tests (required for REGRESSION_CHECK)
+            fail_to_pass_status: Status of fail_to_pass tests (required for TARGET_FIX_VERIFICATION)
 
         Returns:
             Success message with new phase info, or error message if validation fails.
@@ -2106,6 +2155,11 @@ class LocalHarness(Harness):
             state.root_cause = root_cause
         if modified_files:
             state.modified_files = modified_files
+        # V2: Regression-aware outputs
+        if pass_to_pass_status:
+            state.pass_to_pass_status = pass_to_pass_status
+        if fail_to_pass_status:
+            state.fail_to_pass_status = fail_to_pass_status
 
         # Try to advance
         success, message = state.advance_to_next_phase()
@@ -2122,6 +2176,86 @@ class LocalHarness(Harness):
             )
         else:
             return f"[PHASE TRANSITION BLOCKED] {message}"
+
+    def _return_to_fix_phase(self, reason: str) -> str:
+        """Return to FIX phase when REGRESSION_CHECK finds broken pass_to_pass tests.
+
+        This is called when the agent's fix broke existing tests and needs to
+        fix the regression before proceeding.
+
+        Args:
+            reason: Description of why we're returning to FIX (e.g., which tests broke)
+
+        Returns:
+            Success message with new budget info, or error message if not in REGRESSION_CHECK.
+        """
+        if not self._swe_phase_enabled or not self._swe_phase_state:
+            return "Phase enforcement is not enabled. This tool is only available during SWE-bench tasks."
+
+        state = self._swe_phase_state
+        success, message = state.return_to_fix_phase(reason)
+
+        if success:
+            budget_info = PHASE_BUDGETS[state.current_phase]
+            allowed_tools = budget_info["allowed_tools"]
+            return (
+                f"{message}\n\n"
+                f"Allowed tools in FIX phase: {', '.join(allowed_tools)}\n"
+                f"Description: {budget_info['description']}\n\n"
+                f"IMPORTANT: Fix the regression without breaking the target bug fix."
+            )
+        else:
+            return f"[RETURN TO FIX BLOCKED] {message}"
+
+    def _analyze_test_failure(
+        self,
+        test_name: str,
+        compare_baseline: bool = False,
+    ) -> str:
+        """Analyze why a test failed.
+
+        Use this during REGRESSION_CHECK to understand why a pass_to_pass test broke.
+        Optionally compare against baseline code to see the difference in behavior.
+
+        Args:
+            test_name: The test that failed (e.g., "test_parser.py::test_argparse")
+            compare_baseline: If True, run test on baseline code to see difference
+
+        Returns:
+            Detailed failure output + diff from baseline if requested
+        """
+        if not self._swe_phase_enabled or not self._swe_phase_state:
+            return "Phase enforcement is not enabled. This tool is only available during SWE-bench tasks."
+
+        # Run the test to get failure output
+        try:
+            result = subprocess.run(
+                ["python", "-m", "pytest", test_name, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=self.config.working_dir if self.config else None,
+            )
+            current_output = result.stdout + result.stderr
+        except subprocess.TimeoutExpired:
+            current_output = f"Test {test_name} timed out after 60 seconds"
+        except Exception as e:
+            current_output = f"Error running test: {e}"
+
+        lines = [
+            f"## Test Failure Analysis: {test_name}",
+            "",
+            "### Current Output:",
+            current_output[:2000],  # Truncate to 2000 chars
+        ]
+
+        if compare_baseline:
+            lines.append("")
+            lines.append("### Baseline Comparison:")
+            lines.append("(Baseline comparison requires git stash/unstash - not implemented yet)")
+            lines.append("Tip: Use 'git diff' to see what changed, then reason about which change broke this test.")
+
+        return "\n".join(lines)
 
     def _get_phase_status(self) -> str:
         """Get the current phase status and remaining budget.
