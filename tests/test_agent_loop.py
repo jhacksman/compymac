@@ -491,9 +491,12 @@ class TestToolFiltering:
         from compymac.local_harness import LocalHarness
 
         harness = LocalHarness()
-        # Configure SWE-bench toolset (only Read, Edit, bash, grep, glob, complete)
+        # Configure SWE-bench toolset (Read, Edit, bash, grep, glob, complete + research/navigation tools)
         enabled_tools = harness.set_swe_bench_toolset()
-        assert set(enabled_tools) == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+        assert set(enabled_tools) == {
+            "Read", "Edit", "bash", "grep", "glob", "complete",
+            "web_search", "web_get_contents", "lsp_tool",
+        }
 
         llm = MockLLMClient(responses=[
             ChatResponse(
@@ -519,11 +522,14 @@ class TestToolFiltering:
         tools_sent = llm._calls[0]["tools"]
         tool_names = {t["function"]["name"] for t in tools_sent}
 
-        # Should only have SWE-bench tools
-        assert tool_names == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+        # Should only have SWE-bench tools (including research/navigation tools)
+        assert tool_names == {
+            "Read", "Edit", "bash", "grep", "glob", "complete",
+            "web_search", "web_get_contents", "lsp_tool",
+        }
 
-        # Should NOT have these tools
-        forbidden_tools = {"message_user", "list_repos", "web_search", "request_tools", "think", "TodoWrite"}
+        # Should NOT have these tools (non-SWE-bench tools)
+        forbidden_tools = {"message_user", "list_repos", "request_tools", "think", "TodoWrite"}
         assert tool_names.isdisjoint(forbidden_tools), f"Found forbidden tools: {tool_names & forbidden_tools}"
 
     def test_use_active_toolset_false_sends_all_tools(self):
@@ -575,11 +581,15 @@ class TestToolFiltering:
         all_tool_names = {t["function"]["name"] for t in all_schemas}
         assert len(all_tool_names) > 6
 
-        # Configure SWE-bench toolset
+        # Configure SWE-bench toolset (includes research/navigation tools)
         enabled = harness.set_swe_bench_toolset()
-        assert set(enabled) == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+        expected_tools = {
+            "Read", "Edit", "bash", "grep", "glob", "complete",
+            "web_search", "web_get_contents", "lsp_tool",
+        }
+        assert set(enabled) == expected_tools
 
         # After configuration, get_active_tool_schemas should return only SWE-bench tools
         active_schemas = harness.get_active_tool_schemas()
         active_tool_names = {t["function"]["name"] for t in active_schemas}
-        assert active_tool_names == {"Read", "Edit", "bash", "grep", "glob", "complete"}
+        assert active_tool_names == expected_tools

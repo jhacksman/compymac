@@ -5189,7 +5189,13 @@ Permissions: {mode}"""
             self._active_toolset.disable_tool(tool_name)
 
         # Explicitly enable only SWE-bench tools
-        swe_bench_tools = ["Read", "Edit", "bash", "grep", "glob", "complete"]
+        # Includes research capabilities (web_search, web_get_contents) and
+        # program structure navigation (lsp_tool) for better localization
+        swe_bench_tools = [
+            "Read", "Edit", "bash", "grep", "glob", "complete",
+            "web_search", "web_get_contents",  # Research capabilities
+            "lsp_tool",  # Program structure navigation
+        ]
         enabled = []
         for tool_name in swe_bench_tools:
             if tool_name in self._tools:
@@ -5203,9 +5209,13 @@ Permissions: {mode}"""
         Get OpenAI-format schemas for SWE-bench tools only.
 
         This is the ACI (Agent-Computer Interface) for SWE-bench tasks.
-        Returns a minimal, closed action space.
+        Returns a minimal, closed action space with research and navigation capabilities.
         """
-        swe_bench_tools = ["Read", "Edit", "bash", "grep", "glob", "complete"]
+        swe_bench_tools = [
+            "Read", "Edit", "bash", "grep", "glob", "complete",
+            "web_search", "web_get_contents",  # Research capabilities
+            "lsp_tool",  # Program structure navigation
+        ]
         tools = [
             self._tools[name] for name in swe_bench_tools
             if name in self._tools
