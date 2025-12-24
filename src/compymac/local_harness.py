@@ -41,6 +41,11 @@ from compymac.harness_spec import (
     truncate_output,
 )
 from compymac.safety import PolicyEngine
+from compymac.swe_workflow import (
+    BUDGET_NEUTRAL_TOOLS,
+    PHASE_BUDGETS,
+    SWEPhaseState,
+)
 from compymac.tool_menu import MenuManager
 from compymac.types import ToolCall, ToolResult
 from compymac.verification import (
@@ -185,6 +190,11 @@ class LocalHarness(Harness):
 
         # Menu manager for hierarchical tool discovery
         self._menu_manager = MenuManager()
+
+        # SWE-bench phase state for intra-attempt budget enforcement
+        # This is None by default and set by SWEBenchRunner when running SWE-bench tasks
+        self._swe_phase_state: SWEPhaseState | None = None
+        self._swe_phase_enabled: bool = False
 
         # Register default tools
         self._register_default_tools()
@@ -1115,6 +1125,52 @@ class LocalHarness(Harness):
             is_core=True,
         )
 
+        # SWE-BENCH PHASE tools - for intra-attempt budget enforcement
+        # advance_phase - transition between workflow phases
+        self.register_tool(
+            name="advance_phase",
+            schema=ToolSchema(
+                name="advance_phase",
+                description=(
+                    "Advance to the next SWE-bench workflow phase. "
+                    "Phases: LOCALIZATION -> UNDERSTANDING -> FIX -> VERIFICATION -> COMPLETE. "
+                    "You MUST call this with required outputs before using tools from the next phase. "
+                    "LOCALIZATION requires: suspect_files, hypothesis. "
+                    "UNDERSTANDING requires: root_cause. "
+                    "FIX requires: modified_files."
+                ),
+                required_params=[],
+                optional_params=["suspect_files", "hypothesis", "root_cause", "modified_files"],
+                param_types={
+                    "suspect_files": "array",
+                    "hypothesis": "string",
+                    "root_cause": "string",
+                    "modified_files": "array",
+                },
+            ),
+            handler=self._advance_phase,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
+        # get_phase_status - check current phase and remaining budget
+        self.register_tool(
+            name="get_phase_status",
+            schema=ToolSchema(
+                name="get_phase_status",
+                description=(
+                    "Get the current SWE-bench phase status and remaining budget. "
+                    "Shows current phase, remaining tool calls, allowed tools, and missing outputs."
+                ),
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=self._get_phase_status,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
         # MENU NAVIGATION tools - for hierarchical tool discovery
         self.register_tool(
             name="menu_list",
@@ -1991,6 +2047,111 @@ class LocalHarness(Harness):
         return f"Task completed with status '{status}': {final_answer}"
 
     # =========================================================================
+    # SWE-bench Phase Management - Intra-attempt budget enforcement
+    # See swe_workflow.py for design rationale
+    # =========================================================================
+
+    def enable_swe_phase_enforcement(self) -> None:
+        """Enable SWE-bench phase enforcement with fresh state."""
+        self._swe_phase_state = SWEPhaseState()
+        self._swe_phase_enabled = True
+
+    def disable_swe_phase_enforcement(self) -> None:
+        """Disable SWE-bench phase enforcement."""
+        self._swe_phase_state = None
+        self._swe_phase_enabled = False
+
+    def get_swe_phase_state(self) -> SWEPhaseState | None:
+        """Get the current SWE phase state."""
+        return self._swe_phase_state
+
+    def set_swe_phase_state(self, state: SWEPhaseState) -> None:
+        """Set the SWE phase state (for restoring from previous attempt)."""
+        self._swe_phase_state = state
+        self._swe_phase_enabled = True
+
+    def _advance_phase(
+        self,
+        suspect_files: list[str] | None = None,
+        hypothesis: str | None = None,
+        root_cause: str | None = None,
+        modified_files: list[str] | None = None,
+    ) -> str:
+        """Advance to the next SWE-bench workflow phase.
+
+        This tool is the ONLY way to transition between phases. You MUST call it
+        with the required outputs for your current phase before you can use tools
+        from the next phase.
+
+        Args:
+            suspect_files: Files suspected to contain the bug (required for LOCALIZATION)
+            hypothesis: Your hypothesis about the bug (required for LOCALIZATION)
+            root_cause: The root cause of the bug (required for UNDERSTANDING)
+            modified_files: Files you modified to fix the bug (required for FIX)
+
+        Returns:
+            Success message with new phase info, or error message if validation fails.
+        """
+        if not self._swe_phase_enabled or not self._swe_phase_state:
+            return "Phase enforcement is not enabled. This tool is only available during SWE-bench tasks."
+
+        state = self._swe_phase_state
+
+        # Update state with provided outputs
+        if suspect_files:
+            state.suspect_files = suspect_files
+        if hypothesis:
+            state.hypothesis = hypothesis
+        if root_cause:
+            state.root_cause = root_cause
+        if modified_files:
+            state.modified_files = modified_files
+
+        # Try to advance
+        success, message = state.advance_to_next_phase()
+
+        if success:
+            # Include helpful info about the new phase
+            new_phase = state.current_phase
+            budget_info = PHASE_BUDGETS[new_phase]
+            allowed_tools = budget_info["allowed_tools"]
+            return (
+                f"{message}\n\n"
+                f"Allowed tools in {new_phase.value}: {', '.join(allowed_tools)}\n"
+                f"Description: {budget_info['description']}"
+            )
+        else:
+            return f"[PHASE TRANSITION BLOCKED] {message}"
+
+    def _get_phase_status(self) -> str:
+        """Get the current phase status and remaining budget.
+
+        Returns information about the current phase, remaining tool calls,
+        and what outputs are still needed to advance.
+        """
+        if not self._swe_phase_enabled or not self._swe_phase_state:
+            return "Phase enforcement is not enabled."
+
+        state = self._swe_phase_state
+        phase = state.current_phase
+        budget_info = PHASE_BUDGETS[phase]
+        remaining = state.get_remaining_budget()
+        is_valid, missing = state.validate_phase_outputs()
+
+        lines = [
+            f"Current Phase: {phase.value}",
+            f"Remaining Budget: {remaining} tool calls",
+            f"Allowed Tools: {', '.join(budget_info['allowed_tools'])}",
+        ]
+
+        if missing:
+            lines.append(f"Missing Outputs: {', '.join(missing)}")
+        else:
+            lines.append("All required outputs collected. Ready to advance_phase().")
+
+        return "\n".join(lines)
+
+    # =========================================================================
     # Menu Navigation System - Hierarchical tool discovery
     # See tool_menu.py for design rationale
     # =========================================================================
@@ -2016,9 +2177,29 @@ class LocalHarness(Harness):
         - At ROOT: only meta-tools (menu_list, menu_enter, menu_exit, complete, think, message_user)
         - In a mode: meta-tools + that mode's tools
 
+        When SWE phase enforcement is enabled, this method also filters tools based on
+        the current phase. This is the first layer of defense (schema filtering).
+        The execute() method provides a second layer (hard rejection) as a backstop.
+
         This dramatically reduces context size compared to exposing all 60+ tools.
         """
         visible_tool_names = self._menu_manager.get_visible_tools()
+
+        # If SWE phase enforcement is enabled, filter tools based on current phase
+        if self._swe_phase_enabled and self._swe_phase_state:
+            phase_state = self._swe_phase_state
+            # Filter to only tools allowed in current phase + budget-neutral tools
+            filtered_names = [
+                name for name in visible_tool_names
+                if phase_state.is_tool_allowed(name)
+            ]
+            # Always include phase management tools
+            phase_tools = ["advance_phase", "get_phase_status"]
+            for tool in phase_tools:
+                if tool not in filtered_names and tool in self._tools:
+                    filtered_names.append(tool)
+            visible_tool_names = filtered_names
+
         visible_tools = [
             self._tools[name] for name in visible_tool_names
             if name in self._tools
@@ -4875,6 +5056,62 @@ Permissions: {mode}"""
                     call_id,
                     policy_warnings=warning_msg,
                 )
+
+        # SWE-bench phase enforcement (hard rejection as backstop)
+        # This is the second layer of defense after schema filtering in get_menu_tool_schemas()
+        if self._swe_phase_enabled and self._swe_phase_state:
+            phase_state = self._swe_phase_state
+            tool_name = tool_call.name
+
+            # Check if tool is allowed in current phase
+            if not phase_state.is_tool_allowed(tool_name):
+                current_phase = phase_state.current_phase
+                allowed_tools = PHASE_BUDGETS[current_phase]["allowed_tools"]
+                error_msg = (
+                    f"Tool '{tool_name}' is not allowed in {current_phase.value} phase. "
+                    f"Allowed tools: {', '.join(allowed_tools)}. "
+                    f"Use advance_phase() to transition to the next phase."
+                )
+
+                self._event_log.log_event(
+                    EventType.ERROR,
+                    call_id,
+                    error=f"Phase violation: {error_msg}",
+                    phase_blocked=True,
+                )
+
+                return ToolResult(
+                    tool_call_id=call_id,
+                    content=f"[PHASE BLOCKED] {error_msg}",
+                    success=False,
+                    error=f"Phase violation: {error_msg}",
+                )
+
+            # Check if phase budget is exhausted
+            if phase_state.is_budget_exhausted() and tool_name not in BUDGET_NEUTRAL_TOOLS:
+                current_phase = phase_state.current_phase
+                error_msg = (
+                    f"Budget exhausted for {current_phase.value} phase. "
+                    f"You have used all {PHASE_BUDGETS[current_phase]['max_tool_calls']} tool calls. "
+                    f"Use advance_phase() to transition to the next phase, or call get_phase_status() for details."
+                )
+
+                self._event_log.log_event(
+                    EventType.ERROR,
+                    call_id,
+                    error=f"Budget exhausted: {error_msg}",
+                    budget_blocked=True,
+                )
+
+                return ToolResult(
+                    tool_call_id=call_id,
+                    content=f"[BUDGET EXHAUSTED] {error_msg}",
+                    success=False,
+                    error=f"Budget exhausted: {error_msg}",
+                )
+
+            # Increment tool call count for current phase (after validation passes)
+            phase_state.increment_tool_call(tool_name)
 
         # Execute
         self._event_log.log_event(EventType.TOOL_DISPATCH, call_id, tool_name=tool.name)

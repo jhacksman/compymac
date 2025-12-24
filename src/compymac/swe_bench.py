@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 import time
 import uuid
@@ -19,9 +20,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from compymac.swe_workflow import AttemptState, SWEPhaseState
+
 if TYPE_CHECKING:
     from compymac.harness import Harness
     from compymac.llm import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -525,7 +530,8 @@ When all tests pass, call complete with a description of your fix.
 
         # Standard CompyMac agent config with menu system enabled
         # No hardcoded tool restrictions - agent discovers tools through menu
-        config = AgentConfig(
+        # grounding_context will be set per-attempt to inject AttemptState for attempt 2+
+        base_config = AgentConfig(
             system_prompt=prompt,
             max_steps=50,
             use_menu_system=True,  # Enable hierarchical menu system
@@ -535,51 +541,137 @@ When all tests pass, call complete with a description of your fix.
 
         total_tool_calls = 0
         last_error = ""
-        import logging
-        logger = logging.getLogger(__name__)
+        attempt_state: AttemptState | None = None  # Persists across attempts
 
-        for attempt in range(self.max_verification_attempts):
-            logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
+        # Enable phase enforcement in harness (Mechanism 1)
+        # This enables intra-attempt budget enforcement
+        if hasattr(self.harness, 'enable_swe_phase_enforcement'):
+            self.harness.enable_swe_phase_enforcement()
+            logger.info("Phase enforcement enabled for SWE-bench task")
 
-            # Create fresh agent for each attempt (but repo state persists)
-            agent = AgentLoop(
-                harness=self.harness,
-                llm_client=self.llm_client,
-                config=config,
-            )
+        try:
+            for attempt in range(self.max_verification_attempts):
+                logger.info(f"Starting attempt {attempt + 1}/{self.max_verification_attempts}")
 
-            # Run agent
-            try:
-                if attempt == 0:
-                    user_input = "Please analyze the repository and fix the bug described above."
-                else:
-                    # Provide feedback from previous attempt
-                    user_input = f"""Your previous fix attempt did not pass the tests.
+                # Reset phase state for each attempt (fresh budget)
+                if hasattr(self.harness, 'enable_swe_phase_enforcement'):
+                    self.harness.enable_swe_phase_enforcement()
+
+                # Build grounding_context for this attempt
+                # For attempt 2+, inject AttemptState to enable cross-attempt learning
+                grounding_context: dict[str, Any] = {
+                    "repo_path": str(repo_path),
+                    "failing_tests": task.fail_to_pass[:3],
+                    "attempt_number": attempt + 1,
+                    "max_attempts": self.max_verification_attempts,
+                }
+
+                if attempt_state is not None:
+                    # Inject previous attempt findings (Mechanism 2: inter-attempt state persistence)
+                    grounding_context["previous_attempt"] = attempt_state.to_grounding_context()
+                    logger.info(f"Injecting previous attempt state: hypothesis='{attempt_state.hypothesis[:50]}...'")
+
+                # Create config with grounding_context for this attempt
+                config = AgentConfig(
+                    system_prompt=base_config.system_prompt,
+                    max_steps=base_config.max_steps,
+                    use_menu_system=base_config.use_menu_system,
+                    require_complete_tool=base_config.require_complete_tool,
+                    force_complete_on_last_step=base_config.force_complete_on_last_step,
+                    grounding_context=grounding_context,
+                )
+
+                # Create fresh agent for each attempt (but repo state persists)
+                agent = AgentLoop(
+                    harness=self.harness,
+                    llm_client=self.llm_client,
+                    config=config,
+                )
+
+                # Run agent
+                try:
+                    if attempt == 0:
+                        user_input = "Please analyze the repository and fix the bug described above."
+                    else:
+                        # Provide feedback from previous attempt + structured state
+                        previous_summary = attempt_state.to_prompt_injection() if attempt_state else ""
+                        user_input = f"""Your previous fix attempt did not pass the tests.
 
 VERIFICATION FAILED (attempt {attempt}/{self.max_verification_attempts}):
 {last_error}
 
+{previous_summary}
+
 Please analyze what went wrong and try a different approach.
 Remember: You MUST use the Edit tool to modify SOURCE CODE files.
+DO NOT repeat the same approach that failed.
 """
-                agent.run(user_input)
-                total_tool_calls += agent.state.tool_call_count
+                    agent.run(user_input)
+                    total_tool_calls += agent.state.tool_call_count
 
-                # Log tool usage summary
-                tool_counts: dict[str, int] = {}
-                for msg in agent.state.messages:
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            tool_name = tc.get('function', {}).get('name', 'unknown')
-                            tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
-                logger.info(f"Attempt {attempt + 1} tool usage: {tool_counts}")
+                    # Log tool usage summary
+                    tool_counts: dict[str, int] = {}
+                    for msg in agent.state.messages:
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                tool_name = tc.get('function', {}).get('name', 'unknown')
+                                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+                    logger.info(f"Attempt {attempt + 1} tool usage: {tool_counts}")
 
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed with error: {e}")
-                last_error = str(e)
-                continue
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed with error: {e}")
+                    last_error = str(e)
+                    # Still capture state for next attempt
+                    attempt_state = self._capture_attempt_state(
+                        attempt + 1, str(e), "", repo_path
+                    )
+                    continue
 
-            # Get current patch
+                # Get current patch
+                diff_result = subprocess.run(
+                    ["git", "-C", str(repo_path), "diff"],
+                    capture_output=True,
+                    text=True,
+                )
+                patch = diff_result.stdout if diff_result.returncode == 0 else ""
+
+                # Verify patch modifies source code (not just tests)
+                if self.require_source_modification and patch:
+                    if not self._patch_modifies_source(patch, task):
+                        last_error = (
+                            "Patch only modifies test files. "
+                            "You must fix the SOURCE CODE, not just add tests."
+                        )
+                        attempt_state = self._capture_attempt_state(
+                            attempt + 1, last_error, "", repo_path
+                        )
+                        continue
+
+                # Run verification tests
+                verification_results = await self._verify_tests(repo_path, task)
+                if verification_results["all_passed"]:
+                    # Success! Disable phase enforcement and return the patch
+                    if hasattr(self.harness, 'disable_swe_phase_enforcement'):
+                        self.harness.disable_swe_phase_enforcement()
+                    return {
+                        "patch": patch,
+                        "tool_calls": total_tool_calls,
+                        "tokens": 0,
+                        "attempts": attempt + 1,
+                    }
+
+                # Build error message for next attempt
+                failed_tests = verification_results["failed_tests"]
+                last_error = f"Tests still failing: {', '.join(failed_tests)}"
+
+                # Capture state for next attempt (Mechanism 2: inter-attempt state persistence)
+                # This is CRITICAL - enables learning from previous attempt
+                attempt_state = self._capture_attempt_state(
+                    attempt + 1, last_error, patch, repo_path
+                )
+                logger.info(f"Captured attempt state for attempt {attempt + 2}")
+
+            # All attempts exhausted
             diff_result = subprocess.run(
                 ["git", "-C", str(repo_path), "diff"],
                 capture_output=True,
@@ -587,44 +679,76 @@ Remember: You MUST use the Edit tool to modify SOURCE CODE files.
             )
             patch = diff_result.stdout if diff_result.returncode == 0 else ""
 
-            # Verify patch modifies source code (not just tests)
-            if self.require_source_modification and patch:
-                if not self._patch_modifies_source(patch, task):
-                    last_error = (
-                        "Patch only modifies test files. "
-                        "You must fix the SOURCE CODE, not just add tests."
-                    )
-                    continue
+            return {
+                "patch": patch,
+                "tool_calls": total_tool_calls,
+                "tokens": 0,
+                "error": f"Failed after {self.max_verification_attempts} attempts: {last_error}",
+            }
 
-            # Run verification tests
-            verification_results = await self._verify_tests(repo_path, task)
-            if verification_results["all_passed"]:
-                # Success! Return the patch
-                return {
-                    "patch": patch,
-                    "tool_calls": total_tool_calls,
-                    "tokens": 0,
-                    "attempts": attempt + 1,
-                }
+        finally:
+            # Always disable phase enforcement when done
+            if hasattr(self.harness, 'disable_swe_phase_enforcement'):
+                self.harness.disable_swe_phase_enforcement()
 
-            # Build error message for next attempt
-            failed_tests = verification_results["failed_tests"]
-            last_error = f"Tests still failing: {', '.join(failed_tests)}"
+    def _capture_attempt_state(
+        self, attempt_number: int, what_failed: str, patch: str, repo_path: Path
+    ) -> AttemptState:
+        """Capture state from a failed attempt for cross-attempt learning.
 
-        # All attempts exhausted
-        diff_result = subprocess.run(
-            ["git", "-C", str(repo_path), "diff"],
-            capture_output=True,
-            text=True,
-        )
-        patch = diff_result.stdout if diff_result.returncode == 0 else ""
+        This is CRITICAL for Mechanism 2 (inter-attempt state persistence).
+        It captures what was learned and what failed so attempt 2+ can build
+        on previous work instead of repeating it.
+        """
+        # Get current phase state from harness (if available)
+        phase_state: SWEPhaseState | None = None
+        if hasattr(self.harness, 'get_swe_phase_state'):
+            phase_state = self.harness.get_swe_phase_state()
 
-        return {
-            "patch": patch,
-            "tool_calls": total_tool_calls,
-            "tokens": 0,
-            "error": f"Failed after {self.max_verification_attempts} attempts: {last_error}",
-        }
+        # Get modified files from git
+        modified_files: list[str] = []
+        git_diff_summary = ""
+        try:
+            diff_result = subprocess.run(
+                ["git", "-C", str(repo_path), "diff", "--name-only"],
+                capture_output=True,
+                text=True,
+            )
+            if diff_result.returncode == 0:
+                modified_files = [f.strip() for f in diff_result.stdout.split("\n") if f.strip()]
+
+            # Get short diff summary
+            stat_result = subprocess.run(
+                ["git", "-C", str(repo_path), "diff", "--stat"],
+                capture_output=True,
+                text=True,
+            )
+            if stat_result.returncode == 0:
+                git_diff_summary = stat_result.stdout[:500]  # Truncate for context size
+        except Exception as e:
+            logger.warning(f"Failed to get git diff: {e}")
+
+        # Build AttemptState
+        if phase_state:
+            return AttemptState.from_phase_state(
+                phase_state=phase_state,
+                attempt_number=attempt_number,
+                what_failed=what_failed,
+                failing_test_output=what_failed,  # Use error as test output for now
+                next_approach="Try a different approach based on the error message.",
+                modified_files=modified_files,
+                git_diff_summary=git_diff_summary,
+            )
+        else:
+            # No phase state available, create minimal AttemptState
+            return AttemptState(
+                attempt_number=attempt_number + 1,
+                what_failed=what_failed,
+                failing_test_output=what_failed,
+                next_approach="Try a different approach based on the error message.",
+                modified_files=modified_files,
+                git_diff_summary=git_diff_summary,
+            )
 
     def _patch_modifies_source(self, patch: str, task: SWEBenchTask) -> bool:
         """Check if patch modifies source code, not just test files."""

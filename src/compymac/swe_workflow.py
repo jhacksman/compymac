@@ -112,6 +112,309 @@ class WorkflowType(str, Enum):
     IMPLEMENT_FEATURE = "implement_feature"
 
 
+class SWEPhase(str, Enum):
+    """Phases of the SWE-bench workflow with programmatic enforcement.
+
+    Based on analysis: natural language prompts are advisory, not constraints.
+    Agents deviate under cognitive load. This enum enables hard enforcement
+    of phase transitions via the advance_phase() tool.
+    """
+
+    LOCALIZATION = "localization"  # Find suspect files, form hypothesis
+    UNDERSTANDING = "understanding"  # Read code, understand root cause
+    FIX = "fix"  # Edit files to implement fix
+    VERIFICATION = "verification"  # Run tests to verify fix
+    COMPLETE = "complete"  # Task finished
+
+
+# Phase budget configuration: max tool calls and allowed tools per phase
+# Budget-neutral tools (not counted): menu_*, think, git_diff_*, git_commit, complete, advance_phase
+PHASE_BUDGETS: dict[SWEPhase, dict[str, Any]] = {
+    SWEPhase.LOCALIZATION: {
+        "max_tool_calls": 15,
+        "required_outputs": ["suspect_files", "hypothesis"],
+        "allowed_tools": ["grep", "glob", "web_search", "Read", "lsp_tool"],
+        "description": "Find suspect files and form a hypothesis about the bug location",
+    },
+    SWEPhase.UNDERSTANDING: {
+        "max_tool_calls": 20,
+        "required_outputs": ["root_cause"],
+        "allowed_tools": ["Read", "lsp_tool", "web_get_contents", "grep", "glob"],
+        "description": "Read code to understand the root cause of the bug",
+    },
+    SWEPhase.FIX: {
+        "max_tool_calls": 10,
+        "required_outputs": ["modified_files"],
+        "allowed_tools": ["Edit", "Read"],
+        "description": "Edit files to implement the fix",
+    },
+    SWEPhase.VERIFICATION: {
+        "max_tool_calls": 5,
+        "required_outputs": [],
+        "allowed_tools": ["bash"],
+        "description": "Run tests to verify the fix works",
+    },
+    SWEPhase.COMPLETE: {
+        "max_tool_calls": 0,
+        "required_outputs": [],
+        "allowed_tools": ["complete"],
+        "description": "Task finished",
+    },
+}
+
+# Tools that don't count against phase budgets
+BUDGET_NEUTRAL_TOOLS = [
+    "menu_list", "menu_enter", "menu_exit",
+    "think",
+    "git_diff_unstaged", "git_diff_staged", "git_status",
+    "git_commit", "git_add",
+    "complete",
+    "advance_phase",
+]
+
+
+@dataclass
+class SWEPhaseState:
+    """Tracks current phase and tool call counts within an attempt.
+
+    This enables intra-attempt budget enforcement: hard limits on tool calls
+    per phase to prevent endless wandering.
+    """
+
+    current_phase: SWEPhase = SWEPhase.LOCALIZATION
+    phase_tool_calls: dict[SWEPhase, int] = field(
+        default_factory=lambda: dict.fromkeys(SWEPhase, 0)
+    )
+
+    # Outputs collected during phases (validated by advance_phase)
+    suspect_files: list[str] = field(default_factory=list)
+    hypothesis: str = ""
+    root_cause: str = ""
+    modified_files: list[str] = field(default_factory=list)
+
+    def increment_tool_call(self, tool_name: str) -> None:
+        """Increment tool call count for current phase (if not budget-neutral)."""
+        if tool_name not in BUDGET_NEUTRAL_TOOLS:
+            self.phase_tool_calls[self.current_phase] += 1
+
+    def get_remaining_budget(self) -> int:
+        """Get remaining tool calls for current phase."""
+        budget = PHASE_BUDGETS[self.current_phase]["max_tool_calls"]
+        used = self.phase_tool_calls[self.current_phase]
+        return max(0, budget - used)
+
+    def is_budget_exhausted(self) -> bool:
+        """Check if current phase budget is exhausted."""
+        return self.get_remaining_budget() <= 0
+
+    def is_tool_allowed(self, tool_name: str) -> bool:
+        """Check if a tool is allowed in the current phase."""
+        if tool_name in BUDGET_NEUTRAL_TOOLS:
+            return True
+        allowed = PHASE_BUDGETS[self.current_phase]["allowed_tools"]
+        return tool_name in allowed
+
+    def get_required_outputs(self) -> list[str]:
+        """Get required outputs for current phase."""
+        return PHASE_BUDGETS[self.current_phase]["required_outputs"]
+
+    def validate_phase_outputs(self) -> tuple[bool, list[str]]:
+        """Validate that required outputs are present for current phase.
+
+        Returns (is_valid, missing_outputs).
+        """
+        required = self.get_required_outputs()
+        missing = []
+
+        for output in required:
+            if output == "suspect_files" and not self.suspect_files:
+                missing.append("suspect_files")
+            elif output == "hypothesis" and not self.hypothesis:
+                missing.append("hypothesis")
+            elif output == "root_cause" and not self.root_cause:
+                missing.append("root_cause")
+            elif output == "modified_files" and not self.modified_files:
+                missing.append("modified_files")
+
+        return len(missing) == 0, missing
+
+    def advance_to_next_phase(self) -> tuple[bool, str]:
+        """Advance to the next phase if outputs are valid.
+
+        Returns (success, message).
+        """
+        is_valid, missing = self.validate_phase_outputs()
+        if not is_valid:
+            return False, f"Cannot advance: missing required outputs: {', '.join(missing)}"
+
+        phase_order = [
+            SWEPhase.LOCALIZATION,
+            SWEPhase.UNDERSTANDING,
+            SWEPhase.FIX,
+            SWEPhase.VERIFICATION,
+            SWEPhase.COMPLETE,
+        ]
+
+        current_idx = phase_order.index(self.current_phase)
+        if current_idx >= len(phase_order) - 1:
+            return False, "Already at final phase (COMPLETE)"
+
+        next_phase = phase_order[current_idx + 1]
+        self.current_phase = next_phase
+        budget = PHASE_BUDGETS[next_phase]["max_tool_calls"]
+        return True, f"Advanced to {next_phase.value} phase. Budget: {budget} tool calls."
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "current_phase": self.current_phase.value,
+            "phase_tool_calls": {k.value: v for k, v in self.phase_tool_calls.items()},
+            "suspect_files": self.suspect_files,
+            "hypothesis": self.hypothesis,
+            "root_cause": self.root_cause,
+            "modified_files": self.modified_files,
+        }
+
+
+@dataclass
+class AttemptState:
+    """Persists state across attempts for inter-attempt learning.
+
+    This is CRITICAL: the real problem is multi-attempt failure where each
+    attempt restarts from scratch without learning from previous findings.
+    This dataclass captures what was learned and what failed so attempt 2+
+    can build on previous work instead of repeating it.
+    """
+
+    attempt_number: int = 1
+
+    # Localization findings from previous attempts
+    localization_findings: list[str] = field(default_factory=list)
+    hypothesis: str = ""
+    suspect_files: list[str] = field(default_factory=list)
+
+    # What went wrong in previous attempt
+    what_failed: str = ""
+    failing_test_output: str = ""
+
+    # What to try differently
+    next_approach: str = ""
+
+    # Current state of the repo (for awareness of accumulated changes)
+    modified_files: list[str] = field(default_factory=list)
+    git_diff_summary: str = ""
+
+    def to_grounding_context(self) -> dict[str, Any]:
+        """Convert to grounding context for injection into agent prompt.
+
+        This is injected into attempt 2+ to provide cross-attempt learning.
+        """
+        return {
+            "attempt_number": self.attempt_number,
+            "previous_findings": {
+                "localization": self.localization_findings,
+                "hypothesis": self.hypothesis,
+                "suspect_files": self.suspect_files,
+            },
+            "previous_failure": {
+                "what_failed": self.what_failed,
+                "test_output": self.failing_test_output[:500] if self.failing_test_output else "",
+            },
+            "suggested_approach": self.next_approach,
+            "repo_state": {
+                "modified_files": self.modified_files,
+                "has_uncommitted_changes": bool(self.git_diff_summary),
+            },
+        }
+
+    def to_prompt_injection(self) -> str:
+        """Format as a prompt injection for the agent.
+
+        This is a compact, structured summary that helps the agent
+        avoid repeating previous mistakes.
+        """
+        lines = [
+            f"## Previous Attempt Summary (Attempt {self.attempt_number - 1})",
+            "",
+        ]
+
+        if self.localization_findings:
+            lines.append("### Localization Findings")
+            for finding in self.localization_findings:
+                lines.append(f"- {finding}")
+            lines.append("")
+
+        if self.hypothesis:
+            lines.append(f"### Hypothesis: {self.hypothesis}")
+            lines.append("")
+
+        if self.suspect_files:
+            lines.append(f"### Suspect Files: {', '.join(self.suspect_files)}")
+            lines.append("")
+
+        if self.what_failed:
+            lines.append(f"### What Failed: {self.what_failed}")
+            lines.append("")
+
+        if self.next_approach:
+            lines.append(f"### Suggested Next Approach: {self.next_approach}")
+            lines.append("")
+
+        if self.modified_files:
+            lines.append(f"### Currently Modified Files: {', '.join(self.modified_files)}")
+            lines.append("(These changes persist from previous attempt)")
+            lines.append("")
+
+        lines.append("DO NOT repeat the same approach that failed. Try something different.")
+
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "attempt_number": self.attempt_number,
+            "localization_findings": self.localization_findings,
+            "hypothesis": self.hypothesis,
+            "suspect_files": self.suspect_files,
+            "what_failed": self.what_failed,
+            "failing_test_output": self.failing_test_output,
+            "next_approach": self.next_approach,
+            "modified_files": self.modified_files,
+            "git_diff_summary": self.git_diff_summary,
+        }
+
+    @classmethod
+    def from_phase_state(
+        cls,
+        phase_state: "SWEPhaseState",
+        attempt_number: int,
+        what_failed: str,
+        failing_test_output: str,
+        next_approach: str,
+        modified_files: list[str],
+        git_diff_summary: str,
+    ) -> "AttemptState":
+        """Create AttemptState from a completed SWEPhaseState.
+
+        This is called at the end of each failed attempt to capture
+        what was learned for the next attempt.
+        """
+        return cls(
+            attempt_number=attempt_number + 1,
+            localization_findings=[
+                f"Suspect files: {', '.join(phase_state.suspect_files)}",
+                f"Hypothesis: {phase_state.hypothesis}",
+            ] if phase_state.suspect_files else [],
+            hypothesis=phase_state.hypothesis,
+            suspect_files=phase_state.suspect_files,
+            what_failed=what_failed,
+            failing_test_output=failing_test_output,
+            next_approach=next_approach,
+            modified_files=modified_files,
+            git_diff_summary=git_diff_summary,
+        )
+
+
 @dataclass
 class TestResults:
     """Results from running tests."""
