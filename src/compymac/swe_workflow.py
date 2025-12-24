@@ -182,9 +182,9 @@ class SWEPhaseState:
     """
 
     current_phase: SWEPhase = SWEPhase.LOCALIZATION
-    phase_tool_calls: dict[SWEPhase, int] = field(default_factory=lambda: {
-        phase: 0 for phase in SWEPhase
-    })
+    phase_tool_calls: dict[SWEPhase, int] = field(
+        default_factory=lambda: dict.fromkeys(SWEPhase, 0)
+    )
 
     # Outputs collected during phases (validated by advance_phase)
     suspect_files: list[str] = field(default_factory=list)

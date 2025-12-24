@@ -44,7 +44,6 @@ from compymac.safety import PolicyEngine
 from compymac.swe_workflow import (
     BUDGET_NEUTRAL_TOOLS,
     PHASE_BUDGETS,
-    SWEPhase,
     SWEPhaseState,
 )
 from compymac.tool_menu import MenuManager
