@@ -179,14 +179,23 @@ PHASE_BUDGETS: dict[SWEPhase, dict[str, Any]] = {
     },
 }
 
-# Tools that don't count against phase budgets
+# Tools that don't count against phase budgets (budget accounting only)
+# These tools can be called without consuming the phase's tool call budget.
+# NOTE: This is separate from PHASE_NEUTRAL_TOOLS - budget-neutral != phase-neutral
 BUDGET_NEUTRAL_TOOLS = [
-    "menu_list", "menu_enter", "menu_exit",
-    "think",
-    "git_diff_unstaged", "git_diff_staged", "git_status",
-    "git_commit", "git_add",
-    "complete",
-    "advance_phase",
+    "think",  # Thinking doesn't consume budget
+    "advance_phase",  # Phase transitions
+    "get_phase_status",  # Phase inspection
+    "return_to_fix_phase",  # Regression recovery
+]
+
+# Tools that can be called from ANY phase (phase-neutral)
+# These bypass phase allowlist checking entirely.
+# Keep this list minimal - most tools should be phase-restricted.
+PHASE_NEUTRAL_TOOLS = [
+    "think",  # Always allowed
+    "advance_phase",  # Phase transitions must work from any phase
+    "get_phase_status",  # Phase inspection always allowed
 ]
 
 
@@ -233,8 +242,13 @@ class SWEPhaseState:
         return self.get_remaining_budget() <= 0
 
     def is_tool_allowed(self, tool_name: str) -> bool:
-        """Check if a tool is allowed in the current phase."""
-        if tool_name in BUDGET_NEUTRAL_TOOLS:
+        """Check if a tool is allowed in the current phase.
+
+        Uses PHASE_NEUTRAL_TOOLS (not BUDGET_NEUTRAL_TOOLS) to determine
+        which tools bypass phase restrictions. Budget-neutrality is a
+        separate concept handled by increment_tool_call().
+        """
+        if tool_name in PHASE_NEUTRAL_TOOLS:
             return True
         allowed = PHASE_BUDGETS[self.current_phase]["allowed_tools"]
         return tool_name in allowed
