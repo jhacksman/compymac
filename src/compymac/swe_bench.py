@@ -563,7 +563,7 @@ Please analyze what went wrong and try a different approach.
 Remember: You MUST use the Edit tool to modify SOURCE CODE files.
 """
                 agent.run(user_input)
-                total_tool_calls += len(agent.state.messages)
+                total_tool_calls += agent.state.tool_call_count
 
                 # Log tool usage summary
                 tool_counts: dict[str, int] = {}
