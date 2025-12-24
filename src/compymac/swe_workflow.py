@@ -243,7 +243,7 @@ class SWEPhaseState:
 
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check if a tool is allowed in the current phase.
-        
+
         Uses PHASE_NEUTRAL_TOOLS (not BUDGET_NEUTRAL_TOOLS) to determine
         which tools bypass phase restrictions. Budget-neutrality is a
         separate concept handled by increment_tool_call().
