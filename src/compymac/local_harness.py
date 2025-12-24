@@ -5471,6 +5471,25 @@ Permissions: {mode}"""
         """Get OpenAI-format schemas for all registered tools (ignores active toolset)."""
         return self._build_schemas(self._tools.values())
 
+    def get_phase_filtered_tool_schemas(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format schemas filtered by current SWE phase.
+
+        This is the key method for phase enforcement when menu system is disabled.
+        It filters tools based on the current phase's allowed_tools list.
+
+        If phase enforcement is not enabled, returns all tool schemas.
+        """
+        if not self._swe_phase_enabled or not self._swe_phase_state:
+            return self.get_tool_schemas()
+
+        phase_state = self._swe_phase_state
+        # Filter to only tools allowed in current phase
+        filtered_tools = [
+            tool for tool in self._tools.values()
+            if phase_state.is_tool_allowed(tool.name)
+        ]
+        return self._build_schemas(filtered_tools)
+
     def get_active_tool_schemas(self) -> list[dict[str, Any]]:
         """Get OpenAI-format schemas for only the currently active tools."""
         active_tools = [
