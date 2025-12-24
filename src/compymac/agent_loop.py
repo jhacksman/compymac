@@ -159,10 +159,15 @@ class AgentLoop:
             )
 
         # Get tool schemas from harness
-        # Priority: menu system > active toolset > all tools
+        # Priority: menu system > phase filtering > active toolset > all tools
         if self.config.use_menu_system and hasattr(self.harness, 'get_menu_tool_schemas'):
             # Hierarchical tool discovery - only show tools for current menu state
+            # Also applies phase filtering if SWE phase enforcement is enabled
             tools = self.harness.get_menu_tool_schemas()
+        elif hasattr(self.harness, 'get_phase_filtered_tool_schemas'):
+            # Phase-based tool filtering (for SWE-bench without menu system)
+            # Returns all tools if phase enforcement is not enabled
+            tools = self.harness.get_phase_filtered_tool_schemas()
         elif self.config.use_active_toolset and hasattr(self.harness, 'get_active_tool_schemas'):
             # ACI-style closed action space
             tools = self.harness.get_active_tool_schemas()
