@@ -528,13 +528,13 @@ ANTI-PATTERNS TO AVOID:
 When all tests pass, call complete with a description of your fix.
 '''
 
-        # Standard CompyMac agent config with menu system enabled
-        # No hardcoded tool restrictions - agent discovers tools through menu
+        # Standard CompyMac agent config with menu system DISABLED for SWE-bench
+        # Phase enforcement controls the tool set - menu system would bypass phase restrictions
         # grounding_context will be set per-attempt to inject AttemptState for attempt 2+
         base_config = AgentConfig(
             system_prompt=prompt,
             max_steps=50,
-            use_menu_system=True,  # Enable hierarchical menu system
+            use_menu_system=False,  # DISABLED: Phase enforcement controls tools, not menu
             require_complete_tool=True,
             force_complete_on_last_step=True,
         )
