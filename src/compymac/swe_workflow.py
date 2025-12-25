@@ -196,6 +196,7 @@ PHASE_NEUTRAL_TOOLS = [
     "think",  # Always allowed
     "advance_phase",  # Phase transitions must work from any phase
     "get_phase_status",  # Phase inspection always allowed
+    "complete",  # CRITICAL: Must be callable from any phase to terminate agent loop
 ]
 
 

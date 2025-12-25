@@ -535,6 +535,7 @@ When all tests pass, call complete with a description of your fix.
             system_prompt=prompt,
             max_steps=50,
             use_menu_system=False,  # DISABLED: Phase enforcement controls tools, not menu
+            action_gated=True,  # REQUIRED: Enables termination on complete() tool call
             require_complete_tool=True,
             force_complete_on_last_step=True,
         )
@@ -576,6 +577,7 @@ When all tests pass, call complete with a description of your fix.
                     system_prompt=base_config.system_prompt,
                     max_steps=base_config.max_steps,
                     use_menu_system=base_config.use_menu_system,
+                    action_gated=base_config.action_gated,  # CRITICAL: Must pass through for complete() termination
                     require_complete_tool=base_config.require_complete_tool,
                     force_complete_on_last_step=base_config.force_complete_on_last_step,
                     grounding_context=grounding_context,

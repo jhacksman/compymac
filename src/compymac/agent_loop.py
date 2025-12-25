@@ -392,10 +392,12 @@ class AgentLoop:
                     complete_answer = getattr(self.harness, '_completion_answer', text_response or "")
                     # Reset the flag for potential future runs
                     self.harness._completion_signaled = False
+                    logger.info(f"[COMPLETE_DEBUG] complete_called=True, action_gated={self.config.action_gated}, require_complete_tool={self.config.require_complete_tool}")
                     break
 
             # In action-gated mode with require_complete_tool, only finish on 'complete' call
             if self.config.action_gated and self.config.require_complete_tool:
+                logger.info(f"[COMPLETE_DEBUG] Checking termination: complete_called={complete_called}, action_gated={self.config.action_gated}, require_complete_tool={self.config.require_complete_tool}")
                 if complete_called:
                     self.state.is_complete = True
                     self.state.final_response = complete_answer
