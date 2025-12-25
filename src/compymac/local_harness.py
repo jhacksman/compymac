@@ -2085,10 +2085,14 @@ class LocalHarness(Harness):
         Returns:
             Confirmation message with the final answer
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[COMPLETE_HARNESS] _complete() called with final_answer={final_answer[:50]}...")
         # Store completion state for the agent loop to detect
         self._completion_signaled = True
         self._completion_answer = final_answer
         self._completion_status = status
+        logger.info(f"[COMPLETE_HARNESS] _completion_signaled set to True")
         return f"Task completed with status '{status}': {final_answer}"
 
     # =========================================================================
