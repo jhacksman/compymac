@@ -535,6 +535,7 @@ When all tests pass, call complete with a description of your fix.
             system_prompt=prompt,
             max_steps=50,
             use_menu_system=False,  # DISABLED: Phase enforcement controls tools, not menu
+            action_gated=True,  # REQUIRED: Enables termination on complete() tool call
             require_complete_tool=True,
             force_complete_on_last_step=True,
         )
