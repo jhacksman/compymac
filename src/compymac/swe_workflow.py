@@ -187,6 +187,7 @@ BUDGET_NEUTRAL_TOOLS = [
     "advance_phase",  # Phase transitions
     "get_phase_status",  # Phase inspection
     "return_to_fix_phase",  # Regression recovery
+    "complete",  # CRITICAL: Must always be callable to terminate agent loop
 ]
 
 # Tools that can be called from ANY phase (phase-neutral)
