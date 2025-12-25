@@ -2092,7 +2092,7 @@ class LocalHarness(Harness):
         self._completion_signaled = True
         self._completion_answer = final_answer
         self._completion_status = status
-        logger.info(f"[COMPLETE_HARNESS] _completion_signaled set to True")
+        logger.info("[COMPLETE_HARNESS] _completion_signaled set to True")
         return f"Task completed with status '{status}': {final_answer}"
 
     # =========================================================================
