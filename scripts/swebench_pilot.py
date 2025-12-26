@@ -156,6 +156,21 @@ async def run_pilot_dry_run(tasks: list[SWEBenchTask], config: PilotConfig) -> N
     print("\nTo run for real, remove --dry-run flag")
 
 
+def save_incremental_result(result: SWEBenchResult, results_file: Path) -> None:
+    """Save a single result incrementally to JSONL file (append mode).
+
+    This ensures results are persisted immediately after each task completes,
+    so timeouts/crashes don't lose completed work.
+    """
+    result_dict = result.to_dict()
+    result_dict["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    with open(results_file, "a") as f:
+        f.write(json.dumps(result_dict) + "\n")
+
+    logger.info(f"Result saved incrementally to {results_file}")
+
+
 async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEBenchResult]:
     """Run the pilot with actual task execution."""
     from compymac.config import LLMConfig
@@ -192,12 +207,17 @@ async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEB
     # Create dashboard for results
     dashboard = SWEBenchDashboard()
 
+    # Incremental results file (JSONL format - one result per line)
+    incremental_file = config.output_dir / "results.jsonl"
+    logger.info(f"Incremental results will be saved to {incremental_file}")
+
     # Run tasks
     print("\n" + "=" * 60)
     print(f"RUNNING {len(tasks)} TASKS")
     print("=" * 60)
 
     results = []
+    resolved_count = 0
     for i, task in enumerate(tasks, 1):
         print(f"\n[{i}/{len(tasks)}] Running {task.instance_id}...")
         start_time = time.time()
@@ -211,8 +231,21 @@ async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEB
             status = "RESOLVED" if result.resolved else ("PARTIAL" if result.partial else "FAILED")
             print(f"    Status: {status} ({elapsed:.1f}s)")
 
+            if result.resolved:
+                resolved_count += 1
+
+            # Print ground-truth evaluation details
+            f2p_passed = sum(1 for v in result.fail_to_pass_results.values() if v)
+            f2p_total = len(result.fail_to_pass_results)
+            p2p_passed = sum(1 for v in result.pass_to_pass_results.values() if v)
+            p2p_total = len(result.pass_to_pass_results)
+            print(f"    Ground truth: fail_to_pass={f2p_passed}/{f2p_total}, pass_to_pass={p2p_passed}/{p2p_total}")
+
             if result.error_log:
                 print(f"    Error: {result.error_log[:100]}...")
+
+            # CRITICAL: Save result immediately (incremental persistence)
+            save_incremental_result(result, incremental_file)
 
         except Exception as e:
             logger.error(f"Task {task.instance_id} crashed: {e}")
@@ -234,6 +267,9 @@ async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEB
             results.append(result)
             dashboard.add_result(result)
 
+            # CRITICAL: Save even failed results immediately
+            save_incremental_result(result, incremental_file)
+
     # Generate and save report
     print("\n" + "=" * 60)
     print("PILOT RESULTS")
@@ -247,10 +283,13 @@ async def run_pilot(tasks: list[SWEBenchTask], config: PilotConfig) -> list[SWEB
     print(f"\nAvg tool calls: {report.avg_tool_calls:.1f}")
     print(f"Avg time: {report.avg_time_sec:.1f}s")
 
-    # Save results
+    # Print success rate summary
+    print(f"\n*** SUCCESS RATE: {resolved_count}/{len(tasks)} ({resolved_count/len(tasks)*100:.1f}%) ***")
+
+    # Save final summary results (in addition to incremental)
     results_file = config.output_dir / "pilot_results.json"
     dashboard.save_results(results_file)
-    logger.info(f"Results saved to {results_file}")
+    logger.info(f"Final results saved to {results_file}")
 
     # Save detailed task results
     detailed_file = config.output_dir / "pilot_detailed.json"

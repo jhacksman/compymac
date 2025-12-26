@@ -44,6 +44,7 @@ from compymac.safety import PolicyEngine
 from compymac.swe_workflow import (
     BUDGET_NEUTRAL_TOOLS,
     PHASE_BUDGETS,
+    SWEPhase,
     SWEPhaseState,
 )
 from compymac.tool_menu import MenuManager
@@ -2084,10 +2085,50 @@ class LocalHarness(Harness):
 
         Returns:
             Confirmation message with the final answer
+
+        Note:
+            When SWE-bench phase enforcement is enabled, this method checks the
+            "completion contract" - the agent must have provided fail_to_pass_status
+            (self-attestation that tests passed) before completion is allowed.
+            This prevents agents from skipping verification entirely.
         """
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[COMPLETE_HARNESS] _complete() called with final_answer={final_answer[:50]}...")
+
+        # Check completion contract when SWE-bench phase enforcement is enabled
+        if self._swe_phase_enabled and self._swe_phase_state is not None:
+            phase_state = self._swe_phase_state
+
+            # V3 workflow: complete is allowed from TARGET_FIX_VERIFICATION phase
+            # But agent must have self-attested that tests passed (fail_to_pass_status)
+            if phase_state.current_phase == SWEPhase.TARGET_FIX_VERIFICATION:
+                # Check if agent provided fail_to_pass_status (self-attestation)
+                if not phase_state.fail_to_pass_status:
+                    logger.warning("[COMPLETE_HARNESS] Completion blocked: missing fail_to_pass_status")
+                    return (
+                        "[COMPLETION BLOCKED] You must provide fail_to_pass_status before calling complete(). "
+                        "Run fail_to_pass tests with bash and call advance_phase(fail_to_pass_status='all_passed' or 'N_failed') first. "
+                        "This ensures you have verified the bug is actually fixed."
+                    )
+
+                # Check if agent self-attested success
+                if phase_state.fail_to_pass_status != "all_passed":
+                    logger.warning(f"[COMPLETE_HARNESS] Completion blocked: fail_to_pass_status='{phase_state.fail_to_pass_status}'")
+                    return (
+                        f"[COMPLETION BLOCKED] fail_to_pass_status is '{phase_state.fail_to_pass_status}'. "
+                        f"Tests must pass before calling complete(). "
+                        f"Fix the remaining issues and run tests again."
+                    )
+
+                # Optionally check pass_to_pass_status (belt-and-suspenders)
+                if phase_state.pass_to_pass_status and phase_state.pass_to_pass_status != "all_passed":
+                    logger.warning(f"[COMPLETE_HARNESS] Completion warning: pass_to_pass_status='{phase_state.pass_to_pass_status}'")
+                    # Allow completion but warn - ground truth evaluation will catch regressions
+                    logger.info("[COMPLETE_HARNESS] Allowing completion despite pass_to_pass issues (ground truth will verify)")
+
+            logger.info(f"[COMPLETE_HARNESS] Completion contract satisfied: fail_to_pass_status='{phase_state.fail_to_pass_status}'")
+
         # Store completion state for the agent loop to detect
         self._completion_signaled = True
         self._completion_answer = final_answer
