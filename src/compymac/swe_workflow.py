@@ -122,14 +122,17 @@ class SWEPhase(str, Enum):
     V2 (regression-aware): Split VERIFICATION into REGRESSION_CHECK + TARGET_FIX_VERIFICATION
     to prevent test overfitting (fixing target bug but breaking existing tests).
     Research: https://arxiv.org/html/2511.16858v1 shows LLMs overfit on fail_to_pass tests.
+
+    V3: Merged COMPLETE into TARGET_FIX_VERIFICATION. The agent calls complete() directly
+    from TARGET_FIX_VERIFICATION when tests pass, eliminating the need for an extra
+    advance_phase call. This aligns with natural agent behavior.
     """
 
     LOCALIZATION = "localization"  # Find suspect files, form hypothesis
     UNDERSTANDING = "understanding"  # Read code, understand root cause
     FIX = "fix"  # Edit files to implement fix
     REGRESSION_CHECK = "regression_check"  # Run pass_to_pass tests (no regressions)
-    TARGET_FIX_VERIFICATION = "target_fix_verification"  # Run fail_to_pass tests (bug fixed)
-    COMPLETE = "complete"  # Task finished
+    TARGET_FIX_VERIFICATION = "target_fix_verification"  # Run fail_to_pass tests, call complete when done
 
 
 # Phase budget configuration: max tool calls and allowed tools per phase
@@ -168,14 +171,8 @@ PHASE_BUDGETS: dict[SWEPhase, dict[str, Any]] = {
     SWEPhase.TARGET_FIX_VERIFICATION: {
         "max_tool_calls": 5,
         "required_outputs": ["fail_to_pass_status"],  # MANDATORY: must verify bug is fixed
-        "allowed_tools": ["bash"],
-        "description": "Run fail_to_pass tests to verify the bug is fixed",
-    },
-    SWEPhase.COMPLETE: {
-        "max_tool_calls": 0,
-        "required_outputs": [],
-        "allowed_tools": ["complete"],
-        "description": "Task finished",
+        "allowed_tools": ["bash", "complete"],  # V3: complete allowed here - natural workflow
+        "description": "Run fail_to_pass tests. Call complete when tests pass.",
     },
 }
 
@@ -187,6 +184,7 @@ BUDGET_NEUTRAL_TOOLS = [
     "advance_phase",  # Phase transitions
     "get_phase_status",  # Phase inspection
     "return_to_fix_phase",  # Regression recovery
+    "complete",  # V3: Termination doesn't consume budget
 ]
 
 # Tools that can be called from ANY phase (phase-neutral)
@@ -293,24 +291,25 @@ class SWEPhaseState:
 
         V2 (regression-aware): Updated phase order to include REGRESSION_CHECK and
         TARGET_FIX_VERIFICATION. Also supports returning to FIX phase if regressions detected.
+
+        V3: Removed COMPLETE phase - agent calls complete() directly from TARGET_FIX_VERIFICATION.
         """
         is_valid, missing = self.validate_phase_outputs()
         if not is_valid:
             return False, f"Cannot advance: missing required outputs: {', '.join(missing)}"
 
-        # V2: Updated phase order with split verification
+        # V3: Updated phase order - no COMPLETE phase (complete() called from TARGET_FIX_VERIFICATION)
         phase_order = [
             SWEPhase.LOCALIZATION,
             SWEPhase.UNDERSTANDING,
             SWEPhase.FIX,
             SWEPhase.REGRESSION_CHECK,
-            SWEPhase.TARGET_FIX_VERIFICATION,
-            SWEPhase.COMPLETE,
+            SWEPhase.TARGET_FIX_VERIFICATION,  # Final phase - call complete() here
         ]
 
         current_idx = phase_order.index(self.current_phase)
         if current_idx >= len(phase_order) - 1:
-            return False, "Already at final phase (COMPLETE)"
+            return False, "Already at final phase (TARGET_FIX_VERIFICATION). Call complete() when tests pass."
 
         next_phase = phase_order[current_idx + 1]
         self.current_phase = next_phase
