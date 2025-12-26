@@ -193,11 +193,12 @@ BUDGET_NEUTRAL_TOOLS = [
 # Tools that can be called from ANY phase (phase-neutral)
 # These bypass phase allowlist checking entirely.
 # Keep this list minimal - most tools should be phase-restricted.
+# NOTE: `complete` is NOT here - it should only be callable from COMPLETE phase
+# to enforce that agents go through all workflow phases before terminating.
 PHASE_NEUTRAL_TOOLS = [
     "think",  # Always allowed
     "advance_phase",  # Phase transitions must work from any phase
     "get_phase_status",  # Phase inspection always allowed
-    "complete",  # CRITICAL: Must be callable from any phase to terminate agent loop
 ]
 
 
