@@ -102,6 +102,49 @@ class CheckpointStatus(str, Enum):
 
 
 @dataclass
+class CognitiveEvent:
+    """Represents a metacognitive event in agent execution (V5).
+
+    Cognitive events capture the agent's reasoning, temptation awareness,
+    and decision points. These are distinct from tool calls - they represent
+    the agent's internal cognitive processes.
+
+    Event types:
+    - "think": Private reasoning via <think> tool
+    - "temptation_awareness": Agent recognized a cognitive shortcut temptation
+    - "decision_point": Agent made a deliberate choice between alternatives
+    - "reflection": Agent reflected on past actions or outcomes
+    """
+
+    event_type: str  # "think", "temptation_awareness", "decision_point", "reflection"
+    timestamp: float
+    phase: str | None  # SWEPhase value or None if not in SWE mode
+    content: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "event_type": self.event_type,
+            "timestamp": self.timestamp,
+            "phase": self.phase,
+            "content": self.content,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CognitiveEvent:
+        """Create from dictionary."""
+        return cls(
+            event_type=data["event_type"],
+            timestamp=data["timestamp"],
+            phase=data.get("phase"),
+            content=data["content"],
+            metadata=data.get("metadata", {}),
+        )
+
+
+@dataclass
 class ToolProvenance:
     """Provenance information for tool invocations."""
     tool_name: str
@@ -527,6 +570,24 @@ class TraceStore:
                     ON checkpoints(status);
                 CREATE INDEX IF NOT EXISTS idx_checkpoints_step
                     ON checkpoints(step_number);
+
+                -- V5: Cognitive events table for metacognitive tracking
+                CREATE TABLE IF NOT EXISTS cognitive_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    phase TEXT,
+                    content TEXT NOT NULL,
+                    metadata TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_cognitive_events_trace_id
+                    ON cognitive_events(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_cognitive_events_type
+                    ON cognitive_events(event_type);
+                CREATE INDEX IF NOT EXISTS idx_cognitive_events_timestamp
+                    ON cognitive_events(timestamp);
             """)
 
     def _next_seq(self, actor_id: str) -> int:
@@ -1244,6 +1305,65 @@ class TraceStore:
         events = self.get_events(trace_id=trace_id, since=since, until=until)
         return [e.to_dict() for e in events]
 
+    def store_cognitive_event(self, trace_id: str, event: CognitiveEvent) -> None:
+        """Store a cognitive event (V5 metacognitive tracking).
+
+        Cognitive events capture the agent's reasoning, temptation awareness,
+        and decision points. These are stored separately from spans to enable
+        metacognitive compliance analysis.
+
+        Args:
+            trace_id: The trace this event belongs to
+            event: The cognitive event to store
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO cognitive_events (trace_id, event_type, timestamp, phase, content, metadata)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trace_id,
+                    event.event_type,
+                    event.timestamp,
+                    event.phase,
+                    event.content,
+                    json.dumps(event.metadata),
+                ),
+            )
+
+    def get_cognitive_events(self, trace_id: str) -> list[CognitiveEvent]:
+        """Retrieve all cognitive events for a trace (V5 metacognitive tracking).
+
+        Args:
+            trace_id: The trace to get cognitive events for
+
+        Returns:
+            List of CognitiveEvent objects in chronological order
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT event_type, timestamp, phase, content, metadata
+                FROM cognitive_events
+                WHERE trace_id = ?
+                ORDER BY timestamp
+                """,
+                (trace_id,),
+            )
+            events = []
+            for row in cursor.fetchall():
+                events.append(
+                    CognitiveEvent(
+                        event_type=row[0],
+                        timestamp=row[1],
+                        phase=row[2],
+                        content=row[3],
+                        metadata=json.loads(row[4]),
+                    )
+                )
+            return events
+
 
 class SummaryEventLog:
     """
@@ -1404,6 +1524,18 @@ class TraceContext:
             object_span_id=object_span_id,
             object_artifact_hash=object_artifact_hash,
         )
+
+    def add_cognitive_event(self, event: CognitiveEvent) -> None:
+        """Record a cognitive event (V5 metacognitive tracking).
+
+        Cognitive events capture the agent's reasoning, temptation awareness,
+        and decision points. This method stores the event in the trace store
+        for later analysis.
+
+        Args:
+            event: The cognitive event to record
+        """
+        self.trace_store.store_cognitive_event(self.trace_id, event)
 
 
 def create_trace_store(base_path: Path) -> tuple[TraceStore, ArtifactStore]:

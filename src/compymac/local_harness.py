@@ -2134,23 +2134,35 @@ class LocalHarness(Harness):
             Brief confirmation message (user-facing)
         """
         import logging
+        import time
         logger = logging.getLogger(__name__)
 
         # Log thinking content (will be captured in traces if trace context exists)
         logger.info(f"[THINK] {content[:200]}..." if len(content) > 200 else f"[THINK] {content}")
 
+        # Get current phase for cognitive event tracking
+        current_phase: str | None = None
+        if self._swe_phase_enabled and self._swe_phase_state:
+            current_phase = self._swe_phase_state.current_phase.value
+
         # Track thinking in SWE phase state (for compliance validation)
         if self._swe_phase_enabled and self._swe_phase_state:
-            # TODO: When implementing full V5, add:
-            # self._swe_phase_state.record_thinking(content, trigger=self._last_thinking_trigger)
-            # self._last_thinking_trigger = None  # Reset after use
-            pass
+            # V5: Record thinking event for metacognitive compliance validation
+            trigger = getattr(self, "_last_thinking_trigger", None)
+            self._swe_phase_state.record_thinking(content, trigger=trigger)
+            self._last_thinking_trigger = None  # Reset after use
 
-        # TODO: When trace store is extended with cognitive events, add:
-        # if self._trace_context:
-        #     from compymac.trace_store import CognitiveEvent
-        #     event = CognitiveEvent(...)
-        #     self._trace_context.add_cognitive_event(event)
+        # V5: Capture as cognitive event if trace context exists
+        if self._trace_context:
+            from compymac.trace_store import CognitiveEvent
+            event = CognitiveEvent(
+                event_type="think",
+                timestamp=time.time(),
+                phase=current_phase,
+                content=content[:500] if len(content) > 500 else content,
+                metadata={},
+            )
+            self._trace_context.add_cognitive_event(event)
 
         # Return brief confirmation (user never sees the actual thinking content)
         return "Reasoning recorded. Proceed with next action."
