@@ -133,7 +133,7 @@ class CognitiveEvent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CognitiveEvent":
+    def from_dict(cls, data: dict[str, Any]) -> CognitiveEvent:
         """Create from dictionary."""
         return cls(
             event_type=data["event_type"],
