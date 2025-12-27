@@ -230,6 +230,10 @@ class SWEPhaseState:
     bash_executions: list[dict[str, Any]] = field(default_factory=list)  # {command, exit_code, timestamp}
     last_edit_timestamp: float = 0.0  # Timestamp of most recent file edit
 
+    # V5: Metacognitive tracking - thinking events for compliance validation
+    thinking_events: list[dict[str, Any]] = field(default_factory=list)  # {content, trigger, timestamp}
+    last_thinking_scenario: str = ""  # Most recent required scenario that triggered thinking
+
     def increment_tool_call(self, tool_name: str) -> None:
         """Increment tool call count for current phase (if not budget-neutral)."""
         if tool_name not in BUDGET_NEUTRAL_TOOLS:
@@ -433,6 +437,68 @@ class SWEPhaseState:
         # All checks passed!
         return True, ""
 
+    def record_thinking(
+        self, content: str, trigger: str | None = None, timestamp: float | None = None
+    ) -> None:
+        """Record a thinking event for metacognitive compliance validation.
+
+        V5: Tracks when the agent uses the <think> tool, enabling validation
+        that required thinking scenarios were satisfied before critical actions.
+
+        Args:
+            content: The thinking content (truncated for storage)
+            trigger: The scenario that triggered thinking (e.g., "before_claiming_completion")
+            timestamp: When the thinking occurred (defaults to now)
+        """
+        import time
+        self.thinking_events.append({
+            "content": content[:500] if len(content) > 500 else content,  # Truncate for storage
+            "trigger": trigger or "voluntary",
+            "timestamp": timestamp or time.time(),
+        })
+        if trigger:
+            self.last_thinking_scenario = trigger
+
+    def has_recent_thinking(self, scenario: str, within_seconds: float = 300) -> bool:
+        """Check if agent has thought about a specific scenario recently.
+
+        V5: Used to validate that required thinking occurred before critical
+        actions like phase transitions or completion claims.
+
+        Args:
+            scenario: The thinking scenario to check for (e.g., "before_claiming_completion")
+            within_seconds: How recent the thinking must be (default 5 minutes)
+
+        Returns:
+            True if matching thinking event found within the time window
+        """
+        import time
+        cutoff = time.time() - within_seconds
+        return any(
+            event["trigger"] == scenario and event["timestamp"] > cutoff
+            for event in self.thinking_events
+        )
+
+    def get_thinking_compliance_rate(self) -> float:
+        """Calculate what percentage of required thinking scenarios were satisfied.
+
+        V5: Returns a compliance rate between 0.0 and 1.0 indicating how many
+        of the required thinking scenarios for the current phase have been
+        satisfied with recent thinking events.
+
+        Returns:
+            Compliance rate (1.0 = all required scenarios satisfied)
+        """
+        required_scenarios = get_required_thinking_scenarios(self.current_phase)
+        if not required_scenarios:
+            return 1.0
+
+        satisfied = sum(
+            1 for scenario in required_scenarios
+            if self.has_recent_thinking(scenario)
+        )
+        return satisfied / len(required_scenarios)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -449,7 +515,30 @@ class SWEPhaseState:
             # V4: Evidence-based gating
             "bash_executions": self.bash_executions,
             "last_edit_timestamp": self.last_edit_timestamp,
+            # V5: Metacognitive tracking
+            "thinking_events": self.thinking_events,
+            "last_thinking_scenario": self.last_thinking_scenario,
         }
+
+
+def get_required_thinking_scenarios(phase: SWEPhase) -> list[str]:
+    """Get list of required thinking scenarios for a phase.
+
+    V5: Each phase has specific scenarios where thinking is required
+    before critical actions. This function returns those scenarios.
+
+    Args:
+        phase: The current SWE workflow phase
+
+    Returns:
+        List of scenario names that require thinking in this phase
+    """
+    scenarios_by_phase: dict[SWEPhase, list[str]] = {
+        SWEPhase.UNDERSTANDING: ["before_advancing_to_fix"],
+        SWEPhase.FIX: ["before_git_operations"],
+        SWEPhase.TARGET_FIX_VERIFICATION: ["before_claiming_completion"],
+    }
+    return scenarios_by_phase.get(phase, [])
 
 
 @dataclass
