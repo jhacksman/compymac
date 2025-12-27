@@ -2191,18 +2191,11 @@ class LocalHarness(Harness):
         if self._swe_phase_enabled and self._swe_phase_state is not None:
             phase_state = self._swe_phase_state
 
-            # V5: Thinking trigger validation before completion
-            # Agent must use <think> to self-audit before claiming completion
-            if not phase_state.has_recent_thinking("before_claiming_completion", within_seconds=300):
-                return (
-                    "[THINKING REQUIRED] Before calling complete(), you must use <think> "
-                    "to self-audit your work. Questions to verify:\n"
-                    "- Did all fail_to_pass tests actually pass?\n"
-                    "- Did all pass_to_pass tests still pass (no regressions)?\n"
-                    "- Did you address ALL requirements in the problem statement?\n"
-                    "- Did you check references to any modified code?\n\n"
-                    "Use the think tool with your self-audit, then call complete again."
-                )
+            # V5: Reasoning validation (thinking compliance)
+            # Uses centralized validate_completion_reasoning() for consistency
+            reasoning_valid, reasoning_msg = phase_state.validate_completion_reasoning()
+            if not reasoning_valid:
+                return f"[REASONING VALIDATION FAILED] {reasoning_msg}"
 
             # V3 workflow: complete is allowed from TARGET_FIX_VERIFICATION phase
             # But agent must have self-attested that tests passed (fail_to_pass_status)

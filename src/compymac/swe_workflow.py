@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from compymac.repo_discovery import RepoConfig, discover_repo
+from compymac.temptations import Temptation
 from compymac.trace_store import (
     SpanKind,
     SpanStatus,
@@ -234,6 +235,9 @@ class SWEPhaseState:
     thinking_events: list[dict[str, Any]] = field(default_factory=list)  # {content, trigger, timestamp}
     last_thinking_scenario: str = ""  # Most recent required scenario that triggered thinking
 
+    # V5: Temptation awareness tracking - records when agent encounters cognitive shortcuts
+    temptations_encountered: list[dict[str, Any]] = field(default_factory=list)  # {temptation, recognized, resisted, context, timestamp}
+
     def increment_tool_call(self, tool_name: str) -> None:
         """Increment tool call count for current phase (if not budget-neutral)."""
         if tool_name not in BUDGET_NEUTRAL_TOOLS:
@@ -408,6 +412,13 @@ class SWEPhaseState:
                 matching_test_runs.append(exec_record)
 
         if not matching_test_runs:
+            # V5: Record this as encountering T1_claiming_victory temptation
+            self.record_temptation(
+                Temptation.CLAIMING_VICTORY,
+                recognized=False,  # Agent didn't use <think> to acknowledge
+                resisted=False,    # Attempted the shortcut
+                context=f"Claimed {test_type}='{test_status}' without running tests"
+            )
             return False, (
                 f"No evidence of running tests. You claimed {test_type}='{test_status}', "
                 f"but no bash commands matching test patterns (pytest, etc.) were found. "
@@ -499,6 +510,71 @@ class SWEPhaseState:
         )
         return satisfied / len(required_scenarios)
 
+    def validate_completion_reasoning(self) -> tuple[bool, str]:
+        """V5: Validate agent has thought through completion checklist.
+
+        This method checks that the agent has used <think> to self-audit
+        before claiming completion. It's part of the V5 reasoning validation
+        that complements the V4 evidence-based gating.
+
+        Returns:
+            Tuple of (is_valid, error_message). If valid, error_message is empty.
+        """
+        if not self.has_recent_thinking("before_claiming_completion", within_seconds=600):
+            return False, (
+                "You must use <think> to self-audit before claiming completion. "
+                "Required checklist:\n"
+                "1. Did tests actually pass (evidence-based gating confirmed this)?\n"
+                "2. Did you check for regressions (pass_to_pass tests)?\n"
+                "3. Did you complete ALL parts of the task?\n"
+                "4. Did you verify all edited locations?\n\n"
+                "Use <think> to verify these points, then call complete() again."
+            )
+
+        return True, ""
+
+    def record_temptation(
+        self,
+        temptation: Temptation,
+        recognized: bool,
+        resisted: bool,
+        context: str = "",
+    ) -> None:
+        """Record when agent encounters a cognitive shortcut temptation.
+
+        V5: Tracks temptation encounters for analysis and compliance reporting.
+        This helps identify which temptations are most common and whether
+        agents are successfully recognizing and resisting them.
+
+        Args:
+            temptation: The temptation type from the Temptation enum
+            recognized: Whether the agent recognized this as a temptation
+            resisted: Whether the agent resisted the temptation
+            context: Additional context about the encounter
+        """
+        import time
+        self.temptations_encountered.append({
+            "temptation": temptation.value,
+            "recognized": recognized,
+            "resisted": resisted,
+            "context": context,
+            "timestamp": time.time(),
+        })
+
+    def get_temptation_resistance_rate(self) -> float:
+        """Calculate percentage of temptations that were resisted.
+
+        V5: Returns a rate between 0.0 and 1.0 indicating how many
+        encountered temptations were successfully resisted.
+
+        Returns:
+            Resistance rate (1.0 = all temptations resisted, 0.0 = none resisted)
+        """
+        if not self.temptations_encountered:
+            return 1.0  # No temptations encountered = perfect resistance
+        resisted = sum(1 for t in self.temptations_encountered if t["resisted"])
+        return resisted / len(self.temptations_encountered)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -518,6 +594,8 @@ class SWEPhaseState:
             # V5: Metacognitive tracking
             "thinking_events": self.thinking_events,
             "last_thinking_scenario": self.last_thinking_scenario,
+            # V5: Temptation awareness tracking
+            "temptations_encountered": self.temptations_encountered,
         }
 
 
