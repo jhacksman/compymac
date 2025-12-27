@@ -1669,6 +1669,12 @@ class LocalHarness(Harness):
         path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+
+        # V4: Record file edit for evidence-based gating
+        if self._swe_phase_enabled and self._swe_phase_state:
+            import time
+            self._swe_phase_state.record_file_edit(timestamp=time.time())
+
         return f"Successfully wrote {len(content)} characters to {file_path}"
 
     def _run_bash(
@@ -1721,6 +1727,15 @@ class LocalHarness(Harness):
         self._last_return_code = return_code
         self._last_exec_dir = exec_dir
         self._last_bash_id = bash_id
+
+        # V4: Record bash execution for evidence-based gating
+        if self._swe_phase_enabled and self._swe_phase_state:
+            import time
+            self._swe_phase_state.record_bash_execution(
+                command=command,
+                exit_code=return_code,
+                timestamp=time.time()
+            )
 
         return output
 
@@ -1901,6 +1916,12 @@ class LocalHarness(Harness):
             replacements = 1
 
         path.write_text(new_content)
+
+        # V4: Record file edit for evidence-based gating
+        if self._swe_phase_enabled and self._swe_phase_state:
+            import time
+            self._swe_phase_state.record_file_edit(timestamp=time.time())
+
         return f"Successfully edited {file_path}: {replacements} replacement(s) made"
 
     def _grep(
@@ -2201,9 +2222,16 @@ class LocalHarness(Harness):
         if modified_files:
             state.modified_files = modified_files
         # V2: Regression-aware outputs
+        # V4: Evidence-based gating - validate test claims before accepting them
         if pass_to_pass_status:
+            is_valid, error_msg = state.validate_test_evidence(pass_to_pass_status, "pass_to_pass")
+            if not is_valid:
+                return f"[EVIDENCE VALIDATION FAILED] {error_msg}"
             state.pass_to_pass_status = pass_to_pass_status
         if fail_to_pass_status:
+            is_valid, error_msg = state.validate_test_evidence(fail_to_pass_status, "fail_to_pass")
+            if not is_valid:
+                return f"[EVIDENCE VALIDATION FAILED] {error_msg}"
             state.fail_to_pass_status = fail_to_pass_status
 
         # Try to advance
