@@ -226,6 +226,10 @@ class SWEPhaseState:
     fail_to_pass_status: str = ""  # "all_passed" | "N_failed" (from TARGET_FIX_VERIFICATION)
     broke_pass_to_pass: list[str] = field(default_factory=list)  # Tests that regressed
 
+    # V4: Evidence-based gating - track bash executions and edits for validation
+    bash_executions: list[dict[str, Any]] = field(default_factory=list)  # {command, exit_code, timestamp}
+    last_edit_timestamp: float = 0.0  # Timestamp of most recent file edit
+
     def increment_tool_call(self, tool_name: str) -> None:
         """Increment tool call count for current phase (if not budget-neutral)."""
         if tool_name not in BUDGET_NEUTRAL_TOOLS:
@@ -336,6 +340,99 @@ class SWEPhaseState:
         budget = PHASE_BUDGETS[SWEPhase.FIX]["max_tool_calls"]
         return True, f"Returned to FIX phase to address regression: {reason}. Budget: {budget} tool calls."
 
+    def record_bash_execution(self, command: str, exit_code: int, timestamp: float | None = None) -> None:
+        """Record a bash execution for evidence-based gating.
+
+        V4: Used to validate that tests were actually run when agent claims
+        fail_to_pass_status='all_passed' or pass_to_pass_status='all_passed'.
+        """
+        import time
+        self.bash_executions.append({
+            "command": command,
+            "exit_code": exit_code,
+            "timestamp": timestamp or time.time(),
+        })
+
+    def record_file_edit(self, timestamp: float | None = None) -> None:
+        """Record a file edit timestamp for evidence-based gating.
+
+        V4: Used to ensure tests were run AFTER the last edit when validating
+        fail_to_pass_status or pass_to_pass_status claims.
+        """
+        import time
+        self.last_edit_timestamp = timestamp or time.time()
+
+    def validate_test_evidence(
+        self, test_status: str, test_type: str = "fail_to_pass"
+    ) -> tuple[bool, str]:
+        """Validate that test claims are backed by evidence.
+
+        V4: Evidence-based gating prevents agents from claiming 'all_passed'
+        without actually running tests. Validates:
+        1. A bash command was run that matches test patterns
+        2. That command had exit_code=0 (tests passed)
+        3. No code edits happened after that test run
+
+        Args:
+            test_status: The claimed status ('all_passed' or 'N_failed')
+            test_type: Either 'fail_to_pass' or 'pass_to_pass'
+
+        Returns:
+            (is_valid, error_message)
+        """
+        if test_status != "all_passed":
+            # If not claiming all_passed, no validation needed
+            return True, ""
+
+        # Look for bash executions that match test patterns
+        # Common test patterns: pytest, python -m pytest, ./test, npm test, etc.
+        test_patterns = [
+            r"pytest",
+            r"python.*-m.*pytest",
+            r"\./.*test",
+            r"npm.*test",
+            r"python.*test",
+            r"make.*test",
+        ]
+
+        # Find recent bash executions that match test patterns
+        import re
+        matching_test_runs = []
+        for exec_record in self.bash_executions:
+            cmd = exec_record["command"]
+            if any(re.search(pattern, cmd, re.IGNORECASE) for pattern in test_patterns):
+                matching_test_runs.append(exec_record)
+
+        if not matching_test_runs:
+            return False, (
+                f"No evidence of running tests. You claimed {test_type}='{test_status}', "
+                f"but no bash commands matching test patterns (pytest, etc.) were found. "
+                f"Run the tests first, then call advance_phase()."
+            )
+
+        # Find the most recent test run
+        latest_test_run = max(matching_test_runs, key=lambda x: x["timestamp"])
+
+        # Check if test passed (exit_code=0)
+        if latest_test_run["exit_code"] != 0:
+            return False, (
+                f"Latest test run failed with exit_code={latest_test_run['exit_code']}. "
+                f"You claimed {test_type}='{test_status}', but the test command "
+                f"'{latest_test_run['command'][:80]}...' did not pass. "
+                f"Fix the issues and re-run tests."
+            )
+
+        # Check if any edits happened after the test run
+        if self.last_edit_timestamp > latest_test_run["timestamp"]:
+            return False, (
+                f"Code was edited after the last test run. "
+                f"You claimed {test_type}='{test_status}', but files were modified "
+                f"after running tests. Re-run tests to verify the current state."
+            )
+
+        # All checks passed!
+        return True, ""
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
@@ -349,6 +446,9 @@ class SWEPhaseState:
             "pass_to_pass_status": self.pass_to_pass_status,
             "fail_to_pass_status": self.fail_to_pass_status,
             "broke_pass_to_pass": self.broke_pass_to_pass,
+            # V4: Evidence-based gating
+            "bash_executions": self.bash_executions,
+            "last_edit_timestamp": self.last_edit_timestamp,
         }
 
 
