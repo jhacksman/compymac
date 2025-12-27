@@ -1126,6 +1126,28 @@ class LocalHarness(Harness):
             is_core=True,
         )
 
+        # think tool - metacognitive reasoning scratchpad (V5)
+        self.register_tool(
+            name="think",
+            schema=ToolSchema(
+                name="think",
+                description=(
+                    "Private reasoning scratchpad for self-reflection and planning. "
+                    "Use this to reason about your approach, weigh alternatives, identify potential "
+                    "pitfalls, and self-critique your decisions. The user never sees this content, "
+                    "but it's captured in traces for debugging. REQUIRED before critical decisions: "
+                    "(1) git operations, (2) transitioning to code changes, (3) claiming completion, "
+                    "(4) after multiple failed attempts, (5) when tests fail."
+                ),
+                required_params=["content"],
+                optional_params=[],
+                param_types={"content": "string"},
+            ),
+            handler=self._think,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
         # SWE-BENCH PHASE tools - for intra-attempt budget enforcement
         # advance_phase - transition between workflow phases
         self.register_tool(
@@ -2092,10 +2114,46 @@ class LocalHarness(Harness):
         time.sleep(seconds)
         return f"Waited {seconds} seconds"
 
-    def _think(self, thought: str) -> str:
-        """Record a thought without taking action. Useful for reasoning."""
-        # Just log the thought and return it - no side effects
-        return f"Thought recorded: {thought}"
+    def _think(self, content: str) -> str:
+        """Private reasoning scratchpad for agent self-reflection (V5 Metacognitive).
+
+        The agent can use this to:
+        - Reason about what it knows vs what it needs to know
+        - Weigh alternative approaches and tradeoffs
+        - Identify potential pitfalls in the current plan
+        - Self-critique recent actions
+        - Plan next steps explicitly
+
+        The user never sees this content, but it's captured in traces for debugging
+        and metacognitive compliance analysis.
+
+        Args:
+            content: The agent's reasoning (not shown to user)
+
+        Returns:
+            Brief confirmation message (user-facing)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Log thinking content (will be captured in traces if trace context exists)
+        logger.info(f"[THINK] {content[:200]}..." if len(content) > 200 else f"[THINK] {content}")
+
+        # Track thinking in SWE phase state (for compliance validation)
+        if self._swe_phase_enabled and self._swe_phase_state:
+            # TODO: When implementing full V5, add:
+            # self._swe_phase_state.record_thinking(content, trigger=self._last_thinking_trigger)
+            # self._last_thinking_trigger = None  # Reset after use
+            pass
+
+        # TODO: When trace store is extended with cognitive events, add:
+        # if self._trace_context:
+        #     from compymac.trace_store import CognitiveEvent
+        #     event = CognitiveEvent(...)
+        #     self._trace_context.add_cognitive_event(event)
+
+        # Return brief confirmation (user never sees the actual thinking content)
+        return "Reasoning recorded. Proceed with next action."
 
     def _complete(self, final_answer: str, status: str = "success") -> str:
         """Signal task completion. This is the ONLY way to finish in action-gated mode.
