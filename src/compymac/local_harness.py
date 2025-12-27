@@ -2191,6 +2191,19 @@ class LocalHarness(Harness):
         if self._swe_phase_enabled and self._swe_phase_state is not None:
             phase_state = self._swe_phase_state
 
+            # V5: Thinking trigger validation before completion
+            # Agent must use <think> to self-audit before claiming completion
+            if not phase_state.has_recent_thinking("before_claiming_completion", within_seconds=300):
+                return (
+                    "[THINKING REQUIRED] Before calling complete(), you must use <think> "
+                    "to self-audit your work. Questions to verify:\n"
+                    "- Did all fail_to_pass tests actually pass?\n"
+                    "- Did all pass_to_pass tests still pass (no regressions)?\n"
+                    "- Did you address ALL requirements in the problem statement?\n"
+                    "- Did you check references to any modified code?\n\n"
+                    "Use the think tool with your self-audit, then call complete again."
+                )
+
             # V3 workflow: complete is allowed from TARGET_FIX_VERIFICATION phase
             # But agent must have self-attested that tests passed (fail_to_pass_status)
             if phase_state.current_phase == SWEPhase.TARGET_FIX_VERIFICATION:
@@ -2281,6 +2294,19 @@ class LocalHarness(Harness):
             return "Phase enforcement is not enabled. This tool is only available during SWE-bench tasks."
 
         state = self._swe_phase_state
+
+        # V5: Thinking trigger validation before critical phase transitions
+        # Before allowing UNDERSTANDING → FIX transition, require thinking
+        if state.current_phase == SWEPhase.UNDERSTANDING:
+            if not state.has_recent_thinking("before_advancing_to_fix", within_seconds=300):
+                return (
+                    "[THINKING REQUIRED] Before advancing to FIX phase, you must use <think> "
+                    "to verify you have sufficient context. Questions to consider:\n"
+                    "- Have you found ALL locations that need editing?\n"
+                    "- Do you understand the root cause?\n"
+                    "- Have you checked references, types, and dependencies?\n\n"
+                    "Use the think tool with your reasoning, then call advance_phase again."
+                )
 
         # Update state with provided outputs
         if suspect_files:
