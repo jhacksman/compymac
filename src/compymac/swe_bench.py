@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from compymac.prompts import load_swe_bench_v5_prompt
 from compymac.swe_workflow import AttemptState, SWEPhaseState
 
 if TYPE_CHECKING:
@@ -305,6 +306,33 @@ class SWEBenchRunner:
         self.max_verification_attempts = max_verification_attempts
         self.require_source_modification = require_source_modification
 
+    def _build_system_prompt(
+        self, task: SWEBenchTask, repo_path: Path, tool_schemas: str = ""
+    ) -> str:
+        """Build system prompt with V5 metacognitive scaffolding.
+
+        V5: Loads the enhanced system prompt template with thinking scenarios,
+        temptation awareness, and principle blocks. Injects task-specific context.
+
+        Args:
+            task: The SWE-bench task being run
+            repo_path: Path to the cloned repository
+            tool_schemas: Optional tool schema documentation to inject
+
+        Returns:
+            The formatted system prompt with task context
+        """
+        template = load_swe_bench_v5_prompt()
+
+        prompt = template.format(
+            instance_id=task.instance_id,
+            problem_statement=task.problem_statement,
+            repo_path=str(repo_path),
+            tool_schemas=tool_schemas,
+        )
+
+        return prompt
+
     async def run_task(self, task: SWEBenchTask) -> SWEBenchResult:
         """
         Run a single SWE-bench task.
@@ -465,68 +493,9 @@ class SWEBenchRunner:
         # Import here to avoid circular imports
         from compymac.agent_loop import AgentConfig, AgentLoop
 
-        # Build test names for the prompt
-        test_names = ", ".join(task.fail_to_pass[:3])  # Show first 3 tests
-        if len(task.fail_to_pass) > 3:
-            test_names += f" (and {len(task.fail_to_pass) - 3} more)"
-
-        # Standard CompyMac prompt with phased workflow structure
-        # Based on arxiv research: structured localization → fix → verify workflow
-        # improves success rate by 40-50% vs flat instructions
-        prompt = f'''You are a software engineering assistant. Fix the bug described below.
-
-Repository: {task.repo}
-Path: {repo_path}
-
-Problem Statement:
-{task.problem_statement}
-
-Tests that must pass after your fix: {test_names}
-
-WORKFLOW (follow these phases in order):
-
-PHASE 1: LOCALIZATION
-- Use grep/glob to find relevant files (broad search with keywords from problem statement)
-- Read files to understand structure
-- Use lsp_tool for go-to-definition/find-references to trace code paths
-- GOAL: Identify 1-3 suspect files/functions before making any edits
-
-PHASE 2: UNDERSTANDING
-- Read the buggy code carefully (always Read before Edit)
-- If unfamiliar APIs → use web_search("library_name API docs")
-- If error messages unclear → use web_search("exact error message")
-- WARNING: Web results may describe newer versions than this codebase - verify in code
-- GOAL: Understand WHY the bug happens
-
-PHASE 3: FIX
-- Edit SOURCE CODE only (never edit test files unless explicitly required)
-- Always Read a file before using Edit on it
-- Make minimal, targeted changes - avoid broad refactors
-- GOAL: Address the root cause with smallest possible change
-
-PHASE 4: VERIFICATION
-- Run fail_to_pass tests with bash (must pass)
-- Run pass_to_pass tests with bash (must still pass)
-- If NEW failures appear: your edit caused a regression - revert and try different approach
-- GOAL: All tests green
-
-TOOL USAGE GUIDE:
-- grep: WHEN Phase 1 (broad localization). Find files containing keywords.
-- Read: WHEN Phase 1-2 (understanding). ALWAYS before Edit.
-- lsp_tool: WHEN Phase 1-2 (navigation). Trace function calls with goto_definition/find_references.
-- web_search: WHEN Phase 2 (unfamiliar APIs/errors). Fallback, not first resort.
-- Edit: WHEN Phase 3 (fixing). Only after localization complete. Read the file first.
-- bash: WHEN Phase 3-4 (testing). Run tests after each edit.
-
-ANTI-PATTERNS TO AVOID:
-- Editing without localizing first (causes wandering, wastes tool calls)
-- Editing test files (not your job unless explicitly asked)
-- Broad refactors (causes regressions)
-- Skipping verification (miss regressions)
-- Making multiple unrelated changes at once
-
-When all tests pass, call complete with a description of your fix.
-'''
+        # V5: Build system prompt with metacognitive scaffolding
+        # Includes thinking scenarios, temptation awareness, and principle blocks
+        prompt = self._build_system_prompt(task, repo_path)
 
         # Standard CompyMac agent config with menu system DISABLED for SWE-bench
         # Phase enforcement controls the tool set - menu system would bypass phase restrictions
