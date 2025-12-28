@@ -5320,13 +5320,16 @@ Permissions: {mode}"""
         """Execute a single tool call with optional trace capture."""
         call_id = tool_call.id or self._generate_call_id()
 
-        # V5 ENFORCED: Reset consecutive think counter when non-think tool is called
-        # This re-enables think() after the agent takes an action
-        if tool_call.name != "think":
+        # V5 ENFORCED: Reset consecutive think counter ONLY on productive actions
+        # Productive actions are: Edit, bash, bash_background, write_to_shell
+        # Non-productive actions (grep, Read, advance_phase, etc.) do NOT reset the counter
+        # This prevents gaming the 3-consecutive-think limit by alternating think/grep
+        productive_actions = {"Edit", "bash", "bash_background", "write_to_shell", "complete"}
+        if tool_call.name in productive_actions:
             if self._consecutive_think_calls > 0 or self._think_disabled_until_action:
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.info(f"[THINK RESET] Non-think action '{tool_call.name}' taken - resetting think counter and re-enabling think()")
+                logger.info(f"[THINK RESET] Productive action '{tool_call.name}' taken - resetting think counter and re-enabling think()")
             self._consecutive_think_calls = 0
             self._think_disabled_until_action = False
 
