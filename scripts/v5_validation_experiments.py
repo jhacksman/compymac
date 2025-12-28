@@ -104,17 +104,19 @@ class CognitiveComplianceReport:
         }
 
 
-def analyze_cognitive_compliance(trace_id: str, task_id: str) -> CognitiveComplianceReport:
+def analyze_cognitive_compliance(trace_id: str, task_id: str, trace_base_path: Path | None = None) -> CognitiveComplianceReport:
     """Analyze cognitive compliance for a completed task.
 
     Args:
         trace_id: The trace ID from the task run
         task_id: The SWE-bench task instance ID
+        trace_base_path: Base path for trace store (defaults to /tmp/compymac_traces)
 
     Returns:
         CognitiveComplianceReport with analysis results
     """
-    store = create_trace_store()
+    base_path = trace_base_path or Path("/tmp/compymac_traces")
+    store, _ = create_trace_store(base_path)
     events = store.get_cognitive_events(trace_id)
 
     # Categorize events
@@ -391,6 +393,7 @@ async def run_validation(
                 compliance_report = analyze_cognitive_compliance(
                     task_result.trace_id,
                     task.instance_id,
+                    trace_base_path=config.output_dir / "traces",
                 )
                 print(f"    Thinking events: {compliance_report.total_thinking_events}")
                 print(f"    Compliance rate: {compliance_report.thinking_compliance_rate:.1%}")
