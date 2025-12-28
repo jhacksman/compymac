@@ -224,9 +224,17 @@ class AgentLoop:
                 input_artifact_hash=llm_input_artifact_hash,
             )
 
+        # In action-gated mode, force tool calling to prevent intermittent text responses
+        # This aligns the API contract with the agent loop's requirement that every turn
+        # must include a tool call (no prose-only responses allowed)
+        tool_choice = None
+        if self.config.action_gated and tools:
+            tool_choice = "required"
+
         response = self.llm_client.chat(
             messages=messages_for_api,
             tools=tools if tools else None,
+            tool_choice=tool_choice,
         )
 
         # End LLM call span if tracing is enabled

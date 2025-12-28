@@ -262,7 +262,7 @@ class MockLLMClient:
         self.responses = responses or []
         self.call_count = 0
 
-    def chat(self, messages, tools=None):
+    def chat(self, messages, tools=None, tool_choice=None):
         if self.call_count < len(self.responses):
             response = self.responses[self.call_count]
         else:

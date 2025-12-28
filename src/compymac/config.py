@@ -33,6 +33,23 @@ class LLMConfig:
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         )
 
+    @classmethod
+    def from_env_deterministic(cls) -> "LLMConfig":
+        """
+        Load configuration with temperature=0 for deterministic behavior.
+
+        Use this for SWE-bench and other tasks where consistent tool calling
+        is critical. Temperature=0 reduces sampling variance and improves
+        tool call reliability with models like qwen3-next-80b.
+        """
+        return cls(
+            base_url=os.getenv("LLM_BASE_URL", "http://localhost:8000/v1"),
+            api_key=os.getenv("LLM_API_KEY", ""),
+            model=os.getenv("LLM_MODEL", ""),
+            temperature=0.0,  # Deterministic for reliable tool calling
+            max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
+        )
+
 
 @dataclass
 class ContextConfig:
