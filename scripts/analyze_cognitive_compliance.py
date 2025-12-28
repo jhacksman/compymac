@@ -156,7 +156,9 @@ def main():
     args = parser.parse_args()
 
     # Create trace store
-    store = create_trace_store(db_path=args.db_path)
+    # create_trace_store requires base_path (directory), not db_path
+    base_path = Path(args.db_path).parent if args.db_path else Path("/tmp/compymac_traces")
+    store, _ = create_trace_store(base_path)
 
     if args.trace_id:
         # Analyze single trace

@@ -200,6 +200,8 @@ class LocalHarness(Harness):
         # V5: Think loop detection to prevent analysis paralysis
         self._recent_think_calls: list[str] = []
         self._max_recent_thinks = 5  # Track last 5 think calls for similarity detection
+        self._consecutive_think_calls = 0  # Track consecutive think() calls for 3-call limit
+        self._think_disabled_until_action = False  # Enforced block after 3 consecutive thinks
 
         # Register default tools
         self._register_default_tools()
@@ -2141,6 +2143,22 @@ class LocalHarness(Harness):
         import time
         logger = logging.getLogger(__name__)
 
+        # V5 ENFORCED: Check if think() is disabled due to 3 consecutive calls
+        if self._think_disabled_until_action:
+            logger.warning("[THINK BLOCKED] think() disabled until agent takes a non-think action")
+            return "[THINK DISABLED] You have called think() 3 times in a row. The think tool is now DISABLED until you take a different action. Choose one of: grep, Read, Edit, bash, advance_phase. You cannot call think() again until you act."
+
+        # V5 ENFORCED: Increment consecutive think counter
+        self._consecutive_think_calls += 1
+        logger.info(f"[THINK COUNT] Consecutive think calls: {self._consecutive_think_calls}/3")
+
+        # V5 ENFORCED: After 3 consecutive thinks, disable think tool
+        if self._consecutive_think_calls >= 3:
+            self._think_disabled_until_action = True
+            logger.warning("[THINK LIMIT REACHED] 3 consecutive think() calls - disabling think until action taken")
+            # Still process this think call, but warn that next one will be blocked
+            # Fall through to normal processing, but add warning to response
+
         # V5: Analysis paralysis detection - check for repeated similar thinking
         content_lower = content.lower()
         content_words = set(content_lower.split())
@@ -2158,22 +2176,6 @@ class LocalHarness(Harness):
         self._recent_think_calls.append(content[:200])  # Store first 200 chars
         if len(self._recent_think_calls) > self._max_recent_thinks:
             self._recent_think_calls.pop(0)
-
-        # Check phase-level thinking budget (if SWE phase enforcement enabled)
-        max_thinks_per_phase = 10  # Soft limit per phase
-        if self._swe_phase_enabled and self._swe_phase_state:
-            phase_think_count = len([
-                event for event in self._swe_phase_state.thinking_events
-                # Only count thinks from current phase (recent events)
-            ])
-            if phase_think_count >= max_thinks_per_phase:
-                logger.warning(f"[EXCESSIVE THINKING] {phase_think_count} think() calls in this phase. Analysis paralysis detected.")
-                return f"[WARNING] You've called think() {phase_think_count} times in this phase - that's too much analysis! You're stuck in T4 (Analysis Paralysis). STOP thinking and START acting. Either gather concrete data (grep/read) or make the edit."
-
-        # If too many similar calls, warn about analysis paralysis
-        if similar_count >= 2:
-            logger.warning(f"[THINK LOOP DETECTED] Similar thinking repeated {similar_count + 1} times. Agent may be stuck in analysis paralysis.")
-            return "[WARNING] You're thinking in circles (T4: Analysis Paralysis). Stop thinking and either: (1) Gather MORE information with grep/read, or (2) Make the edit you've been planning. Repeated thinking won't help - you need ACTION."
 
         # Log thinking content (will be captured in traces if trace context exists)
         logger.info(f"[THINK] {content[:200]}..." if len(content) > 200 else f"[THINK] {content}")
@@ -5317,6 +5319,16 @@ Permissions: {mode}"""
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Execute a single tool call with optional trace capture."""
         call_id = tool_call.id or self._generate_call_id()
+
+        # V5 ENFORCED: Reset consecutive think counter when non-think tool is called
+        # This re-enables think() after the agent takes an action
+        if tool_call.name != "think":
+            if self._consecutive_think_calls > 0 or self._think_disabled_until_action:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"[THINK RESET] Non-think action '{tool_call.name}' taken - resetting think counter and re-enabling think()")
+            self._consecutive_think_calls = 0
+            self._think_disabled_until_action = False
 
         # Log receipt
         self._event_log.log_event(
