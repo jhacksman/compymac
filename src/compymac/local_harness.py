@@ -197,6 +197,10 @@ class LocalHarness(Harness):
         self._swe_phase_state: SWEPhaseState | None = None
         self._swe_phase_enabled: bool = False
 
+        # V5: Think loop detection to prevent analysis paralysis
+        self._recent_think_calls: list[str] = []
+        self._max_recent_thinks = 5  # Track last 5 think calls for similarity detection
+
         # Register default tools
         self._register_default_tools()
 
@@ -2136,6 +2140,40 @@ class LocalHarness(Harness):
         import logging
         import time
         logger = logging.getLogger(__name__)
+
+        # V5: Analysis paralysis detection - check for repeated similar thinking
+        content_lower = content.lower()
+        content_words = set(content_lower.split())
+
+        similar_count = 0
+        for recent in self._recent_think_calls[-3:]:  # Check last 3 calls
+            recent_words = set(recent.lower().split())
+            # Calculate Jaccard similarity (intersection / union)
+            if len(content_words | recent_words) > 0:
+                similarity = len(content_words & recent_words) / len(content_words | recent_words)
+                if similarity > 0.6:  # More than 60% word overlap
+                    similar_count += 1
+
+        # Track this call for future similarity checks
+        self._recent_think_calls.append(content[:200])  # Store first 200 chars
+        if len(self._recent_think_calls) > self._max_recent_thinks:
+            self._recent_think_calls.pop(0)
+
+        # Check phase-level thinking budget (if SWE phase enforcement enabled)
+        max_thinks_per_phase = 10  # Soft limit per phase
+        if self._swe_phase_enabled and self._swe_phase_state:
+            phase_think_count = len([
+                event for event in self._swe_phase_state.thinking_events
+                # Only count thinks from current phase (recent events)
+            ])
+            if phase_think_count >= max_thinks_per_phase:
+                logger.warning(f"[EXCESSIVE THINKING] {phase_think_count} think() calls in this phase. Analysis paralysis detected.")
+                return f"[WARNING] You've called think() {phase_think_count} times in this phase - that's too much analysis! You're stuck in T4 (Analysis Paralysis). STOP thinking and START acting. Either gather concrete data (grep/read) or make the edit."
+
+        # If too many similar calls, warn about analysis paralysis
+        if similar_count >= 2:
+            logger.warning(f"[THINK LOOP DETECTED] Similar thinking repeated {similar_count + 1} times. Agent may be stuck in analysis paralysis.")
+            return "[WARNING] You're thinking in circles (T4: Analysis Paralysis). Stop thinking and either: (1) Gather MORE information with grep/read, or (2) Make the edit you've been planning. Repeated thinking won't help - you need ACTION."
 
         # Log thinking content (will be captured in traces if trace context exists)
         logger.info(f"[THINK] {content[:200]}..." if len(content) > 200 else f"[THINK] {content}")
