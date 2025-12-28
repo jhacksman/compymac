@@ -1,0 +1,28 @@
+{
+  "instance_id": "pylint-dev__pylint-5859",
+  "resolved": false,
+  "partial": false,
+  "failed": true,
+  "fail_to_pass_results": {
+    "tests/checkers/unittest_misc.py::TestFixme::test_non_alphanumeric_codetag": false
+  },
+  "pass_to_pass_results": {
+    "tests/checkers/unittest_misc.py::TestFixme::test_fixme_with_message": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_todo_without_message": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_xxx_without_space": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_xxx_middle": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_without_space_fixme": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_absent_codetag": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_other_present_codetag": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_issue_2321_should_not_trigger": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_issue_2321_should_trigger": false,
+    "tests/checkers/unittest_misc.py::TestFixme::test_dont_trigger_on_todoist": false
+  },
+  "patch_generated": "diff --git a/tests/checkers/unittest_misc.py b/tests/checkers/unittest_misc.py\nindex 23e19a9d0..bd15a932e 100644\n--- a/tests/checkers/unittest_misc.py\n+++ b/tests/checkers/unittest_misc.py\n@@ -68,6 +68,16 @@ class TestFixme(CheckerTestCase):\n         ):\n             self.checker.process_tokens(_tokenize_str(code))\n \n+    @set_config(notes=[\"???\"])\n+    def test_non_alphanumeric_codetag(self) -> None:\n+        code = \"\"\"a = 1\n+                #???\n+                \"\"\"\n+        with self.assertAddsMessages(\n+            MessageTest(msg_id=\"fixme\", line=2, args=\"???\", col_offset=17)\n+        ):\n+            self.checker.process_tokens(_tokenize_str(code))\n+\n     @set_config(notes=[])\n     def test_absent_codetag(self) -> None:\n         code = \"\"\"a = 1\n",
+  "tool_calls_made": 20,
+  "tokens_used": 0,
+  "time_elapsed_sec": 53.03226280212402,
+  "trace_id": "11b6bb40-feba-447f-a630-0f944b4f746c",
+  "error_log": "",
+  "elapsed_time": 53.22149419784546
+}
