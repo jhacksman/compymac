@@ -329,8 +329,9 @@ async def run_validation(
     from compymac.local_harness import LocalHarness
 
     # Validate LLM configuration
+    # Use deterministic config (temperature=0) for consistent tool calling
     try:
-        llm_config = LLMConfig.from_env()
+        llm_config = LLMConfig.from_env_deterministic()
         if not llm_config.model or not llm_config.base_url:
             logger.error("LLM_MODEL and LLM_BASE_URL must be set")
             sys.exit(1)
@@ -347,11 +348,17 @@ async def run_validation(
     harness = LocalHarness()
     llm_client = LLMClient(config=llm_config, validate_config=True)
 
-    # Create runner
+    # V5: Create trace store for cognitive event capture
+    from compymac.trace_store import create_trace_store
+    trace_store, artifact_store = create_trace_store(config.output_dir / "traces")
+    logger.info(f"Trace store initialized at {config.output_dir / 'traces'}")
+
+    # Create runner with trace store for V5 cognitive event capture
     runner = SWEBenchRunner(
         harness=harness,
         llm_client=llm_client,
         workspace_base=config.workspace_base,
+        trace_store=trace_store,
     )
 
     # Create dashboard
@@ -380,7 +387,7 @@ async def run_validation(
             # Analyze cognitive compliance
             compliance_report = None
             if task_result.trace_id:
-                print(f"    Analyzing cognitive compliance...")
+                print("    Analyzing cognitive compliance...")
                 compliance_report = analyze_cognitive_compliance(
                     task_result.trace_id,
                     task.instance_id,
@@ -430,7 +437,7 @@ async def run_validation(
     print("=" * 60)
 
     report = dashboard.generate_report()
-    print(f"\nTask Performance:")
+    print("\nTask Performance:")
     print(f"  Total tasks: {report.total_tasks}")
     print(f"  Resolved: {report.resolved} ({report.resolve_rate:.1%})")
     print(f"  Partial: {report.partial} ({report.partial_rate:.1%})")
@@ -443,7 +450,7 @@ async def run_validation(
         avg_compliance = sum(r.thinking_compliance_rate for r in compliance_reports) / len(compliance_reports)
         avg_resistance = sum(r.temptation_resistance_rate for r in compliance_reports) / len(compliance_reports)
 
-        print(f"\nCognitive Compliance:")
+        print("\nCognitive Compliance:")
         print(f"  Avg thinking events: {avg_thinking:.1f}")
         print(f"  Avg compliance rate: {avg_compliance:.1%}")
         print(f"  Avg temptation resistance: {avg_resistance:.1%}")
