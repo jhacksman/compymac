@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from compymac.prompts import load_swe_bench_v5_prompt
 from compymac.swe_workflow import AttemptState, SWEPhaseState
+from compymac.trace_store import TraceContext, TraceStore
 
 if TYPE_CHECKING:
     from compymac.harness import Harness
@@ -288,6 +289,7 @@ class SWEBenchRunner:
         workspace_base: Path | None = None,
         max_verification_attempts: int = 3,
         require_source_modification: bool = True,
+        trace_store: TraceStore | None = None,
     ):
         """
         Initialize runner.
@@ -298,6 +300,7 @@ class SWEBenchRunner:
             workspace_base: Base directory for task workspaces
             max_verification_attempts: Max times to retry if tests fail (default: 3)
             require_source_modification: Require patch to modify source, not just tests
+            trace_store: Optional TraceStore for cognitive event capture (V5)
         """
         self.harness = harness
         self.llm_client = llm_client
@@ -305,6 +308,7 @@ class SWEBenchRunner:
         self.results: list[SWEBenchResult] = []
         self.max_verification_attempts = max_verification_attempts
         self.require_source_modification = require_source_modification
+        self.trace_store = trace_store
 
     def _build_system_prompt(
         self, task: SWEBenchTask, repo_path: Path, tool_schemas: str = ""
@@ -346,10 +350,21 @@ class SWEBenchRunner:
         trace_id = str(uuid.uuid4())
         start_time = time.time()
 
+        # V5: Create TraceContext for cognitive event capture
+        trace_context: TraceContext | None = None
+        if self.trace_store:
+            trace_context = TraceContext(self.trace_store, trace_id)
+            # Set trace context on harness so cognitive events are captured
+            if hasattr(self.harness, 'set_trace_context'):
+                self.harness.set_trace_context(trace_context)
+
         # Phase 1: Setup repository
         try:
             repo_path = await self._setup_repository(task)
         except Exception as e:
+            # Clear trace context on failure
+            if hasattr(self.harness, 'set_trace_context'):
+                self.harness.set_trace_context(None)
             return self._create_failed_result(
                 task, trace_id, start_time, f"Repository setup failed: {e}"
             )
@@ -381,6 +396,10 @@ class SWEBenchRunner:
 
         # Phase 4: Cleanup
         await self._cleanup_repository(repo_path)
+
+        # V5: Clear trace context after task completes
+        if hasattr(self.harness, 'set_trace_context'):
+            self.harness.set_trace_context(None)
 
         # Phase 5: Compute outcome
         resolved = test_results.all_fail_to_pass_passed and test_results.all_pass_to_pass_passed
