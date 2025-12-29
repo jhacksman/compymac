@@ -814,7 +814,7 @@ DO NOT repeat the same approach that failed.
         passed_tests = []
 
         for test in task.fail_to_pass:
-            passed = await self._run_test(repo_path, test, log_output=True)
+            passed = await self._run_test(repo_path, test, log_output=True, task=task)
             if passed:
                 passed_tests.append(test)
             else:
@@ -849,13 +849,13 @@ DO NOT repeat the same approach that failed.
         # Run fail_to_pass tests
         fail_to_pass_results = {}
         for test in task.fail_to_pass:
-            passed = await self._run_test(repo_path, test)
+            passed = await self._run_test(repo_path, test, task=task)
             fail_to_pass_results[test] = passed
 
         # Run pass_to_pass tests
         pass_to_pass_results = {}
         for test in task.pass_to_pass:
-            passed = await self._run_test(repo_path, test)
+            passed = await self._run_test(repo_path, test, task=task)
             pass_to_pass_results[test] = passed
 
         return TestResults(
@@ -863,42 +863,149 @@ DO NOT repeat the same approach that failed.
             pass_to_pass=pass_to_pass_results,
         )
 
+    def _convert_test_name(self, test_name: str) -> str:
+        """Convert SWE-bench test name format to standard test identifier.
+
+        SWE-bench uses format: "method_name (module.path.ClassName)"
+        We need to convert to: "module.path.ClassName.method_name"
+
+        Args:
+            test_name: Test name in SWE-bench format
+
+        Returns:
+            Test name in standard format (module.ClassName.method)
+        """
+        import re
+
+        # Check if it's in SWE-bench format: "method_name (module.ClassName)"
+        match = re.match(r'^(\w+)\s+\(([^)]+)\)$', test_name)
+        if match:
+            method_name = match.group(1)
+            module_class = match.group(2)
+            # Convert to standard format: module.ClassName.method_name
+            return f"{module_class}.{method_name}"
+
+        # Already in standard format or unknown format, return as-is
+        return test_name
+
+    def _get_test_command(
+        self, repo_path: Path, test_name: str, task: SWEBenchTask | None = None
+    ) -> tuple[list[str], str]:
+        """Get the appropriate test command for the repository.
+
+        Different repositories use different test runners:
+        - Django: tests/runtests.py with module.ClassName.method format
+        - Most others: pytest with various formats
+
+        Args:
+            repo_path: Path to the repository
+            test_name: Test name (already converted to standard format)
+            task: Optional task for repo detection
+
+        Returns:
+            Tuple of (command list, working directory)
+        """
+        # Detect Django repository
+        is_django = (
+            (task and "django" in task.repo.lower())
+            or (repo_path / "tests" / "runtests.py").exists()
+        )
+
+        if is_django:
+            # Django uses its own test runner
+            # Format: python tests/runtests.py module.ClassName.method_name
+            return (
+                ["python", "tests/runtests.py", test_name, "--verbosity=1"],
+                str(repo_path),
+            )
+
+        # Default to pytest
+        # Try to convert module.ClassName.method to pytest format
+        # pytest format: path/to/test.py::ClassName::method
+        parts = test_name.rsplit(".", 2)
+        if len(parts) >= 3:
+            # module.path.ClassName.method -> try to find the file
+            module_path = parts[0]
+            class_name = parts[1] if len(parts) > 2 else ""
+            method_name = parts[-1]
+
+            # Try common test file locations
+            possible_paths = [
+                repo_path / module_path.replace(".", "/") / f"test_{method_name}.py",
+                repo_path / "tests" / module_path.replace(".", "/") / f"test_{class_name.lower()}.py",
+                repo_path / "tests" / f"{module_path.replace('.', '/')}.py",
+                repo_path / module_path.replace(".", "/") / "tests.py",
+            ]
+
+            for test_file in possible_paths:
+                if test_file.exists():
+                    pytest_name = f"{test_file}::{class_name}::{method_name}"
+                    return (
+                        ["python", "-m", "pytest", pytest_name, "-v", "--tb=short"],
+                        str(repo_path),
+                    )
+
+        # Fallback: try running pytest with the test name as-is
+        return (
+            ["python", "-m", "pytest", test_name, "-v", "--tb=short"],
+            str(repo_path),
+        )
+
     async def _run_test(
-        self, repo_path: Path, test_name: str, log_output: bool = True
+        self, repo_path: Path, test_name: str, log_output: bool = True,
+        task: SWEBenchTask | None = None
     ) -> bool:
         """Run a single test and return whether it passed.
 
         Args:
             repo_path: Path to the repository
-            test_name: Name of the test to run (pytest format)
+            test_name: Name of the test to run (SWE-bench format)
             log_output: Whether to log test output for debugging
+            task: Optional task for repo-specific test runner detection
 
         Returns:
             True if the test passed, False otherwise
         """
+        # Convert SWE-bench test name format to standard format
+        converted_name = self._convert_test_name(test_name)
+
+        # Get the appropriate test command for this repo
+        cmd, cwd = self._get_test_command(repo_path, converted_name, task)
+
+        logger.info(f"Running test: {test_name} -> {converted_name}")
+        logger.info(f"Command: {' '.join(cmd)} (cwd: {cwd})")
+
         result = subprocess.run(
-            ["python", "-m", "pytest", test_name, "-v", "--tb=short"],
-            cwd=str(repo_path),
+            cmd,
+            cwd=cwd,
             capture_output=True,
             text=True,
+            timeout=300,  # 5 minute timeout per test
         )
 
-        # Log test output for debugging
-        if log_output and result.returncode != 0:
-            log_dir = repo_path / ".swebench_logs"
-            log_dir.mkdir(exist_ok=True)
+        # Always log test output for debugging (not just on failure)
+        log_dir = repo_path / ".swebench_logs"
+        log_dir.mkdir(exist_ok=True)
 
-            # Sanitize test name for filename
-            safe_name = test_name.replace("/", "_").replace("::", "__")
-            log_file = log_dir / f"{safe_name}.log"
+        # Sanitize test name for filename
+        safe_name = test_name.replace("/", "_").replace("::", "__").replace(" ", "_").replace("(", "").replace(")", "")
+        log_file = log_dir / f"{safe_name}.log"
 
-            with open(log_file, "w") as f:
-                f.write(f"=== Test: {test_name} ===\n")
-                f.write(f"Return code: {result.returncode}\n\n")
-                f.write("=== STDOUT ===\n")
-                f.write(result.stdout or "(empty)\n")
-                f.write("\n=== STDERR ===\n")
-                f.write(result.stderr or "(empty)\n")
+        with open(log_file, "w") as f:
+            f.write(f"=== Test: {test_name} ===\n")
+            f.write(f"Converted: {converted_name}\n")
+            f.write(f"Command: {' '.join(cmd)}\n")
+            f.write(f"Working dir: {cwd}\n")
+            f.write(f"Return code: {result.returncode}\n\n")
+            f.write("=== STDOUT ===\n")
+            f.write(result.stdout or "(empty)\n")
+            f.write("\n=== STDERR ===\n")
+            f.write(result.stderr or "(empty)\n")
+
+        if result.returncode != 0:
+            logger.warning(f"Test failed: {test_name} (return code: {result.returncode})")
+            if result.stderr:
+                logger.warning(f"Stderr: {result.stderr[:500]}")
 
         return result.returncode == 0
 
