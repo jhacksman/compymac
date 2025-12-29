@@ -460,7 +460,7 @@ class SWEBenchRunner:
         return list(results)
 
     async def _setup_repository(self, task: SWEBenchTask) -> Path:
-        """Clone repo and checkout correct version."""
+        """Clone repo, checkout correct version, and install dependencies."""
         repo_path = self.workspace_base / task.instance_id
         repo_path.mkdir(parents=True, exist_ok=True)
 
@@ -493,7 +493,60 @@ class SWEBenchRunner:
             if apply_result.returncode != 0:
                 raise RuntimeError(f"Test patch apply failed: {apply_result.stderr}")
 
+        # Install project dependencies
+        await self._install_dependencies(repo_path, task)
+
         return repo_path
+
+    async def _install_dependencies(self, repo_path: Path, task: SWEBenchTask) -> None:
+        """Install project dependencies based on repository type.
+
+        Different repositories have different installation methods:
+        - Django: pip install -e . (editable install)
+        - Most Python projects: pip install -e . or pip install -r requirements.txt
+        - Some projects need specific setup commands
+        """
+        logger.info(f"Installing dependencies for {task.repo}...")
+
+        # Check for common dependency files and install accordingly
+        setup_py = repo_path / "setup.py"
+        setup_cfg = repo_path / "setup.cfg"
+        pyproject_toml = repo_path / "pyproject.toml"
+        requirements_txt = repo_path / "requirements.txt"
+        requirements_dev = repo_path / "requirements-dev.txt"
+        requirements_test = repo_path / "requirements-test.txt"
+
+        install_commands: list[list[str]] = []
+
+        # Prefer editable install if setup.py or pyproject.toml exists
+        if setup_py.exists() or pyproject_toml.exists() or setup_cfg.exists():
+            install_commands.append(["pip", "install", "-e", "."])
+        elif requirements_txt.exists():
+            install_commands.append(["pip", "install", "-r", "requirements.txt"])
+
+        # Also install dev/test requirements if they exist
+        if requirements_dev.exists():
+            install_commands.append(["pip", "install", "-r", "requirements-dev.txt"])
+        if requirements_test.exists():
+            install_commands.append(["pip", "install", "-r", "requirements-test.txt"])
+
+        # Run installation commands
+        for cmd in install_commands:
+            logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout for installation
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    f"Dependency installation warning: {result.stderr[:500] if result.stderr else 'unknown error'}"
+                )
+                # Don't fail on installation errors - some repos may have optional deps
+            else:
+                logger.info(f"Successfully ran: {' '.join(cmd)}")
 
     async def _run_agent(
         self, task: SWEBenchTask, repo_path: Path, trace_id: str
