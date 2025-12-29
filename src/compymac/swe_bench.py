@@ -13,7 +13,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
+import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -358,9 +362,9 @@ class SWEBenchRunner:
             if hasattr(self.harness, 'set_trace_context'):
                 self.harness.set_trace_context(trace_context)
 
-        # Phase 1: Setup repository
+        # Phase 1: Setup repository (includes venv creation and dependency installation)
         try:
-            repo_path = await self._setup_repository(task)
+            repo_path, venv_python = await self._setup_repository(task)
         except Exception as e:
             # Clear trace context on failure
             if hasattr(self.harness, 'set_trace_context'):
@@ -384,9 +388,9 @@ class SWEBenchRunner:
 
         elapsed = time.time() - start_time
 
-        # Phase 3: Evaluate patch
+        # Phase 3: Evaluate patch (using venv python for test execution)
         try:
-            test_results = await self._evaluate_patch(repo_path, task, patch_generated)
+            test_results = await self._evaluate_patch(repo_path, task, patch_generated, venv_python)
         except Exception as e:
             test_results = TestResults(
                 fail_to_pass=dict.fromkeys(task.fail_to_pass, False),
@@ -459,9 +463,24 @@ class SWEBenchRunner:
         results = await asyncio.gather(*[run_with_semaphore(t) for t in tasks])
         return list(results)
 
-    async def _setup_repository(self, task: SWEBenchTask) -> Path:
-        """Clone repo, checkout correct version, and install dependencies."""
+    async def _setup_repository(self, task: SWEBenchTask) -> tuple[Path, Path]:
+        """Clone repo, checkout correct version, create venv, and install dependencies.
+
+        Returns:
+            Tuple of (repo_path, venv_python_path)
+        """
         repo_path = self.workspace_base / task.instance_id
+
+        # Force cleanup if directory already exists (from previous failed run)
+        if repo_path.exists():
+            # Safety check: only delete if it's inside workspace_base
+            try:
+                repo_path.resolve().relative_to(self.workspace_base.resolve())
+                logger.info(f"Cleaning up existing directory: {repo_path}")
+                shutil.rmtree(repo_path, ignore_errors=True)
+            except ValueError as e:
+                raise RuntimeError(f"Refusing to delete {repo_path} - not inside workspace_base") from e
+
         repo_path.mkdir(parents=True, exist_ok=True)
 
         # Clone repo
@@ -493,60 +512,182 @@ class SWEBenchRunner:
             if apply_result.returncode != 0:
                 raise RuntimeError(f"Test patch apply failed: {apply_result.stderr}")
 
-        # Install project dependencies
-        await self._install_dependencies(repo_path, task)
+        # Create isolated virtual environment to avoid global environment contamination
+        venv_path = repo_path / ".venv"
+        logger.info(f"Creating isolated virtual environment at {venv_path}")
+        venv_result = subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_path)],
+            capture_output=True,
+            text=True,
+        )
+        if venv_result.returncode != 0:
+            raise RuntimeError(f"Venv creation failed: {venv_result.stderr}")
 
-        return repo_path
+        # Get path to venv python
+        venv_python = venv_path / "bin" / "python"
+        if not venv_python.exists():
+            # Windows fallback
+            venv_python = venv_path / "Scripts" / "python.exe"
 
-    async def _install_dependencies(self, repo_path: Path, task: SWEBenchTask) -> None:
-        """Install project dependencies based on repository type.
+        if not venv_python.exists():
+            raise RuntimeError(f"Venv python not found at {venv_python}")
 
-        Different repositories have different installation methods:
-        - Django: pip install -e . (editable install)
-        - Most Python projects: pip install -e . or pip install -r requirements.txt
-        - Some projects need specific setup commands
+        # Install project dependencies using venv python
+        await self._install_dependencies(repo_path, task, venv_python)
+
+        return repo_path, venv_python
+
+    async def _install_dependencies(
+        self, repo_path: Path, task: SWEBenchTask, venv_python: Path
+    ) -> None:
+        """Install project dependencies in isolated virtual environment.
+
+        Uses a robust installation ladder:
+        1. Upgrade pip/setuptools/wheel
+        2. Try test extras if pyproject.toml exists
+        3. Install requirements files
+        4. Always ensure pytest is installed
+        5. Handle repo-specific build requirements (e.g., scikit-learn)
+        6. Verify installation
         """
-        logger.info(f"Installing dependencies for {task.repo}...")
+        logger.info(f"Installing dependencies for {task.repo} using {venv_python}...")
 
-        # Check for common dependency files and install accordingly
+        # 1. Upgrade pip/setuptools/wheel first
+        logger.info("Upgrading pip, setuptools, wheel...")
+        subprocess.run(
+            [str(venv_python), "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Check for common dependency files
         setup_py = repo_path / "setup.py"
         setup_cfg = repo_path / "setup.cfg"
         pyproject_toml = repo_path / "pyproject.toml"
         requirements_txt = repo_path / "requirements.txt"
-        requirements_dev = repo_path / "requirements-dev.txt"
-        requirements_test = repo_path / "requirements-test.txt"
 
-        install_commands: list[list[str]] = []
+        # 2. Try test extras if pyproject.toml or setup.py exists
+        installed_editable = False
+        if pyproject_toml.exists() or setup_py.exists() or setup_cfg.exists():
+            # Try common test extra names
+            for extra in ["test", "dev", "tests", "testing", "all"]:
+                logger.info(f"Trying: pip install -e '.[{extra}]'")
+                result = subprocess.run(
+                    [str(venv_python), "-m", "pip", "install", "-e", f".[{extra}]"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode == 0:
+                    logger.info(f"Successfully installed with [{extra}] extra")
+                    installed_editable = True
+                    break
 
-        # Prefer editable install if setup.py or pyproject.toml exists
-        if setup_py.exists() or pyproject_toml.exists() or setup_cfg.exists():
-            install_commands.append(["pip", "install", "-e", "."])
-        elif requirements_txt.exists():
-            install_commands.append(["pip", "install", "-r", "requirements.txt"])
+            # Fallback to plain editable install
+            if not installed_editable:
+                logger.info("Trying: pip install -e .")
+                result = subprocess.run(
+                    [str(venv_python), "-m", "pip", "install", "-e", "."],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode == 0:
+                    installed_editable = True
+                else:
+                    logger.warning(f"Editable install failed: {result.stderr[:300]}")
 
-        # Also install dev/test requirements if they exist
-        if requirements_dev.exists():
-            install_commands.append(["pip", "install", "-r", "requirements-dev.txt"])
-        if requirements_test.exists():
-            install_commands.append(["pip", "install", "-r", "requirements-test.txt"])
+        # 3. Install requirements files if they exist
+        req_files = [
+            "requirements.txt",
+            "requirements-dev.txt",
+            "requirements-test.txt",
+            "dev-requirements.txt",
+            "test-requirements.txt",
+            "requirements/dev.txt",
+            "requirements/test.txt",
+        ]
+        for req_file in req_files:
+            req_path = repo_path / req_file
+            if req_path.exists():
+                logger.info(f"Installing {req_file}...")
+                subprocess.run(
+                    [str(venv_python), "-m", "pip", "install", "-r", str(req_path)],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
 
-        # Run installation commands
-        for cmd in install_commands:
-            logger.info(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(
-                cmd,
+        # If no setup.py/pyproject.toml and only requirements.txt
+        if not installed_editable and requirements_txt.exists():
+            logger.info("Installing requirements.txt...")
+            subprocess.run(
+                [str(venv_python), "-m", "pip", "install", "-r", "requirements.txt"],
                 cwd=str(repo_path),
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minute timeout for installation
+                timeout=300,
             )
-            if result.returncode != 0:
-                logger.warning(
-                    f"Dependency installation warning: {result.stderr[:500] if result.stderr else 'unknown error'}"
+
+        # 4. ALWAYS ensure pytest is installed for test execution
+        logger.info("Ensuring pytest is installed...")
+        subprocess.run(
+            [str(venv_python), "-m", "pip", "install", "pytest", "pytest-xdist"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # 5. Handle repo-specific build requirements
+        repo_lower = task.repo.lower()
+
+        # Scikit-learn needs C extension compilation
+        if "scikit-learn" in repo_lower or "sklearn" in repo_lower:
+            logger.info("Building scikit-learn C extensions...")
+            if setup_py.exists():
+                subprocess.run(
+                    [str(venv_python), "setup.py", "build_ext", "--inplace"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
                 )
-                # Don't fail on installation errors - some repos may have optional deps
-            else:
-                logger.info(f"Successfully ran: {' '.join(cmd)}")
+            # Also try installing build dependencies
+            subprocess.run(
+                [str(venv_python), "-m", "pip", "install", "numpy", "scipy", "cython"],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        # Matplotlib/seaborn need matplotlib
+        if "matplotlib" in repo_lower or "seaborn" in repo_lower:
+            logger.info("Installing matplotlib for visualization repos...")
+            subprocess.run(
+                [str(venv_python), "-m", "pip", "install", "matplotlib", "numpy", "pandas"],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        # 6. Verify pytest installation
+        verify = subprocess.run(
+            [str(venv_python), "-c", "import pytest; print(f'pytest {pytest.__version__}')"],
+            capture_output=True,
+            text=True,
+        )
+        if verify.returncode != 0:
+            logger.warning(f"pytest verification failed: {verify.stderr}")
+        else:
+            logger.info(f"Verified: {verify.stdout.strip()}")
 
     async def _run_agent(
         self, task: SWEBenchTask, repo_path: Path, trace_id: str
@@ -860,33 +1001,54 @@ DO NOT repeat the same approach that failed.
         return False
 
     async def _verify_tests(
-        self, repo_path: Path, task: SWEBenchTask
+        self, repo_path: Path, task: SWEBenchTask, venv_python: Path | None = None
     ) -> dict[str, Any]:
-        """Run fail_to_pass tests and return verification results."""
+        """Run fail_to_pass tests and return verification results.
+
+        Args:
+            repo_path: Path to the repository
+            task: The SWE-bench task
+            venv_python: Path to venv python interpreter
+
+        Returns:
+            Dict with all_passed, passed_tests, failed_tests, and harness_errors
+        """
         failed_tests = []
         passed_tests = []
+        harness_errors = []
 
         for test in task.fail_to_pass:
-            passed = await self._run_test(repo_path, test, log_output=True, task=task)
+            passed, is_harness_error = await self._run_test(
+                repo_path, test, log_output=True, task=task, venv_python=venv_python
+            )
             if passed:
                 passed_tests.append(test)
             else:
                 failed_tests.append(test)
+                if is_harness_error:
+                    harness_errors.append(test)
 
         return {
             "all_passed": len(failed_tests) == 0 and len(passed_tests) > 0,
             "passed_tests": passed_tests,
             "failed_tests": failed_tests,
+            "harness_errors": harness_errors,
         }
 
     async def _evaluate_patch(
-        self, repo_path: Path, task: SWEBenchTask, patch: str
+        self, repo_path: Path, task: SWEBenchTask, patch: str, venv_python: Path
     ) -> TestResults:
-        """Run tests on the current repo state.
+        """Run tests on the current repo state using isolated venv.
 
         Note: The agent already made changes to the working tree, so we don't
         need to apply the patch again. We just run tests on the current state.
         The patch parameter is kept for logging/verification purposes.
+
+        Args:
+            repo_path: Path to the repository
+            task: The SWE-bench task
+            patch: The generated patch (for logging only)
+            venv_python: Path to the venv python interpreter
         """
         if not patch:
             return TestResults(
@@ -902,21 +1064,25 @@ DO NOT repeat the same approach that failed.
         # Run fail_to_pass tests
         fail_to_pass_results = {}
         for test in task.fail_to_pass:
-            passed = await self._run_test(repo_path, test, task=task)
+            passed, is_harness_error = await self._run_test(repo_path, test, task=task, venv_python=venv_python)
             fail_to_pass_results[test] = passed
+            if is_harness_error:
+                logger.warning(f"Harness error detected for {test} - infrastructure issue, not agent failure")
 
         # Run pass_to_pass tests
         pass_to_pass_results = {}
         for test in task.pass_to_pass:
-            passed = await self._run_test(repo_path, test, task=task)
+            passed, is_harness_error = await self._run_test(repo_path, test, task=task, venv_python=venv_python)
             pass_to_pass_results[test] = passed
+            if is_harness_error:
+                logger.warning(f"Harness error detected for {test} - infrastructure issue, not agent failure")
 
         return TestResults(
             fail_to_pass=fail_to_pass_results,
             pass_to_pass=pass_to_pass_results,
         )
 
-    def _convert_test_name(self, test_name: str) -> str:
+    def _convert_test_name(self, test_name: str) -> str | None:
         """Convert SWE-bench test name format to standard test identifier.
 
         SWE-bench uses format: "method_name (module.path.ClassName)"
@@ -926,10 +1092,8 @@ DO NOT repeat the same approach that failed.
             test_name: Test name in SWE-bench format
 
         Returns:
-            Test name in standard format (module.ClassName.method)
+            Test name in standard format (module.ClassName.method), or None if invalid
         """
-        import re
-
         # Check if it's in SWE-bench format: "method_name (module.ClassName)"
         match = re.match(r'^(\w+)\s+\(([^)]+)\)$', test_name)
         if match:
@@ -938,12 +1102,26 @@ DO NOT repeat the same approach that failed.
             # Convert to standard format: module.ClassName.method_name
             return f"{module_class}.{method_name}"
 
-        # Already in standard format or unknown format, return as-is
+        # Check if it's already in valid module.path format (dotted identifier)
+        # Valid: "tests.test_foo.TestClass.test_method" or "test_foo::TestClass::test_method"
+        if re.match(r'^[\w./:]+$', test_name):
+            return test_name
+
+        # Check for descriptive test names that aren't valid module paths
+        # These are Django's descriptive test names like "An exception is setUp()..."
+        # They contain spaces, special chars, or start with articles/descriptions
+        if ' ' in test_name or test_name[0].isupper() and not re.match(r'^[A-Z][a-z]+[A-Z]', test_name):
+            # Looks like a descriptive name, not a module path
+            logger.warning(f"Invalid test name format (descriptive, not module path): {test_name[:50]}...")
+            return None
+
+        # Unknown format - return as-is and let the test runner handle it
         return test_name
 
     def _get_test_command(
-        self, repo_path: Path, test_name: str, task: SWEBenchTask | None = None
-    ) -> tuple[list[str], str]:
+        self, repo_path: Path, test_name: str | None, task: SWEBenchTask | None = None,
+        venv_python: Path | None = None
+    ) -> tuple[list[str], str] | None:
         """Get the appropriate test command for the repository.
 
         Different repositories use different test runners:
@@ -952,12 +1130,20 @@ DO NOT repeat the same approach that failed.
 
         Args:
             repo_path: Path to the repository
-            test_name: Test name (already converted to standard format)
+            test_name: Test name (already converted to standard format), or None if invalid
             task: Optional task for repo detection
+            venv_python: Path to venv python interpreter (uses "python" if not provided)
 
         Returns:
-            Tuple of (command list, working directory)
+            Tuple of (command list, working directory), or None if test_name is invalid
         """
+        # If test_name is None (invalid format), skip this test
+        if test_name is None:
+            return None
+
+        # Use venv python if provided, otherwise fall back to system python
+        python_cmd = str(venv_python) if venv_python else "python"
+
         # Detect Django repository
         is_django = (
             (task and "django" in task.repo.lower())
@@ -968,7 +1154,7 @@ DO NOT repeat the same approach that failed.
             # Django uses its own test runner
             # Format: python tests/runtests.py module.ClassName.method_name
             return (
-                ["python", "tests/runtests.py", test_name, "--verbosity=1"],
+                [python_cmd, "tests/runtests.py", test_name, "--verbosity=1"],
                 str(repo_path),
             )
 
@@ -994,20 +1180,63 @@ DO NOT repeat the same approach that failed.
                 if test_file.exists():
                     pytest_name = f"{test_file}::{class_name}::{method_name}"
                     return (
-                        ["python", "-m", "pytest", pytest_name, "-v", "--tb=short"],
+                        [python_cmd, "-m", "pytest", pytest_name, "-v", "--tb=short"],
                         str(repo_path),
                     )
 
         # Fallback: try running pytest with the test name as-is
         return (
-            ["python", "-m", "pytest", test_name, "-v", "--tb=short"],
+            [python_cmd, "-m", "pytest", test_name, "-v", "--tb=short"],
             str(repo_path),
         )
 
+    def _classify_test_failure(self, stdout: str, stderr: str, returncode: int) -> bool:
+        """Classify whether a test failure is a harness/infrastructure error.
+
+        Harness errors are infrastructure issues (missing deps, import errors, etc.)
+        that should be distinguished from actual test failures.
+
+        Args:
+            stdout: Test stdout
+            stderr: Test stderr
+            returncode: Test return code
+
+        Returns:
+            True if this is a harness error, False if it's a real test failure
+        """
+        combined = (stdout + stderr).lower()
+
+        # Patterns that indicate harness/infrastructure errors
+        harness_error_patterns = [
+            "no module named",
+            "modulenotfounderror",
+            "importerror",
+            "cannot import name",
+            "error processing line",  # .pth file corruption
+            "attributeerror: 'nonetype' object has no attribute 'loader'",  # matplotlib .pth
+            "pytest: error: unrecognized arguments",
+            "error: invalid choice",
+            "command not found",
+            "no such file or directory",
+            "permission denied",
+            "syntaxerror",
+            "indentationerror",
+            "error collecting",  # pytest collection error
+            "collection error",
+            "fixture.*not found",
+            "plugin.*not found",
+        ]
+
+        for pattern in harness_error_patterns:
+            if pattern in combined:
+                return True
+
+        return False
+
     async def _run_test(
         self, repo_path: Path, test_name: str, log_output: bool = True,
-        task: SWEBenchTask | None = None
-    ) -> bool:
+        task: SWEBenchTask | None = None, venv_python: Path | None = None
+    ) -> tuple[bool, bool]:
         """Run a single test and return whether it passed.
 
         Args:
@@ -1015,18 +1244,34 @@ DO NOT repeat the same approach that failed.
             test_name: Name of the test to run (SWE-bench format)
             log_output: Whether to log test output for debugging
             task: Optional task for repo-specific test runner detection
+            venv_python: Path to venv python interpreter
 
         Returns:
-            True if the test passed, False otherwise
+            Tuple of (passed: bool, is_harness_error: bool)
+            - passed: True if the test passed
+            - is_harness_error: True if failure was due to infrastructure issue
         """
         # Convert SWE-bench test name format to standard format
         converted_name = self._convert_test_name(test_name)
 
         # Get the appropriate test command for this repo
-        cmd, cwd = self._get_test_command(repo_path, converted_name, task)
+        cmd_result = self._get_test_command(repo_path, converted_name, task, venv_python)
+
+        # If test name was invalid, skip this test
+        if cmd_result is None:
+            logger.warning(f"Skipping test with invalid name format: {test_name}")
+            # Return False (not passed) but True (harness error) since it's an infrastructure issue
+            return False, True
+
+        cmd, cwd = cmd_result
 
         logger.info(f"Running test: {test_name} -> {converted_name}")
         logger.info(f"Command: {' '.join(cmd)} (cwd: {cwd})")
+
+        # Set up environment to avoid plugin conflicts and global env contamination
+        test_env = os.environ.copy()
+        test_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"  # Prevent third-party plugin conflicts
+        test_env["PYTHONNOUSERSITE"] = "1"  # Ignore user site-packages
 
         try:
             result = subprocess.run(
@@ -1035,6 +1280,7 @@ DO NOT repeat the same approach that failed.
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minute timeout per test
+                env=test_env,
             )
             returncode = result.returncode
             stdout = result.stdout or "(empty)"
@@ -1049,6 +1295,11 @@ DO NOT repeat the same approach that failed.
             stdout = "(exception - no stdout)"
             stderr = str(e)
             logger.warning(f"Test execution failed: {test_name} - {e}")
+
+        # Classify the failure type
+        is_harness_error = False
+        if returncode != 0:
+            is_harness_error = self._classify_test_failure(stdout, stderr, returncode)
 
         # Save logs to a stable location OUTSIDE repo_path so they survive cleanup
         # Use workspace_base/logs/{instance_id}/ instead of repo_path/.swebench_logs/
@@ -1065,18 +1316,22 @@ DO NOT repeat the same approach that failed.
             f.write(f"Converted: {converted_name}\n")
             f.write(f"Command: {' '.join(cmd)}\n")
             f.write(f"Working dir: {cwd}\n")
-            f.write(f"Return code: {returncode}\n\n")
+            f.write(f"Return code: {returncode}\n")
+            f.write(f"Is harness error: {is_harness_error}\n\n")
             f.write("=== STDOUT ===\n")
             f.write(stdout)
             f.write("\n=== STDERR ===\n")
             f.write(stderr)
 
         if returncode != 0:
-            logger.warning(f"Test failed: {test_name} (return code: {returncode})")
+            if is_harness_error:
+                logger.warning(f"HARNESS ERROR: {test_name} (infrastructure issue, not agent failure)")
+            else:
+                logger.warning(f"Test failed: {test_name} (return code: {returncode})")
             # Log first 500 chars of stderr for debugging
             logger.warning(f"Stderr: {stderr[:500]}")
 
-        return returncode == 0
+        return returncode == 0, is_harness_error
 
     async def _cleanup_repository(self, repo_path: Path) -> None:
         """Clean up repository after task completion."""
