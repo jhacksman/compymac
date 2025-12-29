@@ -1028,17 +1028,33 @@ DO NOT repeat the same approach that failed.
         logger.info(f"Running test: {test_name} -> {converted_name}")
         logger.info(f"Command: {' '.join(cmd)} (cwd: {cwd})")
 
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout per test
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout per test
+            )
+            returncode = result.returncode
+            stdout = result.stdout or "(empty)"
+            stderr = result.stderr or "(empty)"
+        except subprocess.TimeoutExpired as e:
+            returncode = -1
+            stdout = e.stdout.decode() if e.stdout else "(timeout - no stdout)"
+            stderr = e.stderr.decode() if e.stderr else "(timeout - no stderr)"
+            logger.warning(f"Test timed out: {test_name}")
+        except Exception as e:
+            returncode = -1
+            stdout = "(exception - no stdout)"
+            stderr = str(e)
+            logger.warning(f"Test execution failed: {test_name} - {e}")
 
-        # Always log test output for debugging (not just on failure)
-        log_dir = repo_path / ".swebench_logs"
-        log_dir.mkdir(exist_ok=True)
+        # Save logs to a stable location OUTSIDE repo_path so they survive cleanup
+        # Use workspace_base/logs/{instance_id}/ instead of repo_path/.swebench_logs/
+        instance_id = task.instance_id if task else "unknown"
+        log_dir = self.workspace_base / "logs" / instance_id
+        log_dir.mkdir(parents=True, exist_ok=True)
 
         # Sanitize test name for filename
         safe_name = test_name.replace("/", "_").replace("::", "__").replace(" ", "_").replace("(", "").replace(")", "")
@@ -1049,18 +1065,18 @@ DO NOT repeat the same approach that failed.
             f.write(f"Converted: {converted_name}\n")
             f.write(f"Command: {' '.join(cmd)}\n")
             f.write(f"Working dir: {cwd}\n")
-            f.write(f"Return code: {result.returncode}\n\n")
+            f.write(f"Return code: {returncode}\n\n")
             f.write("=== STDOUT ===\n")
-            f.write(result.stdout or "(empty)\n")
+            f.write(stdout)
             f.write("\n=== STDERR ===\n")
-            f.write(result.stderr or "(empty)\n")
+            f.write(stderr)
 
-        if result.returncode != 0:
-            logger.warning(f"Test failed: {test_name} (return code: {result.returncode})")
-            if result.stderr:
-                logger.warning(f"Stderr: {result.stderr[:500]}")
+        if returncode != 0:
+            logger.warning(f"Test failed: {test_name} (return code: {returncode})")
+            # Log first 500 chars of stderr for debugging
+            logger.warning(f"Stderr: {stderr[:500]}")
 
-        return result.returncode == 0
+        return returncode == 0
 
     async def _cleanup_repository(self, repo_path: Path) -> None:
         """Clean up repository after task completion."""
