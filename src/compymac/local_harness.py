@@ -2235,6 +2235,8 @@ class LocalHarness(Harness):
             # Uses centralized validate_completion_reasoning() for consistency
             reasoning_valid, reasoning_msg = phase_state.validate_completion_reasoning()
             if not reasoning_valid:
+                # Set the trigger so the next think() call will be tagged correctly
+                self._last_thinking_trigger = "before_claiming_completion"
                 return f"[REASONING VALIDATION FAILED] {reasoning_msg}"
 
             # V3 workflow: complete is allowed from TARGET_FIX_VERIFICATION phase
@@ -2332,13 +2334,15 @@ class LocalHarness(Harness):
         # Before allowing UNDERSTANDING → FIX transition, require thinking
         if state.current_phase == SWEPhase.UNDERSTANDING:
             if not state.has_recent_thinking("before_advancing_to_fix", within_seconds=300):
+                # Set the trigger so the next think() call will be tagged correctly
+                self._last_thinking_trigger = "before_advancing_to_fix"
                 return (
-                    "[THINKING REQUIRED] Before advancing to FIX phase, you must use <think> "
+                    "[THINKING REQUIRED] Before advancing to FIX phase, you must call the think() tool "
                     "to verify you have sufficient context. Questions to consider:\n"
                     "- Have you found ALL locations that need editing?\n"
                     "- Do you understand the root cause?\n"
                     "- Have you checked references, types, and dependencies?\n\n"
-                    "Use the think tool with your reasoning, then call advance_phase again."
+                    "Call think() with your reasoning, then call advance_phase again."
                 )
 
         # Update state with provided outputs
@@ -3431,8 +3435,8 @@ class LocalHarness(Harness):
         if not api_key:
             return "Error: LLM_API_KEY or VENICE_API_KEY environment variable not set"
 
-        # Use Venice.ai API with qwen3-next-80b model for reasoning
-        model = os.environ.get("LLM_MODEL", "qwen3-next-80b")
+        # Use Venice.ai API with qwen3-235b-a22b-instruct-2507 model for reasoning
+        model = os.environ.get("LLM_MODEL", "qwen3-235b-a22b-instruct-2507")
 
         system_prompt = """You are a smart friend helping with complex reasoning and debugging.
 You have expertise in software engineering, debugging, and problem-solving.

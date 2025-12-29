@@ -40,7 +40,7 @@ class LLMConfig:
 
         Use this for SWE-bench and other tasks where consistent tool calling
         is critical. Temperature=0 reduces sampling variance and improves
-        tool call reliability with models like qwen3-next-80b.
+        tool call reliability with models like qwen3-235b-a22b-instruct-2507.
         """
         return cls(
             base_url=os.getenv("LLM_BASE_URL", "http://localhost:8000/v1"),
