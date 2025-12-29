@@ -513,7 +513,7 @@ class SWEPhaseState:
     def validate_completion_reasoning(self) -> tuple[bool, str]:
         """V5: Validate agent has thought through completion checklist.
 
-        This method checks that the agent has used <think> to self-audit
+        This method checks that the agent has used the think() tool to self-audit
         before claiming completion. It's part of the V5 reasoning validation
         that complements the V4 evidence-based gating.
 
@@ -522,13 +522,13 @@ class SWEPhaseState:
         """
         if not self.has_recent_thinking("before_claiming_completion", within_seconds=600):
             return False, (
-                "You must use <think> to self-audit before claiming completion. "
+                "You must call the think() tool to self-audit before claiming completion. "
                 "Required checklist:\n"
                 "1. Did tests actually pass (evidence-based gating confirmed this)?\n"
                 "2. Did you check for regressions (pass_to_pass tests)?\n"
                 "3. Did you complete ALL parts of the task?\n"
                 "4. Did you verify all edited locations?\n\n"
-                "Use <think> to verify these points, then call complete() again."
+                "Call think() to verify these points, then call complete() again."
             )
 
         return True, ""
