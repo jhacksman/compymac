@@ -908,12 +908,13 @@ class HypothesisArbiter:
         prompt += "Which approach is best and why? Respond with the approach number (1, 2, etc.) and reasoning."
 
         try:
-            from compymac.types import Message
-            response = self.llm_client.chat([Message(role="user", content=prompt)])
+            response = self.llm_client.chat([{"role": "user", "content": prompt}])
+            # response is a ChatResponse object, access .content for the text
+            response_text = response.content if hasattr(response, 'content') else str(response)
             for i, r in enumerate(results):
-                if str(i + 1) in response[:50]:
-                    return r, f"LLM selected approach {i+1}: {response[:200]}"
-            return results[0], f"LLM response unclear, defaulting to first: {response[:100]}"
+                if str(i + 1) in response_text[:50]:
+                    return r, f"LLM selected approach {i+1}: {response_text[:200]}"
+            return results[0], f"LLM response unclear, defaulting to first: {response_text[:100]}"
         except Exception as e:
             return self._select_by_consensus(results), f"LLM judge failed ({e}), using consensus"
 
@@ -1122,13 +1123,14 @@ another on comprehensive refactoring, another on a specific technique."""
         try:
             import json
 
-            from compymac.types import Message
-            response = self.llm_client.chat([Message(role="user", content=prompt)])
+            response = self.llm_client.chat([{"role": "user", "content": prompt}])
+            # response is a ChatResponse object, access .content for the text
+            response_text = response.content if hasattr(response, 'content') else str(response)
 
-            json_start = response.find("[")
-            json_end = response.rfind("]") + 1
+            json_start = response_text.find("[")
+            json_end = response_text.rfind("]") + 1
             if json_start >= 0 and json_end > json_start:
-                approaches = json.loads(response[json_start:json_end])
+                approaches = json.loads(response_text[json_start:json_end])
                 return approaches[:num_approaches]
         except Exception:
             pass
