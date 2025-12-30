@@ -967,8 +967,8 @@ python scripts/test_memory_integration.py
 | M1: Storage Backend Abstraction | COMPLETE | 4fb5156 | PASS | StorageBackend ABC + SQLiteBackend |
 | M2: PostgreSQL Backend | COMPLETE | 099e68e | PASS | PostgresBackend + docker-compose.dev.yml |
 | M3: KnowledgeStore Core | COMPLETE | 65fe258 | PASS | MemoryUnit, RetrievalResult, KnowledgeStore |
-| M4: Venice.ai Embedder | COMPLETE | (this commit) | PASS | VeniceEmbedder with caching, 1024-dim |
-| M5: Hybrid Retriever | NOT STARTED | - | - | - |
+| M4: Venice.ai Embedder | COMPLETE | 96e78fc | PASS | VeniceEmbedder with caching, 1024-dim |
+| M5: Hybrid Retriever | COMPLETE | (this commit) | PASS | Sparse + dense + RRF merge |
 | M6: Document Ingestion Pipeline | NOT STARTED | - | - | - |
 | M7: Secret Scanner | NOT STARTED | - | - | - |
 | M8: Librarian Tool | NOT STARTED | - | - | - |
