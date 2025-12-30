@@ -14,7 +14,7 @@ from typing import Any
 class SQLiteBackend:
     """
     SQLite storage backend implementation.
-    
+
     Thread-safe via connection-per-thread pattern.
     Does not support vector search or full-text search natively.
     """
@@ -22,23 +22,23 @@ class SQLiteBackend:
     def __init__(self, db_path: Path | str):
         """
         Initialize SQLite backend.
-        
+
         Args:
             db_path: Path to SQLite database file (created if doesn't exist)
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Thread-local storage for connections
         self._local = threading.local()
-        
+
         # Create initial connection to verify path is valid
         self._get_connection()
 
     def _get_connection(self) -> sqlite3.Connection:
         """
         Get thread-local database connection.
-        
+
         Returns:
             SQLite connection for current thread
         """
@@ -53,7 +53,7 @@ class SQLiteBackend:
     def execute(self, query: str, params: tuple = ()) -> None:
         """
         Execute a write query.
-        
+
         Args:
             query: SQL query string with ? placeholders
             params: Tuple of parameter values
@@ -66,7 +66,7 @@ class SQLiteBackend:
     def execute_many(self, query: str, params_list: list[tuple]) -> None:
         """
         Execute a write query multiple times with different parameters.
-        
+
         Args:
             query: SQL query string with ? placeholders
             params_list: List of parameter tuples
@@ -79,11 +79,11 @@ class SQLiteBackend:
     def fetch_one(self, query: str, params: tuple = ()) -> dict[str, Any] | None:
         """
         Fetch a single row as a dictionary.
-        
+
         Args:
             query: SQL query string with ? placeholders
             params: Tuple of parameter values
-            
+
         Returns:
             Dictionary with column names as keys, or None if no row found
         """
@@ -98,11 +98,11 @@ class SQLiteBackend:
     def fetch_all(self, query: str, params: tuple = ()) -> list[dict[str, Any]]:
         """
         Fetch all matching rows as a list of dictionaries.
-        
+
         Args:
             query: SQL query string with ? placeholders
             params: Tuple of parameter values
-            
+
         Returns:
             List of dictionaries with column names as keys
         """
@@ -115,7 +115,7 @@ class SQLiteBackend:
     def supports_vector_search(self) -> bool:
         """
         SQLite does not support vector search natively.
-        
+
         Returns:
             False
         """
@@ -125,7 +125,7 @@ class SQLiteBackend:
         """
         SQLite has FTS5 but we don't use it by default.
         Could be extended to use FTS5 in the future.
-        
+
         Returns:
             False (for now - basic LIKE queries used instead)
         """
