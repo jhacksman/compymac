@@ -561,8 +561,22 @@ class FileWriteVerifier(Verifier):
 class BrowserActionVerifier(Verifier):
     """Verifies browser automation actions."""
 
-    def create_contract(self, action: str, **kwargs: Any) -> ToolContract:
-        """Create contract for browser action."""
+    def __init__(self, default_action: str = "navigate"):
+        """Initialize with a default action for when called without explicit action."""
+        self.default_action = default_action
+
+    def create_contract(self, action: str | None = None, **kwargs: Any) -> ToolContract:
+        """Create contract for browser action.
+
+        Args:
+            action: The browser action (click, type, navigate, etc.).
+                   If None, uses the default_action set during initialization.
+            **kwargs: Action-specific arguments (url, devinid, content, etc.)
+        """
+        # Use default action if not provided (happens when called via VerificationEngine)
+        if action is None:
+            action = self.default_action
+
         contract = ToolContract(
             tool_name=f"browser_{action}",
             arguments=kwargs,
@@ -679,9 +693,13 @@ class VerificationEngine:
             "file_edit": FileEditVerifier(),
             "Write": FileWriteVerifier(),
             "file_write": FileWriteVerifier(),
-            "browser_click": BrowserActionVerifier(),
-            "browser_type": BrowserActionVerifier(),
-            "browser_navigate": BrowserActionVerifier(),
+            # Each browser tool gets its own verifier with the correct default action
+            "browser_click": BrowserActionVerifier(default_action="click"),
+            "browser_type": BrowserActionVerifier(default_action="type"),
+            "browser_navigate": BrowserActionVerifier(default_action="navigate"),
+            "browser_view": BrowserActionVerifier(default_action="view"),
+            "browser_scroll": BrowserActionVerifier(default_action="scroll"),
+            "browser_screenshot": BrowserActionVerifier(default_action="screenshot"),
         }
 
     def get_verifier(self, tool_name: str) -> Verifier | None:
