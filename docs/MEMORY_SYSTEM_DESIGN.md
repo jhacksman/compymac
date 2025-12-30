@@ -965,8 +965,8 @@ python scripts/test_memory_integration.py
 |-----------|--------|-----------|-------|-------|
 | M0: Verify Instrumentation | COMPLETE | 0a4805b | PASS | See M0 Findings below |
 | M1: Storage Backend Abstraction | COMPLETE | 4fb5156 | PASS | StorageBackend ABC + SQLiteBackend |
-| M2: PostgreSQL Backend | COMPLETE | (this commit) | PASS | PostgresBackend + docker-compose.dev.yml |
-| M3: KnowledgeStore Core | NOT STARTED | - | - | - |
+| M2: PostgreSQL Backend | COMPLETE | 099e68e | PASS | PostgresBackend + docker-compose.dev.yml |
+| M3: KnowledgeStore Core | COMPLETE | (this commit) | PASS | MemoryUnit, RetrievalResult, KnowledgeStore |
 | M4: Venice.ai Embedder | NOT STARTED | - | - | - |
 | M5: Hybrid Retriever | NOT STARTED | - | - | - |
 | M6: Document Ingestion Pipeline | NOT STARTED | - | - | - |
