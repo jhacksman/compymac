@@ -963,7 +963,7 @@ python scripts/test_memory_integration.py
 
 | Milestone | Status | PR/Commit | Tests | Notes |
 |-----------|--------|-----------|-------|-------|
-| M0: Verify Instrumentation | NOT STARTED | - | - | - |
+| M0: Verify Instrumentation | COMPLETE | 0a4805b | PASS | See M0 Findings below |
 | M1: Storage Backend Abstraction | NOT STARTED | - | - | - |
 | M2: PostgreSQL Backend | NOT STARTED | - | - | - |
 | M3: KnowledgeStore Core | NOT STARTED | - | - | - |
@@ -973,6 +973,55 @@ python scripts/test_memory_integration.py
 | M7: Secret Scanner | NOT STARTED | - | - | - |
 | M8: Librarian Tool | NOT STARTED | - | - | - |
 | M9: Integration Testing | NOT STARTED | - | - | - |
+
+---
+
+## M0 Findings (2025-12-30)
+
+### Verified Working
+
+1. **TraceStore Infrastructure** - SQLite-based trace storage works correctly
+   - `create_trace_store()` creates database and artifact store
+   - `TraceContext` provides span management API
+   - Spans are stored as START/END event pairs in `trace_events` table
+
+2. **Artifact Storage** - Content-addressed blob storage works
+   - Artifacts stored with SHA-256 hash as ID
+   - Sharded directory structure (e.g., `ab/abcd1234...`)
+   - Deduplication by hash
+
+3. **Agent Loop Instrumentation** (`src/compymac/agent_loop.py`)
+   - Agent turn spans: lines 147-159, 303-308
+   - LLM input artifacts: lines 203-214
+   - LLM call spans: lines 216-225
+   - LLM output artifacts: lines 244-264
+   - Full request/response capture including token usage
+
+4. **Harness Tool Instrumentation** (`src/compymac/local_harness.py`)
+   - Tool call spans: lines 5473-5612
+   - Tool input artifacts: lines 5482-5498
+   - Tool output artifacts: stored on success
+   - Error handling with span status
+
+### Acceptance Test Results
+
+```
+trace_events count: 4 (for 1 LLM call)
+artifacts count: 2 (input + output)
+Event types: span_start (agent_turn), span_start (llm_call), span_end, span_end
+Artifact files on disk: 2
+```
+
+### Gaps Identified
+
+1. **No automatic trace directory creation** - Must set `trace_base_path` in AgentConfig
+2. **No provenance relations being written** - The `provenance` table exists but `add_provenance()` is not called in agent_loop
+3. **No cognitive events for non-V5 flows** - Only V5 metacognitive flows write to `cognitive_events`
+4. **No secret scanning** - Tool outputs stored without redaction (M7 will address)
+
+### Conclusion
+
+The TraceStore infrastructure is **complete and functional**. The instrumentation in agent_loop.py and local_harness.py captures all LLM calls and tool executions with full input/output artifacts. Ready to proceed with M1 (Storage Backend Abstraction).
 
 ---
 
