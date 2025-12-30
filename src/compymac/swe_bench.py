@@ -689,6 +689,82 @@ class SWEBenchRunner:
         else:
             logger.info(f"Verified: {verify.stdout.strip()}")
 
+        # 7. Verify project can be imported (catches build/compilation issues early)
+        await self._verify_project_import(repo_path, task, venv_python)
+
+    async def _verify_project_import(
+        self, repo_path: Path, task: SWEBenchTask, venv_python: Path
+    ) -> bool:
+        """Verify the project can be imported after installation.
+
+        This catches build/compilation issues early (e.g., scikit-learn needs
+        Cython compilation, astropy needs compiled extensions).
+
+        Args:
+            repo_path: Path to the repository
+            task: The SWE-bench task
+            venv_python: Path to venv python interpreter
+
+        Returns:
+            True if project can be imported, False otherwise
+        """
+        # Determine the main package name from the repo
+        repo_lower = task.repo.lower()
+
+        # Map repo names to import names
+        import_name_map = {
+            "scikit-learn": "sklearn",
+            "django": "django",
+            "sympy": "sympy",
+            "astropy": "astropy",
+            "matplotlib": "matplotlib",
+            "numpy": "numpy",
+            "scipy": "scipy",
+            "pandas": "pandas",
+            "requests": "requests",
+            "flask": "flask",
+            "pytest": "pytest",
+            "sphinx": "sphinx",
+            "pylint": "pylint",
+            "xarray": "xarray",
+        }
+
+        # Find the import name
+        import_name = None
+        for repo_key, pkg_name in import_name_map.items():
+            if repo_key in repo_lower:
+                import_name = pkg_name
+                break
+
+        if not import_name:
+            # Try to guess from repo name
+            parts = task.repo.split("/")
+            if len(parts) >= 2:
+                import_name = parts[1].replace("-", "_").lower()
+
+        if not import_name:
+            logger.info("Could not determine import name, skipping import verification")
+            return True
+
+        logger.info(f"Verifying project import: {import_name}")
+
+        result = subprocess.run(
+            [str(venv_python), "-c", f"import {import_name}; print('{import_name} imported successfully')"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if result.returncode != 0:
+            logger.warning(f"Project import verification FAILED for {import_name}")
+            logger.warning("This may cause 'found no collectors' errors during test execution")
+            logger.warning(f"Error: {result.stderr[:500]}")
+            return False
+        else:
+            logger.info(f"Project import verified: {result.stdout.strip()}")
+            return True
+
     async def _run_agent(
         self, task: SWEBenchTask, repo_path: Path, trace_id: str
     ) -> dict[str, Any]:
@@ -1158,6 +1234,50 @@ DO NOT repeat the same approach that failed.
                 str(repo_path),
             )
 
+        # Detect Sympy repository - uses its own test runner
+        is_sympy = (
+            (task and "sympy" in task.repo.lower())
+            or (repo_path / "sympy" / "__init__.py").exists()
+        )
+
+        if is_sympy:
+            # Sympy uses bin/test or python -m pytest with special handling
+            # Test names are often just function names like "test_ccode_Relational"
+            # We need to find the test file that contains this function
+
+            # If test_name is already in pytest format (path::test), use it directly
+            if "::" in test_name:
+                return (
+                    [python_cmd, "-m", "pytest", test_name, "-v", "--tb=short"],
+                    str(repo_path),
+                )
+
+            # If it's just a function name, try to find it in the test files
+            # Common sympy test locations based on the test_patch
+            if test_name.startswith("test_"):
+                # Search for the test function in common test directories
+                import subprocess
+                search_result = subprocess.run(
+                    ["grep", "-r", "-l", f"def {test_name}", "sympy/"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if search_result.returncode == 0 and search_result.stdout.strip():
+                    # Found the file containing the test
+                    found_test_file = search_result.stdout.strip().split("\n")[0]
+                    return (
+                        [python_cmd, "-m", "pytest", f"{found_test_file}::{test_name}", "-v", "--tb=short"],
+                        str(repo_path),
+                    )
+
+            # Fallback: use sympy's test runner
+            return (
+                [python_cmd, "-m", "pytest", "-k", test_name, "-v", "--tb=short"],
+                str(repo_path),
+            )
+
         # Default to pytest
         # Try to convert module.ClassName.method to pytest format
         # pytest format: path/to/test.py::ClassName::method
@@ -1223,8 +1343,11 @@ DO NOT repeat the same approach that failed.
             "indentationerror",
             "error collecting",  # pytest collection error
             "collection error",
+            "found no collectors",  # pytest can't find test (often due to import errors)
             "fixture.*not found",
             "plugin.*not found",
+            "it seems that scikit-learn has not been built correctly",  # scikit-learn build error
+            "cython",  # Cython compilation issues
         ]
 
         for pattern in harness_error_patterns:
