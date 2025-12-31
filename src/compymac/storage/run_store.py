@@ -101,22 +101,22 @@ class SavedRun:
 class RunStore:
     """
     Persistent storage for agent runs.
-    
+
     This class provides the storage layer for Gap 1: Session Persistence + Resume.
     It saves runs as JSON files in a configurable directory.
-    
+
     Usage:
         store = RunStore("/path/to/runs")
-        
+
         # Save a run
         store.save_run(run_id, session, metadata)
-        
+
         # Load a run
         saved_run = store.load_run(run_id)
-        
+
         # Resume from a run
         session = saved_run.session
-        
+
         # List all runs
         runs = store.list_runs()
     """
@@ -124,7 +124,7 @@ class RunStore:
     def __init__(self, storage_dir: str | Path = "~/.compymac/runs"):
         """
         Initialize the run store.
-        
+
         Args:
             storage_dir: Directory to store run files. Defaults to ~/.compymac/runs
         """
@@ -149,7 +149,7 @@ class RunStore:
     ) -> SavedRun:
         """
         Save a run to persistent storage.
-        
+
         Args:
             run_id: Unique identifier for the run
             session: The session to save
@@ -160,7 +160,7 @@ class RunStore:
             harness_state: Optional harness state to save
             tags: Optional tags for the run
             extra: Optional extra metadata
-            
+
         Returns:
             The saved run object
         """
@@ -198,10 +198,10 @@ class RunStore:
     def load_run(self, run_id: str) -> SavedRun | None:
         """
         Load a run from persistent storage.
-        
+
         Args:
             run_id: The run ID to load
-            
+
         Returns:
             The saved run, or None if not found
         """
@@ -222,12 +222,12 @@ class RunStore:
     def update_status(self, run_id: str, status: RunStatus, error_message: str = "") -> bool:
         """
         Update the status of a run.
-        
+
         Args:
             run_id: The run ID to update
             status: New status
             error_message: Optional error message (for failed runs)
-            
+
         Returns:
             True if updated, False if run not found
         """
@@ -249,10 +249,10 @@ class RunStore:
     def increment_step(self, run_id: str) -> int:
         """
         Increment the step count for a run.
-        
+
         Args:
             run_id: The run ID to update
-            
+
         Returns:
             The new step count, or -1 if run not found
         """
@@ -277,12 +277,12 @@ class RunStore:
     ) -> list[RunMetadata]:
         """
         List all runs, optionally filtered by status.
-        
+
         Args:
             status: Optional status filter
             limit: Maximum number of runs to return
             offset: Number of runs to skip
-            
+
         Returns:
             List of run metadata, sorted by updated_at descending
         """
@@ -307,7 +307,7 @@ class RunStore:
     def get_resumable_runs(self) -> list[RunMetadata]:
         """
         Get all runs that can be resumed.
-        
+
         Returns:
             List of runs with status PAUSED or INTERRUPTED
         """
@@ -319,10 +319,10 @@ class RunStore:
     def delete_run(self, run_id: str) -> bool:
         """
         Delete a run from storage.
-        
+
         Args:
             run_id: The run ID to delete
-            
+
         Returns:
             True if deleted, False if not found
         """
@@ -335,10 +335,10 @@ class RunStore:
     def cleanup_old_runs(self, max_age_days: int = 30) -> int:
         """
         Delete runs older than max_age_days.
-        
+
         Args:
             max_age_days: Maximum age in days
-            
+
         Returns:
             Number of runs deleted
         """

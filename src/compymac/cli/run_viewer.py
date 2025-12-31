@@ -23,14 +23,14 @@ from compymac.types import Role
 class RunViewer:
     """
     CLI viewer for agent runs.
-    
+
     Provides methods to display run information in a human-readable format.
     """
 
     def __init__(self, storage_dir: str | Path = "~/.compymac/runs"):
         """
         Initialize the run viewer.
-        
+
         Args:
             storage_dir: Directory where runs are stored
         """
@@ -44,12 +44,12 @@ class RunViewer:
     ) -> str:
         """
         List all runs with optional filtering.
-        
+
         Args:
             status: Optional status filter
             limit: Maximum number of runs to show
             show_details: Whether to show detailed information
-            
+
         Returns:
             Formatted string output
         """
@@ -78,10 +78,10 @@ class RunViewer:
     def view_run(self, run_id: str) -> str:
         """
         View detailed information about a specific run.
-        
+
         Args:
             run_id: The run ID to view
-            
+
         Returns:
             Formatted string output
         """
@@ -123,11 +123,11 @@ class RunViewer:
     def view_timeline(self, run_id: str, limit: int = 50) -> str:
         """
         View the message timeline for a run.
-        
+
         Args:
             run_id: The run ID to view
             limit: Maximum number of messages to show
-            
+
         Returns:
             Formatted string output
         """
@@ -173,10 +173,10 @@ class RunViewer:
     def view_tool_calls(self, run_id: str) -> str:
         """
         View all tool calls made during a run.
-        
+
         Args:
             run_id: The run ID to view
-            
+
         Returns:
             Formatted string output
         """
@@ -235,10 +235,10 @@ class RunViewer:
     def view_diffs(self, run_id: str) -> str:
         """
         View file diffs from edits made during a run.
-        
+
         Args:
             run_id: The run ID to view
-            
+
         Returns:
             Formatted string output
         """
@@ -295,7 +295,7 @@ class RunViewer:
     def get_resumable(self) -> str:
         """
         List runs that can be resumed.
-        
+
         Returns:
             Formatted string output
         """

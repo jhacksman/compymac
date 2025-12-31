@@ -41,7 +41,7 @@ class WorkflowState(Enum):
 class ApprovalGate:
     """
     An approval gate that must be passed before proceeding.
-    
+
     Approval gates can be:
     - Automatic (passes if condition is met)
     - Manual (requires explicit user approval)
@@ -57,7 +57,7 @@ class ApprovalGate:
     def check(self) -> tuple[bool, str]:
         """
         Check if the gate passes.
-        
+
         Returns:
             Tuple of (passed, reason)
         """
@@ -103,7 +103,7 @@ class ApprovalGate:
 class GitPRWorkflow:
     """
     Automated Git PR workflow with approval gates.
-    
+
     This class manages the lifecycle of a PR from branch creation to merge,
     with approval gates at critical points.
     """
@@ -191,10 +191,10 @@ class GitPRWorkflow:
     def create_branch(self, branch_name: str | None = None) -> tuple[bool, str]:
         """
         Create a new branch for the PR.
-        
+
         Args:
             branch_name: Optional branch name (auto-generated if not provided)
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -223,10 +223,10 @@ class GitPRWorkflow:
     def stage_files(self, files: list[str] | None = None) -> tuple[bool, str]:
         """
         Stage files for commit.
-        
+
         Args:
             files: List of file paths to stage (stages all if None)
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -252,10 +252,10 @@ class GitPRWorkflow:
     def commit(self, message: str) -> tuple[bool, str]:
         """
         Commit staged changes with approval gate.
-        
+
         Args:
             message: Commit message
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -286,10 +286,10 @@ class GitPRWorkflow:
     def push(self, force: bool = False) -> tuple[bool, str]:
         """
         Push commits to remote with approval gate.
-        
+
         Args:
             force: Whether to force push (requires manual approval)
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -334,10 +334,10 @@ class GitPRWorkflow:
     def check_gate(self, gate_name: str) -> tuple[bool, str]:
         """
         Check if a specific gate passes.
-        
+
         Args:
             gate_name: Name of the gate to check
-            
+
         Returns:
             Tuple of (passed, reason)
         """
@@ -349,11 +349,11 @@ class GitPRWorkflow:
     def approve_gate(self, gate_name: str, approver: str = "user") -> tuple[bool, str]:
         """
         Manually approve a gate.
-        
+
         Args:
             gate_name: Name of the gate to approve
             approver: Who is approving
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -396,7 +396,7 @@ class GitPRWorkflow:
     def can_proceed(self) -> tuple[bool, str]:
         """
         Check if workflow can proceed to next step.
-        
+
         Returns:
             Tuple of (can_proceed, reason)
         """
