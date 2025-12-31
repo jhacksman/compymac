@@ -1,12 +1,49 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { HistorySidebar } from '@/components/layout/HistorySidebar'
 import { ConversationPanel } from '@/components/layout/ConversationPanel'
 import { AgentWorkspace } from '@/components/workspace/AgentWorkspace'
 import { StatusBar } from '@/components/layout/StatusBar'
+import { useWebSocket } from '@/hooks/useWebSocket'
+import { useSessionStore } from '@/store/session'
 
 export default function Home() {
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const { setTodos, setTerminalOutput, setBrowserState, setBrowserControl } = useSessionStore()
+  
+  // Create session on mount
+  useEffect(() => {
+    const createSession = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/sessions', {
+          method: 'POST',
+        })
+        const data = await response.json()
+        setSessionId(data.id)
+        // Clear initial mock data
+        setTodos([])
+        setTerminalOutput([])
+        setBrowserState('', '', null)
+        setBrowserControl('user')
+      } catch (error) {
+        console.error('Failed to create session:', error)
+        // Use a fallback session ID for development
+        setSessionId('dev-session-' + Date.now())
+      }
+    }
+    createSession()
+  }, [setTodos, setTerminalOutput, setBrowserState, setBrowserControl])
+
+  const {
+    runCommand,
+    browserNavigate,
+    setBrowserControlMode,
+    createTodo,
+    updateTodo,
+  } = useWebSocket(sessionId)
+
   return (
     <div className="h-screen flex flex-col bg-slate-950">
       <div className="flex-1 flex min-h-0">
@@ -17,7 +54,13 @@ export default function Home() {
           </Panel>
           <PanelResizeHandle className="w-1 bg-slate-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
           <Panel defaultSize={60} minSize={40}>
-            <AgentWorkspace />
+            <AgentWorkspace 
+              onRunCommand={runCommand}
+              onBrowserNavigate={browserNavigate}
+              onSetBrowserControl={setBrowserControlMode}
+              onCreateTodo={createTodo}
+              onUpdateTodo={updateTodo}
+            />
           </Panel>
         </PanelGroup>
       </div>

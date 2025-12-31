@@ -8,10 +8,11 @@ import { cn } from '@/lib/utils'
 interface TerminalPanelProps {
   isMaximized?: boolean
   onMaximize?: () => void
+  onRunCommand?: (command: string, execDir?: string) => void
 }
 
-export function TerminalPanel({ isMaximized, onMaximize }: TerminalPanelProps) {
-  const { terminalOutput, terminalControl, addTerminalOutput } = useSessionStore()
+export function TerminalPanel({ isMaximized, onMaximize, onRunCommand }: TerminalPanelProps) {
+  const { terminalOutput, terminalControl } = useSessionStore()
   const [inputValue, setInputValue] = useState('')
   const terminalRef = useRef<HTMLDivElement>(null)
 
@@ -23,7 +24,9 @@ export function TerminalPanel({ isMaximized, onMaximize }: TerminalPanelProps) {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && inputValue.trim()) {
-      addTerminalOutput(`$ ${inputValue}`)
+      if (onRunCommand) {
+        onRunCommand(inputValue.trim())
+      }
       setInputValue('')
     }
   }

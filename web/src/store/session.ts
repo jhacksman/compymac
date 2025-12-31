@@ -63,6 +63,7 @@ interface SessionState {
   setBrowserState: (url: string, title: string, screenshotUrl: string | null) => void
   setBrowserControl: (control: 'user' | 'agent') => void
   addTerminalOutput: (output: string) => void
+  setTerminalOutput: (output: string[]) => void
   setTerminalControl: (control: 'user' | 'agent') => void
   setTodos: (todos: Todo[]) => void
   setMaximizedPanel: (panel: WorkspacePanel | null) => void
@@ -136,6 +137,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setBrowserState: (url, title, screenshotUrl) => set({ browserUrl: url, browserTitle: title, browserScreenshotUrl: screenshotUrl }),
   setBrowserControl: (control) => set({ browserControl: control }),
   addTerminalOutput: (output) => set((state) => ({ terminalOutput: [...state.terminalOutput, output] })),
+  setTerminalOutput: (output) => set({ terminalOutput: output }),
   setTerminalControl: (control) => set({ terminalControl: control }),
   setTodos: (todos) => set({ todos }),
   setMaximizedPanel: (panel) => set({ maximizedPanel: panel }),

@@ -1,16 +1,42 @@
 'use client'
 
-import { Globe, RefreshCw, ChevronLeft, ChevronRight, Maximize2, Minimize2 } from 'lucide-react'
+import { useState } from 'react'
+import { Globe, RefreshCw, ChevronLeft, ChevronRight, Maximize2, Minimize2, User, Bot } from 'lucide-react'
 import { useSessionStore } from '@/store/session'
 import { cn } from '@/lib/utils'
 
 interface BrowserPanelProps {
   isMaximized?: boolean
   onMaximize?: () => void
+  onNavigate?: (url: string) => void
+  onSetControl?: (control: 'user' | 'agent') => void
 }
 
-export function BrowserPanel({ isMaximized, onMaximize }: BrowserPanelProps) {
-  const { browserUrl, browserTitle, browserControl } = useSessionStore()
+export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl }: BrowserPanelProps) {
+  const { browserUrl, browserTitle, browserScreenshotUrl, browserControl } = useSessionStore()
+  const [urlInput, setUrlInput] = useState(browserUrl)
+
+  const handleNavigate = () => {
+    if (onNavigate && urlInput.trim()) {
+      let url = urlInput.trim()
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url
+      }
+      onNavigate(url)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleNavigate()
+    }
+  }
+
+  const toggleControl = () => {
+    if (onSetControl) {
+      onSetControl(browserControl === 'user' ? 'agent' : 'user')
+    }
+  }
 
   return (
     <div className={cn(
@@ -23,9 +49,27 @@ export function BrowserPanel({ isMaximized, onMaximize }: BrowserPanelProps) {
           <span className="text-sm font-medium text-white">Browser</span>
         </div>
         <div className="flex items-center gap-1">
-          {browserControl === 'agent' && (
-            <span className="text-xs text-green-400 mr-2">AI Navigating</span>
-          )}
+          <button
+            onClick={toggleControl}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors",
+              browserControl === 'agent' 
+                ? "bg-green-500/20 text-green-400" 
+                : "bg-blue-500/20 text-blue-400"
+            )}
+          >
+            {browserControl === 'agent' ? (
+              <>
+                <Bot className="w-3 h-3" />
+                AI Control
+              </>
+            ) : (
+              <>
+                <User className="w-3 h-3" />
+                User Control
+              </>
+            )}
+          </button>
           <button 
             onClick={onMaximize}
             className="p-1 text-slate-400 hover:text-white transition-colors"
@@ -43,12 +87,17 @@ export function BrowserPanel({ isMaximized, onMaximize }: BrowserPanelProps) {
           <button className="p-1 text-slate-400 hover:text-white">
             <ChevronRight className="w-4 h-4" />
           </button>
-          <button className="p-1 text-slate-400 hover:text-white">
+          <button className="p-1 text-slate-400 hover:text-white" onClick={handleNavigate}>
             <RefreshCw className="w-4 h-4" />
           </button>
-          <div className="flex-1 bg-slate-700 rounded px-3 py-1">
-            <span className="text-xs text-slate-300 truncate">{browserUrl}</span>
-          </div>
+          <input
+            type="text"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Enter URL..."
+            className="flex-1 bg-slate-700 rounded px-3 py-1 text-xs text-slate-300 outline-none focus:ring-1 focus:ring-blue-500"
+          />
         </div>
       )}
 
@@ -61,28 +110,25 @@ export function BrowserPanel({ isMaximized, onMaximize }: BrowserPanelProps) {
               <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
             </div>
             {!isMaximized && (
-              <span className="text-xs text-slate-500 truncate ml-2">{browserUrl}</span>
+              <span className="text-xs text-slate-500 truncate ml-2">{browserUrl || 'No page loaded'}</span>
             )}
           </div>
-          <div className="p-4 bg-white">
-            <div className="text-xs text-slate-400 mb-2">Bloomberg</div>
-            <h3 className="text-lg font-bold text-slate-900 mb-4">{browserTitle}</h3>
-            <div className="space-y-3">
-              <div className="h-32 bg-gradient-to-r from-blue-100 to-purple-100 rounded-lg flex items-end p-4">
-                <div className="flex items-end gap-2 h-full w-full">
-                  {[40, 60, 45, 80, 55, 70, 90, 65, 75, 85].map((h, i) => (
-                    <div
-                      key={i}
-                      className="flex-1 bg-gradient-to-t from-blue-500 to-purple-500 rounded-t"
-                      style={{ height: `${h}%` }}
-                    />
-                  ))}
+          <div className="flex-1 bg-white overflow-auto" style={{ height: 'calc(100% - 2rem)' }}>
+            {browserScreenshotUrl ? (
+              <img 
+                src={`http://localhost:8000${browserScreenshotUrl}`} 
+                alt={browserTitle || 'Browser screenshot'} 
+                className="w-full h-auto"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-slate-400">
+                <div className="text-center">
+                  <Globe className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No page loaded</p>
+                  <p className="text-xs mt-1">Enter a URL above to navigate</p>
                 </div>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Top 10 DeFi Trends for 2025: showcasing notable patterns around stablecoins and yields, each resonating the vibrant crypto landscape...
-              </p>
-            </div>
+            )}
           </div>
         </div>
       </div>
