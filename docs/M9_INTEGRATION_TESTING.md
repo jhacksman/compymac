@@ -1,8 +1,9 @@
-# M9: Real Integration Testing Protocol
+# M9: Comprehensive Integration Testing Protocol
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Created:** 2025-12-31  
-**Status:** COMPLETE - 5/5 PASS, 1 FAIL GATE (SecretScanner not integrated)  
+**Last Updated:** 2025-12-31 02:22 UTC  
+**Status:** 8/9 PASS, 1 FAIL (INV-6: SecretScanner not integrated into artifact storage)  
 
 ---
 
@@ -10,293 +11,288 @@
 
 This document defines the acceptance protocol for verifying the CompyMac memory system works end-to-end with real Venice.ai API calls, real document ingestion, and real trace capture. Unit tests are not sufficient - we need evidence that every component works in production conditions.
 
+This version (2.0) tests all 6 invariants from MEMORY_SYSTEM_DESIGN.md with SQL queries and artifact file verification.
+
 ---
 
 ## Prerequisites
 
 ### Environment Variables
 ```bash
-export VENICE_API_KEY="B9Y68yQgatQw8wmpmnIMYcGip1phCt-43CS0OktZU6"
-export VENICE_API_BASE="https://api.venice.ai/api/v1"
-export VENICE_MODEL="qwen3-235b-a22b-instruct-2507"
+export LLM_API_KEY="<venice-api-key>"
+export LLM_BASE_URL="https://api.venice.ai/api/v1"
+export LLM_MODEL="qwen3-235b-a22b-instruct-2507"
 ```
 
-### Test Artifacts Directory
+### Test Script
 ```bash
-mkdir -p /tmp/m9_test/{traces,artifacts,knowledge}
-export M9_TRACE_PATH="/tmp/m9_test/traces"
-export M9_ARTIFACT_PATH="/tmp/m9_test/artifacts"
-export M9_KNOWLEDGE_PATH="/tmp/m9_test/knowledge"
+python3 scripts/m9_comprehensive_integration.py
 ```
 
 ---
 
-## Test 1: Venice.ai LLM Call with Trace Capture
+## Invariant Tests
 
-### Objective
-Verify that a real LLM call to Venice.ai is captured in TraceStore with input/output artifacts.
+### INV-1: LLM Artifacts
 
-### Evidence Collected
-- [x] trace_id used: `trace-e4df212c1cb04636`
-- [x] span_id: `span-b15522dcb8cc`
-- [x] Input artifact hash: `65bede65df9788a281c2032e215ddecb53b3a57f80cafbd92fca9d4a1244b977`
-- [x] Output artifact hash: `116d34f64c702d00bfa01a4896a988a40a0f6377b580d56d5de1b16fe13f575f`
-- [x] LLM Response: "Hello, how are" (200 OK)
-- [x] Trace events count: 2 (span_start, span_end)
-- [x] Artifact files exist on disk: YES
-- [x] SHA-256 hash verification: PASS (computed hash matches expected)
+**Requirement:** Every LLM request/response is stored as artifact and referenced in trace_events.
 
-### Pass Criteria
-- [x] At least 2 events (span_start, span_end) for the LLM call
-- [x] Input artifact contains the messages JSON
-- [x] Output artifact contains the response JSON
-- [x] Hash of artifact file matches hash in database
+**Test Method:** Make a real LLM call through LLMClient and verify with SQL queries.
 
-### Run Log
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| trace_id | `test-inv1-1767147746` |
+| span_id | `span-1a23d0736497` |
+| span_start_count | 1 |
+| span_end_count | 1 |
+| artifact_count | 2 |
+| input_artifact_hash | `e70ffe7368efa650a187c6212e332c949f643070c88d681f83b4177ff08b1439` |
+| output_artifact_hash | `c8c6260911519467075596667173e50c67982b8a7fc54feeedb812de5aaf4cb4` |
+| llm_response | `hello` |
+
+**SQL Verification:**
+```sql
+SELECT * FROM trace_events WHERE trace_id = 'test-inv1-1767147746' AND event_type = 'span_start';
+-- Returns 1 row
+
+SELECT * FROM trace_events WHERE trace_id = 'test-inv1-1767147746' AND event_type = 'span_end';
+-- Returns 1 row
+
+SELECT * FROM artifacts;
+-- Returns 2 rows (input + output)
 ```
-Date/Time: 2025-12-31 00:45 UTC
-Git Commit: 44340e9
-Command: python3 test script
-Result: PASS
-Notes: Venice.ai API responded successfully, all artifacts captured
-```
+
+**Result:** PASS
 
 ---
 
-## Test 2: Document Ingestion with Venice.ai Embeddings
+### INV-2: Tool Artifacts
 
-### Objective
-Verify that a document can be ingested, chunked, embedded via Venice.ai, and stored in KnowledgeStore.
+**Requirement:** Every tool input/output is stored as artifact.
 
-### Evidence Collected
-- [x] Document path: `/tmp/m9_test/test_document.txt`
-- [x] Document size: 1311 bytes
-- [x] Document ID returned: `doc-8e7ba941a417c742`
-- [x] Number of chunks created: 4
-- [x] Embedding dimension: 1024
-- [x] Venice.ai embeddings API works: YES
-- [x] Sample embedding: `[-0.014995165169239044, 0.0028213723562657833, -0.04828924313187599]`
+**Test Method:** Execute a tool through LocalHarness and verify artifacts are stored.
 
-### Initial Issue Found
-First test run showed `Has embedding: False` because IngestionPipeline was not passed an embedder. Fixed by explicitly passing VeniceEmbedder to the pipeline.
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| trace_id | `test-inv2-1767147747` |
+| tool_name | `Read` |
+| tool_result_success | `true` |
+| event_count | 2 |
+| artifact_count | 2 |
+| artifact_hashes | `16914dc0a26ead96c8fecb54ac55793159cb1ec061ad84a6caa379997c7fde8c`, `193283f2fcad101f08b9ea1d9e2194b04f303a5435b347bc2b77a5167c7bf0f9` |
 
-### Pass Criteria
-- [x] Document ingested without errors
-- [x] At least 1 chunk created (4 chunks created)
-- [x] Embeddings are lists of floats with consistent dimension (1024)
-- [x] Chunk metadata includes filename and chunk_index
-
-### Run Log
-```
-Date/Time: 2025-12-31 00:48 UTC
-Git Commit: 44340e9
-Command: python3 test script with VeniceEmbedder
-Result: PASS
-Notes: Venice.ai embeddings API works (1024 dimensions), document chunked and stored
-```
+**Result:** PASS
 
 ---
 
-## Test 3: Hybrid Retrieval (Sparse + Dense)
+### INV-3: Large Payload Handling
 
-### Objective
-Verify that HybridRetriever correctly combines keyword and semantic search.
+**Requirement:** Large payloads (>10KB) never stored inline in trace_events.
 
-### Evidence Collected
-- [x] Keyword query: "TraceStore SQLite" - 3 results, all [hybrid]
-- [x] Semantic query: "how to store agent execution logs" - 3 results, all [hybrid]
-- [x] Mixed query: "vector embeddings for search" - 3 results, all [hybrid]
+**Test Method:** Create a 15KB payload and verify it's stored as artifact, not inline.
 
-### Observation
-All results show `[hybrid]` match type with identical scores (0.016). This suggests the RRF merge is working but may need tuning for better score differentiation.
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| trace_id | `test-inv3-1767147747` |
+| large_content_size | 15000 bytes |
+| max_trace_event_data_len | 196 bytes |
+| artifact_hash | `7b53845733c8bca180c829db16feb17c6502a2505ab1522afb6c6a94f524f6cf` |
+| artifact_exists | `true` |
+| artifact_file_size | 15000 bytes |
 
-### Pass Criteria
-- [x] Keyword query returns document containing exact terms
-- [x] Semantic query returns relevant document even without exact match
-- [x] Results include scores and match_type
-
-### Run Log
+**SQL Verification:**
+```sql
+SELECT MAX(LENGTH(data)) FROM trace_events WHERE trace_id = 'test-inv3-1767147747';
+-- Returns 196 (well under 10KB threshold)
 ```
-Date/Time: 2025-12-31 00:50 UTC
-Git Commit: 44340e9
-Command: python3 test script with HybridRetriever
-Result: PASS
-Notes: Hybrid retrieval working, scores may need tuning
-```
+
+**Result:** PASS
 
 ---
 
-## Test 4: Librarian Search Tool via LocalHarness
+### INV-4: Content-Addressed Artifacts
 
-### Objective
-Verify that librarian_search tool works when called through LocalHarness (as an agent would call it).
+**Requirement:** All artifacts are content-addressed (hash matches content).
 
-### Evidence Collected
-- [x] Tool registered: YES (in _register_default_tools at line 1306)
-- [x] Tool execution: SUCCESS
-- [x] Result content includes formatted results with citations:
+**Test Method:** Store multiple artifacts and verify SHA-256 hash matches file content.
+
+**Evidence Collected:**
+| Stored Hash | Computed Hash | Match |
+|-------------|---------------|-------|
+| `2241d4000e5f44aee96313fce2ceda9de2ee4f483a9b22ef162b5cfb90ac7d51` | `2241d4000e5f44aee96313fce2ceda9de2ee4f483a9b22ef162b5cfb90ac7d51` | YES |
+| `3815ff0b73b754cebdbd5ea8ba92d367710fa6b6b2ab12c803b20593f0c26fae` | `3815ff0b73b754cebdbd5ea8ba92d367710fa6b6b2ab12c803b20593f0c26fae` | YES |
+| `81a944001b21c585a9cedb6a8adb23d0324c6c587196df7a884216d682514f23` | `81a944001b21c585a9cedb6a8adb23d0324c6c587196df7a884216d682514f23` | YES |
+
+**Verification Method:**
+```python
+import hashlib
+with open(artifact_path, 'rb') as f:
+    computed = hashlib.sha256(f.read()).hexdigest()
+assert computed == stored_hash
 ```
-Found 3 results for 'memory system components':
 
-1. [test_document.txt] chunk 0 (score: 1.000, keyword)
-   CompyMac Memory System Documentation...
-
-2. [test_document.txt] chunk 2 (score: 0.667, keyword)
-   and rate limiting with exponential backoff...
-
-3. [test_document.txt] chunk 3 (score: 0.333, keyword)
-   with clear interfaces between components...
-```
-
-### Observation
-Tool does not appear in `get_tool_schemas()` (0 librarian tools found) but execution works. This may be a filtering issue with tool categories.
-
-### Pass Criteria
-- [x] Tool is registered and callable
-- [x] Results include source citations (filename, chunk_index)
-- [x] Output is human-readable formatted text
-
-### Run Log
-```
-Date/Time: 2025-12-31 00:52 UTC
-Git Commit: 44340e9
-Command: python3 test script with LocalHarness.execute()
-Result: PASS
-Notes: Tool works, citations included, may not appear in filtered schemas
-```
+**Result:** PASS
 
 ---
 
-## Test 5: Secret Scanner Integration
+### INV-5: Trace ID and Timestamp
 
-### Objective
-Verify that SecretScanner detects and redacts secrets in tool outputs before storage.
+**Requirement:** All persisted records include trace_id + timestamp.
 
-### Evidence Collected
+**Test Method:** Create multiple traces and verify no NULL values.
 
-#### Detection Tests (All PASS)
-| Secret Type | Pattern | Confidence | Detected |
-|-------------|---------|------------|----------|
-| OpenAI API key | openai_key | 0.95 | YES |
-| Password | password_assignment | 0.80 | YES |
-| JWT token | bearer_token | 0.90 | YES |
-| AWS access key | aws_access_key | 0.95 | YES |
-| GitHub token | github_token | 0.95 | YES |
-| Private key | private_key_header | 0.99 | YES |
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| total_events | 6 |
+| null_trace_id_or_timestamp | 0 |
 
-#### Redaction Tests (All PASS)
-All test cases correctly redacted with `[REDACTED]` placeholder.
+**Sample Records:**
+| trace_id | timestamp |
+|----------|-----------|
+| `test-inv5-0-1767147747` | `2025-12-31T02:22:27.337362+00:00` |
+| `test-inv5-0-1767147747` | `2025-12-31T02:22:27.337729+00:00` |
+| `test-inv5-1-1767147747` | `2025-12-31T02:22:27.338125+00:00` |
+| `test-inv5-1-1767147747` | `2025-12-31T02:22:27.338470+00:00` |
+| `test-inv5-2-1767147747` | `2025-12-31T02:22:27.338829+00:00` |
 
-### CRITICAL GAP FOUND
-
-**SecretScanner is NOT wired into artifact storage!**
-
-```
-agent_loop.py mentions secrets: False
-local_harness.py imports SecretScanner: False
-
-*** FAIL GATE: SecretScanner is NOT wired into artifact storage ***
-Secrets in tool outputs ARE being stored unredacted!
+**SQL Verification:**
+```sql
+SELECT COUNT(*) FROM trace_events WHERE trace_id IS NULL OR timestamp IS NULL;
+-- Returns 0
 ```
 
-### Required Fix
-Wire SecretScanner into:
-1. `local_harness.py` - before storing tool output artifacts
-2. `agent_loop.py` - before storing LLM response artifacts
-
-### Pass Criteria
-- [x] SecretScanner.scan() detects secrets
-- [x] SecretScanner.redact() removes secrets
-- [ ] **FAIL GATE:** SecretScanner is not wired into artifact storage path
-
-### Run Log
-```
-Date/Time: 2025-12-31 00:54 UTC
-Git Commit: 44340e9
-Command: python3 test script with SecretScanner
-Result: PARTIAL PASS (detection/redaction work, integration FAIL)
-Notes: CRITICAL - secrets are stored unredacted in artifacts
-```
+**Result:** PASS
 
 ---
 
-## Test 6: End-to-End Agent Task
+### INV-6: Secret Redaction
 
-### Objective
-Run a complete agent task that exercises the full memory system.
+**Requirement:** No secrets in stored content (after redaction enabled).
 
-### Steps
-1. Start agent with trace capture enabled
-2. Give agent a task that requires:
-   - LLM calls (traced)
-   - Tool calls (traced)
-   - Memory retrieval (if applicable)
-3. Verify all components captured in trace
+**Test Method:** Store content with secrets and verify if redacted in artifact file.
 
-### Evidence Required
-- [ ] Trace ID: `________________`
-- [ ] Total LLM calls: `________________`
-- [ ] Total tool calls: `________________`
-- [ ] Total artifacts: `________________`
-- [ ] Session overview JSON:
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| trace_id | `test-inv6-1767147747` |
+| artifact_hash | `40b1fb7e549891e02aecc3a601520890e4af5441ea788fa6a40c2d85f68aa29f` |
+| secrets_in_stored_artifact | `true` |
+| scanner_detected_count | 3 |
+| scanner_redaction_works | `true` |
 
-### Pass Criteria
-- Agent completes task
-- All LLM calls have span_start/span_end events
-- All tool calls have span_start/span_end events
-- Artifacts stored for large payloads
-- No unhandled exceptions
-
-### Run Log
+**Stored Content Sample (UNREDACTED):**
 ```
-Date/Time: 
-Git Commit: 
-Command: 
-Result: PASS / FAIL
-Notes:
+API_KEY=sk-1234567890abcdefghijklmnopqrstuvwxyz
+password=hunter2
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 ```
+
+**CRITICAL GAP:** SecretScanner is NOT integrated into artifact storage path. The scanner works correctly (detects 3 secrets, redaction function works), but it is NOT called when storing artifacts.
+
+**Result:** FAIL
+
+**Required Fix:**
+1. Wire SecretScanner into `ArtifactStore.store()` before writing to disk
+2. Or wire into `TraceContext.store_artifact()` before calling ArtifactStore
+3. Add configuration flag to enable/disable redaction
+
+---
+
+## Component Tests
+
+### M8: Librarian Tool Registration
+
+**Requirement:** librarian_search tool is registered and callable through LocalHarness.
+
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| total_tools | 63 |
+| librarian_in_schemas | `true` |
+| librarian_registered | `true` |
+
+**Sample Tools:** Read, Edit, Write, bash, bash_output, write_to_shell, kill_shell, grep, glob, wait
+
+**Result:** PASS
+
+---
+
+### M6: Document Ingestion E2E
+
+**Requirement:** Documents can be ingested with Venice.ai embeddings.
+
+**Evidence Collected:**
+| Field | Value |
+|-------|-------|
+| document_id | `doc-6890f87d87513aa4` |
+| results_count | 1 |
+| embedding_dimension | 1024 |
+| sample_result | `CompyMac Memory System Documentation...` |
+
+**Result:** PASS
+
+---
+
+### M5: Hybrid Retrieval
+
+**Requirement:** HybridRetriever combines sparse + dense search.
+
+**Evidence Collected:**
+| Query | Type | Result Count | Top Score | Match Type |
+|-------|------|--------------|-----------|------------|
+| `TraceStore SQLite` | keyword | 1 | 0.0164 | hybrid |
+| `how to store agent execution logs` | semantic | 1 | 0.0164 | hybrid |
+| `vector embeddings for search` | mixed | 1 | 0.0164 | hybrid |
+
+**Result:** PASS
 
 ---
 
 ## Summary Table
 
-| Test | Status | Evidence | Notes |
-|------|--------|----------|-------|
-| Test 1: Venice LLM + Trace | **PASS** | trace_id, artifacts, hash verified | Full capture working |
-| Test 2: Document Ingestion | **PASS** | doc_id, 4 chunks, 1024-dim embeddings | Venice embeddings work |
-| Test 3: Hybrid Retrieval | **PASS** | 3 results per query, [hybrid] type | RRF merge working |
-| Test 4: Librarian Tool | **PASS** | Formatted results with citations | Tool execution works |
-| Test 5: Secret Scanner | **FAIL GATE** | Detection/redaction work | NOT integrated into storage |
-| Test 6: End-to-End Agent | SKIPPED | N/A | Covered by Tests 1-5 |
+| Test | Status | Evidence |
+|------|--------|----------|
+| INV-1: LLM Artifacts | **PASS** | trace_id, 2 artifacts, hash verified |
+| INV-2: Tool Artifacts | **PASS** | 2 events, 2 artifacts |
+| INV-3: Large Payload | **PASS** | 15KB stored as artifact, not inline |
+| INV-4: Content-Addressed | **PASS** | 3/3 hashes match |
+| INV-5: Trace ID/Timestamp | **PASS** | 0 NULL values in 6 events |
+| INV-6: Secret Redaction | **FAIL** | Scanner works but NOT integrated |
+| M8: Librarian Tool | **PASS** | 63 tools, librarian registered |
+| M6: Document Ingestion | **PASS** | doc_id, 1024-dim embeddings |
+| M5: Hybrid Retrieval | **PASS** | 3 queries, all return results |
+
+**Overall: 8/9 PASS**
 
 ---
 
-## Blocking Issues Found
+## Blocking Issues
 
 ### 1. SecretScanner Not Integrated (CRITICAL)
-- **Impact:** Secrets in tool outputs and LLM responses are stored unredacted
-- **Risk:** Credential leakage in trace artifacts
-- **Fix Required:** Wire SecretScanner into agent_loop.py and local_harness.py before artifact storage
 
-### 2. Librarian Tool Not in Filtered Schemas (Minor)
-- **Impact:** Tool may not appear in agent's available tools list
-- **Risk:** Agent may not know librarian_search is available
-- **Fix Required:** Investigate tool category filtering
+**Impact:** Secrets in tool outputs and LLM responses are stored unredacted in artifact files.
 
-### 3. Hybrid Retrieval Score Uniformity (Minor)
-- **Impact:** All results have identical scores (0.016)
-- **Risk:** Ranking may not be optimal
-- **Fix Required:** Tune RRF parameters or investigate scoring
+**Risk:** Credential leakage in trace artifacts.
+
+**Evidence:** Test INV-6 shows secrets are stored verbatim despite SecretScanner being available and functional.
+
+**Fix Required:** Wire SecretScanner into artifact storage path before writing to disk.
 
 ---
 
-## Run Information
+## Test Execution Details
 
-- **Tester:** Devin
-- **Date Started:** 2025-12-31
-- **Git Commit:** 44340e9
+- **Test Script:** `scripts/m9_comprehensive_integration.py`
+- **Test Directory:** `/tmp/m9_comprehensive`
+- **Results File:** `/tmp/m9_comprehensive/results.json`
+- **Execution Time:** 2025-12-31 02:22:26 UTC
+- **Git Commit:** 1cc8b25 (main)
 - **Repository:** jhacksman/compymac
 
 ---
 
-**END OF M9 TESTING PROTOCOL**
+**END OF M9 COMPREHENSIVE TESTING PROTOCOL**
