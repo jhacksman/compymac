@@ -2959,7 +2959,7 @@ class LocalHarness(Harness):
         todo["review_status"] = "pending_audit"  # New field for auditor tracking
         todo["audit_attempts"] = 0  # Track audit attempts for loop prevention
         todo["revision_attempts"] = 0  # Track revision attempts
-        
+
         if evidence:
             todo["evidence"].extend(evidence)
 
