@@ -29,6 +29,7 @@ from compymac.types import Message, ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from compymac.memory import MemoryManager
+    from compymac.storage.run_store import RunStore
     from compymac.trace_store import TraceContext, TraceStore
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,10 @@ class AgentConfig:
     use_active_toolset: bool = False  # If True, use harness.get_active_tool_schemas() instead of get_tool_schemas()
     # Hierarchical tool menu system (reduces context size by only showing relevant tools)
     use_menu_system: bool = False  # If True, use harness.get_menu_tool_schemas() for hierarchical tool discovery
+    # Gap 1: Session persistence (enables pause/resume)
+    enable_persistence: bool = False  # If True, save run state after each step
+    persistence_dir: str = "~/.compymac/runs"  # Directory for run storage
+    run_id: str | None = None  # Optional run ID for resuming (auto-generated if None)
 
 
 @dataclass
@@ -95,6 +100,17 @@ class AgentLoop:
         self._memory_manager: "MemoryManager | None" = None  # noqa: UP037
         self._trace_context: "TraceContext | None" = trace_context  # noqa: UP037
         self._trace_store: "TraceStore | None" = None  # noqa: UP037
+        self._run_store: "RunStore | None" = None  # noqa: UP037
+        self._run_id: str | None = self.config.run_id
+        self._task_description: str = ""
+
+        # Gap 1: Initialize run store for session persistence
+        if self.config.enable_persistence:
+            from compymac.storage.run_store import RunStore
+            self._run_store = RunStore(self.config.persistence_dir)
+            if not self._run_id:
+                import uuid
+                self._run_id = str(uuid.uuid4())
 
         # Initialize tracing if base path is configured
         if self.config.trace_base_path and not self._trace_context:
@@ -565,6 +581,101 @@ class AgentLoop:
                 role="system",
                 content=self.config.system_prompt,
             ))
+
+    # Gap 1: Session persistence methods
+    def save_run(self, status: str = "running") -> str | None:
+        """
+        Save the current run state for later resume.
+
+        Args:
+            status: Run status (running, paused, completed, failed)
+
+        Returns:
+            Run ID if saved, None if persistence not enabled
+        """
+        if not self._run_store or not self._run_id:
+            return None
+
+        from compymac.session import Session
+        from compymac.storage.run_store import RunStatus
+
+        # Create a Session object from current state
+        session = Session(system_prompt=self.config.system_prompt)
+        session.messages = self.state.messages.copy()
+
+        # Map status string to RunStatus enum
+        status_map = {
+            "pending": RunStatus.PENDING,
+            "running": RunStatus.RUNNING,
+            "paused": RunStatus.PAUSED,
+            "completed": RunStatus.COMPLETED,
+            "failed": RunStatus.FAILED,
+            "interrupted": RunStatus.INTERRUPTED,
+        }
+        run_status = status_map.get(status, RunStatus.RUNNING)
+
+        # Save the run
+        self._run_store.save_run(
+            run_id=self._run_id,
+            session=session,
+            task_description=self._task_description,
+            status=run_status,
+            step_count=self.state.step_count,
+            tool_calls_count=self.state.tool_call_count,
+        )
+
+        logger.debug(f"Saved run {self._run_id} with status {status}")
+        return self._run_id
+
+    def load_run(self, run_id: str) -> bool:
+        """
+        Load a saved run and restore state.
+
+        Args:
+            run_id: The run ID to load
+
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        if not self._run_store:
+            from compymac.storage.run_store import RunStore
+            self._run_store = RunStore(self.config.persistence_dir)
+
+        saved_run = self._run_store.load_run(run_id)
+        if not saved_run:
+            logger.warning(f"Run not found: {run_id}")
+            return False
+
+        # Restore state from saved run
+        self._run_id = run_id
+        self._task_description = saved_run.metadata.task_description
+        self.state.messages = saved_run.session.messages.copy()
+        self.state.step_count = saved_run.metadata.step_count
+        self.state.tool_call_count = saved_run.metadata.tool_calls_count
+
+        # Update status to running
+        from compymac.storage.run_store import RunStatus
+        self._run_store.update_status(run_id, RunStatus.RUNNING)
+
+        logger.info(f"Loaded run {run_id}, resuming from step {self.state.step_count}")
+        return True
+
+    def pause_run(self) -> str | None:
+        """
+        Pause the current run for later resume.
+
+        Returns:
+            Run ID if paused, None if persistence not enabled
+        """
+        return self.save_run(status="paused")
+
+    def get_run_id(self) -> str | None:
+        """Get the current run ID."""
+        return self._run_id
+
+    def set_task_description(self, description: str) -> None:
+        """Set the task description for the current run."""
+        self._task_description = description
 
 
 class Policy:

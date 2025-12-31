@@ -133,3 +133,88 @@ class Session:
     def tokens_lost_to_truncation(self) -> int:
         """Total tokens lost to truncation (for observability)."""
         return sum(e.tokens_dropped for e in self.truncation_events)
+
+    # =========================================================================
+    # Gap 1: Session Persistence - Serialization/Deserialization
+    # =========================================================================
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Serialize the session to a dictionary for persistence.
+        
+        This enables Gap 1: Session Persistence + Resume by allowing
+        sessions to be saved to disk and restored later.
+        """
+        return {
+            "id": self.id,
+            "created_at": self.created_at.isoformat(),
+            "system_prompt": self.system_prompt,
+            "messages": [m.to_dict() for m in self.messages],
+            "pending_tool_calls": [
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+                for tc in self.pending_tool_calls
+            ],
+            "truncation_events": [
+                {
+                    "timestamp": te.timestamp.isoformat() if hasattr(te.timestamp, 'isoformat') else str(te.timestamp),
+                    "tokens_dropped": te.tokens_dropped,
+                    "reason": te.reason,
+                }
+                for te in self.truncation_events
+            ],
+            "metadata": self.metadata,
+            "_closed": self._closed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Session":
+        """
+        Deserialize a session from a dictionary.
+        
+        This enables Gap 1: Session Persistence + Resume by allowing
+        sessions to be restored from disk.
+        """
+        # Parse messages
+        messages = []
+        for m in data.get("messages", []):
+            messages.append(Message(
+                role=Role(m["role"]),
+                content=m.get("content", ""),
+                tool_calls=m.get("tool_calls"),
+                tool_call_id=m.get("tool_call_id"),
+            ))
+        
+        # Parse pending tool calls
+        pending_tool_calls = []
+        for tc in data.get("pending_tool_calls", []):
+            pending_tool_calls.append(ToolCall(
+                id=tc["id"],
+                name=tc["name"],
+                arguments=tc["arguments"],
+            ))
+        
+        # Parse truncation events
+        truncation_events = []
+        for te in data.get("truncation_events", []):
+            truncation_events.append(TruncationEvent(
+                timestamp=datetime.fromisoformat(te["timestamp"]) if isinstance(te["timestamp"], str) else te["timestamp"],
+                tokens_dropped=te["tokens_dropped"],
+                reason=te["reason"],
+            ))
+        
+        # Create session without triggering __post_init__ system message
+        session = cls.__new__(cls)
+        session.id = data["id"]
+        session.created_at = datetime.fromisoformat(data["created_at"])
+        session.system_prompt = data.get("system_prompt", "")
+        session.messages = messages
+        session.pending_tool_calls = pending_tool_calls
+        session.truncation_events = truncation_events
+        session.metadata = data.get("metadata", {})
+        session._closed = data.get("_closed", False)
+        
+        return session

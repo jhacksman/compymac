@@ -2001,6 +2001,22 @@ class LocalHarness(Harness):
         if not search_path.exists():
             raise FileNotFoundError(f"Path not found: {path}")
 
+        # Path validation: warn if searching a single file or very narrow scope
+        path_warning = ""
+        if search_path.is_file():
+            path_warning = (
+                f"[Warning: Searching single file '{search_path.name}'. "
+                "Consider searching the parent directory for broader results.]\n"
+            )
+        elif search_path.is_dir():
+            # Check if this is a very deep/narrow path (more than 3 levels from a common root)
+            parts = search_path.parts
+            if len(parts) > 5 and not any(p in ["src", "lib", "pkg"] for p in parts[-3:]):
+                path_warning = (
+                    f"[Warning: Searching narrow path '{path}'. "
+                    "Consider searching a broader directory for complete results.]\n"
+                )
+
         # Build ripgrep-like flags
         case_insensitive = kwargs.get("-i", False)
         show_line_numbers = kwargs.get("-n", False)
@@ -2096,21 +2112,65 @@ class LocalHarness(Harness):
             except (UnicodeDecodeError, PermissionError):
                 continue
 
-        # Format output based on mode
+        # Build provenance metadata for all results
+        total_match_count = sum(match_counts.values())
+        searched_path_resolved = str(search_path.resolve())
+        
+        # Build command representation for provenance
+        cmd_parts = ["grep", f'"{pattern}"', searched_path_resolved]
+        if glob:
+            cmd_parts.append(f"--glob={glob}")
+        if type:
+            cmd_parts.append(f"--type={type}")
+        if case_insensitive:
+            cmd_parts.append("-i")
+        if multiline:
+            cmd_parts.append("--multiline")
+        command_repr = " ".join(cmd_parts)
+        
+        # Format output based on mode - always include provenance for "no matches"
         if output_mode == "files_with_matches":
             output_list = sorted(files_with_matches)
             if head_limit:
                 output_list = output_list[:head_limit]
-            return "\n".join(output_list) if output_list else "No matches found"
+            if output_list:
+                return path_warning + "\n".join(output_list)
+            else:
+                # Return structured "no matches" with provenance
+                return (
+                    f"{path_warning}No matches found.\n"
+                    f"[Provenance: command=`{command_repr}`, "
+                    f"searched_path={searched_path_resolved}, "
+                    f"files_searched={len(files_to_search)}, "
+                    f"match_count=0]"
+                )
         elif output_mode == "count":
             output_list = [f"{f}:{c}" for f, c in sorted(match_counts.items())]
             if head_limit:
                 output_list = output_list[:head_limit]
-            return "\n".join(output_list)
+            if output_list:
+                return path_warning + "\n".join(output_list)
+            else:
+                return (
+                    f"{path_warning}No matches found.\n"
+                    f"[Provenance: command=`{command_repr}`, "
+                    f"searched_path={searched_path_resolved}, "
+                    f"files_searched={len(files_to_search)}, "
+                    f"match_count=0]"
+                )
         else:  # content
             if head_limit:
                 results = results[:head_limit]
-            return "\n".join(results) if results else "No matches found"
+            if results:
+                return path_warning + "\n".join(results)
+            else:
+                return (
+                    f"{path_warning}No matches found.\n"
+                    f"[Provenance: command=`{command_repr}`, "
+                    f"searched_path={searched_path_resolved}, "
+                    f"files_searched={len(files_to_search)}, "
+                    f"match_count=0]"
+                )
 
     def _glob(self, pattern: str, path: str) -> str:
         """Find files matching a glob pattern."""
@@ -2245,10 +2305,19 @@ class LocalHarness(Harness):
             "completion contract" - the agent must have provided fail_to_pass_status
             (self-attestation that tests passed) before completion is allowed.
             This prevents agents from skipping verification entirely.
+            
+            Gap 3: When evidence tracking is enabled via VerificationEngine,
+            completion is blocked unless evidence has been collected.
         """
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[COMPLETE_HARNESS] _complete() called with final_answer={final_answer[:50]}...")
+        
+        # Gap 3: Check evidence tracking (if enabled)
+        can_complete, blocked_reason = self._verification_engine.can_complete()
+        if not can_complete:
+            logger.warning(f"[COMPLETE_HARNESS] Completion blocked by evidence tracker: {blocked_reason}")
+            return blocked_reason
 
         # Check completion contract when SWE-bench phase enforcement is enabled
         if self._swe_phase_enabled and self._swe_phase_state is not None:
@@ -2297,6 +2366,26 @@ class LocalHarness(Harness):
         self._completion_status = status
         logger.info("[COMPLETE_HARNESS] _completion_signaled set to True")
         return f"Task completed with status '{status}': {final_answer}"
+
+    # =========================================================================
+    # Evidence Tracking (Gap 3: Verification Before Complete)
+    # =========================================================================
+
+    def enable_evidence_tracking(self, require_evidence: bool = True) -> None:
+        """Enable evidence tracking for completion gating."""
+        self._verification_engine.enable_evidence_tracking(require_evidence)
+
+    def disable_evidence_tracking(self) -> None:
+        """Disable evidence tracking."""
+        self._verification_engine.disable_evidence_tracking()
+
+    def get_evidence_tracker(self) -> "VerificationTracker | None":
+        """Get the current evidence tracker."""
+        return self._verification_engine.get_tracker()
+
+    def get_evidence_summary(self) -> str:
+        """Get summary of collected evidence."""
+        return self._verification_engine.get_evidence_summary()
 
     # =========================================================================
     # SWE-bench Phase Management - Intra-attempt budget enforcement
