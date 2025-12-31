@@ -120,16 +120,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                     # Get LLM response
                     try:
                         llm = get_llm_client()
-                        messages = [
+                        chat_messages = [
                             {"role": "system", "content": "You are CompyMac, an AI coding assistant. Be helpful and concise."},
                         ]
                         for msg in sessions[session_id]["messages"]:
-                            messages.append({"role": msg["role"], "content": msg["content"]})
+                            chat_messages.append({"role": msg["role"], "content": msg["content"]})
 
                         # Run LLM call in thread pool to not block
+                        # Use a helper function to avoid B023 lint error
+                        def call_llm(client: LLMClient, msgs: list[dict[str, str]]) -> ChatResponse:
+                            return client.chat(msgs)
+
                         loop = asyncio.get_event_loop()
                         response: ChatResponse = await loop.run_in_executor(
-                            None, lambda: llm.chat(messages)
+                            None, call_llm, llm, chat_messages
                         )
 
                         # Add assistant message to session
