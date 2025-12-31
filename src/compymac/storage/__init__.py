@@ -8,8 +8,8 @@ Gap 1: Also provides RunStore for session persistence and resume.
 """
 
 from compymac.storage.backend import StorageBackend
+from compymac.storage.run_store import RunMetadata, RunStatus, RunStore, SavedRun
 from compymac.storage.sqlite_backend import SQLiteBackend
-from compymac.storage.run_store import RunStore, RunStatus, RunMetadata, SavedRun
 
 # PostgresBackend is optional - requires psycopg2
 try:

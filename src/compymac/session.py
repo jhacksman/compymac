@@ -141,7 +141,7 @@ class Session:
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize the session to a dictionary for persistence.
-        
+
         This enables Gap 1: Session Persistence + Resume by allowing
         sessions to be saved to disk and restored later.
         """
@@ -174,7 +174,7 @@ class Session:
     def from_dict(cls, data: dict[str, Any]) -> "Session":
         """
         Deserialize a session from a dictionary.
-        
+
         This enables Gap 1: Session Persistence + Resume by allowing
         sessions to be restored from disk.
         """
@@ -187,7 +187,7 @@ class Session:
                 tool_calls=m.get("tool_calls"),
                 tool_call_id=m.get("tool_call_id"),
             ))
-        
+
         # Parse pending tool calls
         pending_tool_calls = []
         for tc in data.get("pending_tool_calls", []):
@@ -196,7 +196,7 @@ class Session:
                 name=tc["name"],
                 arguments=tc["arguments"],
             ))
-        
+
         # Parse truncation events
         truncation_events = []
         for te in data.get("truncation_events", []):
@@ -205,7 +205,7 @@ class Session:
                 tokens_dropped=te["tokens_dropped"],
                 reason=te["reason"],
             ))
-        
+
         # Create session without triggering __post_init__ system message
         session = cls.__new__(cls)
         session.id = data["id"]
@@ -216,5 +216,5 @@ class Session:
         session.truncation_events = truncation_events
         session.metadata = data.get("metadata", {})
         session._closed = data.get("_closed", False)
-        
+
         return session

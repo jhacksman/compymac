@@ -52,6 +52,7 @@ from compymac.types import ToolCall, ToolResult
 from compymac.verification import (
     VerificationEngine,
     VerificationResult,
+    VerificationTracker,
 )
 
 if TYPE_CHECKING:
@@ -2113,9 +2114,8 @@ class LocalHarness(Harness):
                 continue
 
         # Build provenance metadata for all results
-        total_match_count = sum(match_counts.values())
         searched_path_resolved = str(search_path.resolve())
-        
+
         # Build command representation for provenance
         cmd_parts = ["grep", f'"{pattern}"', searched_path_resolved]
         if glob:
@@ -2127,7 +2127,7 @@ class LocalHarness(Harness):
         if multiline:
             cmd_parts.append("--multiline")
         command_repr = " ".join(cmd_parts)
-        
+
         # Format output based on mode - always include provenance for "no matches"
         if output_mode == "files_with_matches":
             output_list = sorted(files_with_matches)
@@ -2305,14 +2305,14 @@ class LocalHarness(Harness):
             "completion contract" - the agent must have provided fail_to_pass_status
             (self-attestation that tests passed) before completion is allowed.
             This prevents agents from skipping verification entirely.
-            
+
             Gap 3: When evidence tracking is enabled via VerificationEngine,
             completion is blocked unless evidence has been collected.
         """
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[COMPLETE_HARNESS] _complete() called with final_answer={final_answer[:50]}...")
-        
+
         # Gap 3: Check evidence tracking (if enabled)
         can_complete, blocked_reason = self._verification_engine.can_complete()
         if not can_complete:
