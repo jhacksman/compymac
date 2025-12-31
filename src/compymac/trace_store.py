@@ -430,7 +430,7 @@ class ArtifactStore:
     def __init__(self, base_path: Path, redact_secrets: bool = True):
         """
         Initialize ArtifactStore.
-        
+
         Args:
             base_path: Directory to store artifacts
             redact_secrets: If True, redact secrets before storing (default: True)
@@ -462,7 +462,7 @@ class ArtifactStore:
         metadata: dict[str, Any] | None = None,
     ) -> Artifact:
         """Store data and return artifact metadata.
-        
+
         If redact_secrets is enabled and the content is text-based,
         secrets will be redacted before storage.
         """
@@ -478,7 +478,7 @@ class ArtifactStore:
                     secrets_redacted = True
             except (UnicodeDecodeError, Exception):
                 pass  # Not text or redaction failed, store original
-        
+
         artifact_hash = compute_hash(stored_data)
 
         with self._lock:
