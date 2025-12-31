@@ -23,9 +23,9 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -67,7 +67,7 @@ class Evidence:
     type: str  # file_path, command_output, test_result, git_diff, etc.
     data: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -75,16 +75,16 @@ class Evidence:
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Evidence":
+    def from_dict(cls, data: dict[str, Any]) -> Evidence:
         return cls(
             id=data["id"],
             type=data["type"],
             data=data["data"],
             timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else datetime.now(UTC),
         )
-    
+
     def content_hash(self) -> str:
         """Hash the evidence content for monotonicity checking."""
         content = json.dumps({"type": self.type, "data": self.data}, sort_keys=True)
@@ -99,7 +99,7 @@ class CommandLog:
     stderr: str
     exit_code: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "command": self.command,
@@ -108,9 +108,9 @@ class CommandLog:
             "exit_code": self.exit_code,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CommandLog":
+    def from_dict(cls, data: dict[str, Any]) -> CommandLog:
         return cls(
             command=data["command"],
             stdout=data.get("stdout", ""),
@@ -129,7 +129,7 @@ class WorkerClaim:
     files_modified: list[str] = field(default_factory=list)
     commands_run: list[CommandLog] = field(default_factory=list)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "todo_id": self.todo_id,
@@ -139,9 +139,9 @@ class WorkerClaim:
             "commands_run": [c.to_dict() for c in self.commands_run],
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WorkerClaim":
+    def from_dict(cls, data: dict[str, Any]) -> WorkerClaim:
         return cls(
             todo_id=data["todo_id"],
             explanation=data["explanation"],
@@ -150,7 +150,7 @@ class WorkerClaim:
             commands_run=[CommandLog.from_dict(c) for c in data.get("commands_run", [])],
             timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else datetime.now(UTC),
         )
-    
+
     def get_evidence_hashes(self) -> set[str]:
         """Get hashes of all evidence for monotonicity checking."""
         return {e.content_hash() for e in self.evidence}
@@ -164,7 +164,7 @@ class AuditorFollowUp:
     reason: str  # Why this info is needed for verification
     round_number: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "question": self.question,
@@ -182,7 +182,7 @@ class WorkerResponse:
     additional_evidence: list[Evidence] = field(default_factory=list)
     round_number: int = 0
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "answer": self.answer,
@@ -197,7 +197,7 @@ class VerdictReason:
     """A reason for the auditor's verdict."""
     reason: str
     evidence_id: str | None = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "reason": self.reason,
@@ -210,7 +210,7 @@ class RequiredAction:
     """An action required by the auditor."""
     action: str
     priority: str = "medium"  # high, medium, low
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "action": self.action,
@@ -228,7 +228,7 @@ class AuditorVerdict:
     evidence_citations: list[str] = field(default_factory=list)
     follow_up: AuditorFollowUp | None = None  # If verdict is FOLLOW_UP
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "verdict": self.verdict.value,
@@ -239,9 +239,9 @@ class AuditorVerdict:
             "follow_up": self.follow_up.to_dict() if self.follow_up else None,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AuditorVerdict":
+    def from_dict(cls, data: dict[str, Any]) -> AuditorVerdict:
         return cls(
             verdict=AuditVerdict(data["verdict"]),
             confidence=data.get("confidence", 0.5),
@@ -257,32 +257,32 @@ class AuditorVerdict:
 class AuditPacket:
     """
     The structured packet sent to the auditor.
-    
+
     This is the ONLY information the auditor receives - no conversation history.
     """
     # Todo information
     todo_id: str
     todo_content: str
     acceptance_criteria: list[dict[str, Any]] = field(default_factory=list)
-    
+
     # Worker's claim
     worker_claim: WorkerClaim | None = None
-    
+
     # Artifacts
     files_created: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
     git_diff: str = ""
-    
+
     # Context
     repo_path: str = ""
     test_command: str | None = None
-    
+
     # Audit metadata
     audit_attempt: int = 1
     follow_up_round: int = 0
     previous_verdicts: list[AuditorVerdict] = field(default_factory=list)
     dialogue_history: list[dict[str, Any]] = field(default_factory=list)  # Follow-up Q&A
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "todo_id": self.todo_id,
@@ -309,7 +309,7 @@ class TodoNote:
     content: str = ""
     action: str = "note"  # "feedback" | "revision_request" | "clarification" | "note"
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -318,9 +318,9 @@ class TodoNote:
             "action": self.action,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TodoNote":
+    def from_dict(cls, data: dict[str, Any]) -> TodoNote:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:8]),
             author=data.get("author", "system"),
@@ -341,7 +341,7 @@ class AuditEvent:
     before_state: dict[str, Any] = field(default_factory=dict)
     after_state: dict[str, Any] = field(default_factory=dict)
     payload: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
@@ -357,13 +357,13 @@ class AuditEvent:
 
 class TodoSafeguards:
     """Safeguards to prevent infinite loops and ensure bounded iteration."""
-    
+
     # Maximum attempts before escalation
     MAX_AUDIT_ATTEMPTS = 3
     MAX_REVISION_ATTEMPTS = 2
     MAX_FOLLOW_UP_ROUNDS = 3
     MAX_TOOL_RETRIES = 3
-    
+
     # Timeouts (in seconds)
     AUDIT_TIMEOUT_SECONDS = 300  # 5 minutes per audit
     TODO_TIMEOUT_SECONDS = 3600  # 1 hour per todo
@@ -376,7 +376,7 @@ def check_monotonicity(
 ) -> bool:
     """
     Check if there's materially new evidence.
-    
+
     Prevents infinite loops where worker resubmits the same evidence.
     Returns True if there's new evidence, False otherwise.
     """
@@ -392,21 +392,21 @@ def check_escalation(
 ) -> EscalationTrigger | None:
     """
     Check if the todo should be escalated to human.
-    
+
     Returns the escalation trigger if escalation is needed, None otherwise.
     """
     if audit_attempts > TodoSafeguards.MAX_AUDIT_ATTEMPTS:
         return EscalationTrigger.AUDIT_CAP_EXCEEDED
-    
+
     if revision_attempts > TodoSafeguards.MAX_REVISION_ATTEMPTS:
         return EscalationTrigger.REVISION_CAP_EXCEEDED
-    
+
     if follow_up_rounds > TodoSafeguards.MAX_FOLLOW_UP_ROUNDS:
         return EscalationTrigger.FOLLOW_UP_CAP_EXCEEDED
-    
+
     if last_verdict and last_verdict.verdict == AuditVerdict.BLOCKED:
         return EscalationTrigger.AUDITOR_BLOCKED
-    
+
     return None
 
 
@@ -497,87 +497,87 @@ You MUST output your verdict as a JSON object with this exact structure:
 def generate_auditor_prompt(packet: AuditPacket) -> str:
     """
     Generate the full prompt for the auditor agent.
-    
+
     This combines the system prompt with the audit packet.
     """
     prompt_parts = [AUDITOR_SYSTEM_PROMPT, "\n\n---\n\n# Audit Packet\n"]
-    
+
     # Todo information
-    prompt_parts.append(f"## Todo\n")
+    prompt_parts.append("## Todo\n")
     prompt_parts.append(f"**ID:** {packet.todo_id}\n")
     prompt_parts.append(f"**Content:** {packet.todo_content}\n")
-    
+
     if packet.acceptance_criteria:
-        prompt_parts.append(f"\n**Acceptance Criteria:**\n")
+        prompt_parts.append("\n**Acceptance Criteria:**\n")
         for i, criterion in enumerate(packet.acceptance_criteria, 1):
             prompt_parts.append(f"{i}. {criterion}\n")
-    
+
     # Worker's claim
     if packet.worker_claim:
-        prompt_parts.append(f"\n## Worker's Claim\n")
+        prompt_parts.append("\n## Worker's Claim\n")
         prompt_parts.append(f"**Explanation:**\n{packet.worker_claim.explanation}\n")
-        
+
         if packet.worker_claim.files_modified:
             prompt_parts.append(f"\n**Files Modified:** {', '.join(packet.worker_claim.files_modified)}\n")
-        
+
         if packet.worker_claim.evidence:
-            prompt_parts.append(f"\n**Evidence Provided:**\n")
+            prompt_parts.append("\n**Evidence Provided:**\n")
             for e in packet.worker_claim.evidence:
                 prompt_parts.append(f"- [{e.id}] {e.type}: {json.dumps(e.data)[:500]}\n")
-        
+
         if packet.worker_claim.commands_run:
-            prompt_parts.append(f"\n**Commands Run:**\n")
+            prompt_parts.append("\n**Commands Run:**\n")
             for cmd in packet.worker_claim.commands_run:
                 prompt_parts.append(f"- `{cmd.command}` (exit code: {cmd.exit_code})\n")
-    
+
     # Git diff
     if packet.git_diff:
         prompt_parts.append(f"\n## Git Diff\n```diff\n{packet.git_diff[:5000]}\n```\n")
-    
+
     # Context
-    prompt_parts.append(f"\n## Context\n")
+    prompt_parts.append("\n## Context\n")
     prompt_parts.append(f"**Repo Path:** {packet.repo_path}\n")
     if packet.test_command:
         prompt_parts.append(f"**Test Command:** {packet.test_command}\n")
-    
+
     # Audit metadata
-    prompt_parts.append(f"\n## Audit Metadata\n")
+    prompt_parts.append("\n## Audit Metadata\n")
     prompt_parts.append(f"**Audit Attempt:** {packet.audit_attempt}\n")
     prompt_parts.append(f"**Follow-up Round:** {packet.follow_up_round}\n")
-    
+
     # Previous verdicts
     if packet.previous_verdicts:
-        prompt_parts.append(f"\n**Previous Verdicts:**\n")
+        prompt_parts.append("\n**Previous Verdicts:**\n")
         for v in packet.previous_verdicts:
             prompt_parts.append(f"- {v.verdict.value}: {[r.reason for r in v.reasons]}\n")
-    
+
     # Dialogue history
     if packet.dialogue_history:
-        prompt_parts.append(f"\n## Follow-up Dialogue\n")
+        prompt_parts.append("\n## Follow-up Dialogue\n")
         for entry in packet.dialogue_history:
             if entry.get("type") == "question":
                 prompt_parts.append(f"**Auditor Question:** {entry.get('content', '')}\n")
             elif entry.get("type") == "response":
                 prompt_parts.append(f"**Worker Response:** {entry.get('content', '')}\n")
-    
+
     # Instructions
-    prompt_parts.append(f"\n---\n\n")
-    prompt_parts.append(f"Now verify this claim. Use your tools to check the evidence, then output your verdict as JSON.\n")
-    
+    prompt_parts.append("\n---\n\n")
+    prompt_parts.append("Now verify this claim. Use your tools to check the evidence, then output your verdict as JSON.\n")
+
     return "".join(prompt_parts)
 
 
 def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
     """
     Parse the auditor's response into a structured verdict.
-    
+
     Returns None if parsing fails.
     """
     # Try to extract JSON from the response
     try:
         # Look for JSON block
         json_match = None
-        
+
         # Try to find JSON in code block
         import re
         code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
@@ -589,19 +589,19 @@ def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
             json_end = response.rfind('}')
             if json_start != -1 and json_end != -1:
                 json_match = response[json_start:json_end + 1]
-        
+
         if not json_match:
             return None
-        
+
         data = json.loads(json_match)
-        
+
         # Parse verdict
         verdict_str = data.get("verdict", "blocked")
         try:
             verdict = AuditVerdict(verdict_str)
         except ValueError:
             verdict = AuditVerdict.BLOCKED
-        
+
         # Parse reasons
         reasons = []
         for r in data.get("reasons", []):
@@ -612,7 +612,7 @@ def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
                 ))
             elif isinstance(r, str):
                 reasons.append(VerdictReason(reason=r))
-        
+
         # Parse required actions
         required_actions = []
         for a in data.get("required_actions", []):
@@ -623,7 +623,7 @@ def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
                 ))
             elif isinstance(a, str):
                 required_actions.append(RequiredAction(action=a))
-        
+
         # Parse follow-up if verdict is FOLLOW_UP
         follow_up = None
         if verdict == AuditVerdict.FOLLOW_UP:
@@ -635,7 +635,7 @@ def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
                     reason="Auditor needs more information",
                     round_number=0,  # Will be set by caller
                 )
-        
+
         return AuditorVerdict(
             verdict=verdict,
             confidence=float(data.get("confidence", 0.5)),
@@ -644,7 +644,7 @@ def parse_auditor_verdict(response: str) -> AuditorVerdict | None:
             evidence_citations=data.get("evidence_citations", []),
             follow_up=follow_up,
         )
-    
+
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         # If parsing fails, return a blocked verdict
         return AuditorVerdict(
