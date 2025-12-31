@@ -42,6 +42,12 @@ The agent works with any OpenAI-compatible API:
 
 ## Installation
 
+Using uv (recommended):
+```bash
+uv sync
+```
+
+Or using pip:
 ```bash
 pip install -e ".[dev]"
 ```
@@ -77,6 +83,39 @@ print(result.response)
 print(f"Truncations: {agent.session.total_truncations}")
 print(f"Tokens lost: {agent.session.tokens_lost_to_truncation}")
 ```
+
+## Running the Interactive Web UI
+
+The Interactive Web UI provides a Manus/Devin-like interface with real-time tool execution.
+
+### Backend (Terminal 1)
+
+Using uv (recommended):
+```bash
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://api.venice.ai/api/v1"
+export LLM_MODEL="qwen3-235b-a22b-instruct-2507"
+uv run python -m compymac.api.server
+```
+
+The backend runs on http://localhost:8000.
+
+### Frontend (Terminal 2)
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The frontend runs on http://localhost:3000.
+
+### Features
+
+- **Agent-driven todos**: The agent creates a plan (todo list) when given a task, then executes it step by step
+- **Real-time tool execution**: CLI commands, browser actions, and file operations execute in real-time
+- **Status tracking**: Watch the agent transition through Planning → Executing → Idle phases
+- **WebSocket streaming**: All updates stream to the UI in real-time
 
 ## Why These Constraints Matter
 
