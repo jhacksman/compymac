@@ -27,7 +27,7 @@ export interface Session {
 export interface Todo {
   id: string
   content: string
-  status: 'pending' | 'in_progress' | 'completed'
+  status: 'pending' | 'in_progress' | 'claimed' | 'verified'
 }
 
 export type WorkspacePanel = 'browser' | 'cli' | 'todos' | 'knowledge'
@@ -54,7 +54,7 @@ interface SessionState {
   historySidebarCollapsed: boolean
   autonomyLevel: AutonomyLevel
   agentGoal: string
-  agentStatus: 'active' | 'paused' | 'idle'
+  agentStatus: 'active' | 'paused' | 'idle' | 'planning' | 'executing' | 'working' | 'error'
   
   setCurrentSession: (sessionId: string | null) => void
   addMessage: (message: Message) => void
@@ -70,7 +70,7 @@ interface SessionState {
   toggleHistorySidebar: () => void
   setAutonomyLevel: (level: AutonomyLevel) => void
   setAgentGoal: (goal: string) => void
-  setAgentStatus: (status: 'active' | 'paused' | 'idle') => void
+  setAgentStatus: (status: 'active' | 'paused' | 'idle' | 'planning' | 'executing' | 'working' | 'error') => void
   createSession: (title: string) => void
 }
 
