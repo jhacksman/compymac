@@ -968,11 +968,11 @@ python scripts/test_memory_integration.py
 | M2: PostgreSQL Backend | COMPLETE | 099e68e | PASS | PostgresBackend + docker-compose.dev.yml |
 | M3: KnowledgeStore Core | COMPLETE | 65fe258 | PASS | MemoryUnit, RetrievalResult, KnowledgeStore |
 | M4: Venice.ai Embedder | COMPLETE | 96e78fc | PASS | VeniceEmbedder with caching, 1024-dim |
-| M5: Hybrid Retriever | COMPLETE | (this commit) | PASS | Sparse + dense + RRF merge |
-| M6: Document Ingestion Pipeline | NOT STARTED | - | - | - |
-| M7: Secret Scanner | NOT STARTED | - | - | - |
-| M8: Librarian Tool | NOT STARTED | - | - | - |
-| M9: Integration Testing | NOT STARTED | - | - | - |
+| M5: Hybrid Retriever | COMPLETE | 9d8c3a9 | PASS | Sparse + dense + RRF merge |
+| M6: Document Ingestion Pipeline | COMPLETE | (this commit) | PASS | DocumentChunker, DocumentParser, IngestionPipeline |
+| M7: Secret Scanner | COMPLETE | (this commit) | PASS | SecretScanner with pattern detection and redaction |
+| M8: Librarian Tool | COMPLETE | (this commit) | PASS | librarian_search tool in LocalHarness |
+| M9: Integration Testing | COMPLETE | (this commit) | PASS | 4/4 integration tests pass |
 
 ---
 

@@ -1302,6 +1302,29 @@ class LocalHarness(Harness):
             is_core=True,
         )
 
+        # LIBRARIAN tool - search the document library
+        self.register_tool(
+            name="librarian_search",
+            schema=ToolSchema(
+                name="librarian_search",
+                description=(
+                    "Search the document library for relevant information. "
+                    "Uses hybrid retrieval (keyword + semantic) to find documents. "
+                    "Returns formatted results with citations."
+                ),
+                required_params=["query"],
+                optional_params=["limit", "source_type"],
+                param_types={
+                    "query": "string",
+                    "limit": "number",
+                    "source_type": "string",
+                },
+            ),
+            handler=self._librarian_search,
+            category=ToolCategory.CORE,
+            is_core=True,
+        )
+
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
         from compymac.browser import SyncBrowserService
@@ -3418,6 +3441,82 @@ class LocalHarness(Harness):
         if found_secrets:
             return "Available secrets:\n" + "\n".join(f"  - {s}" for s in sorted(found_secrets))
         return "No secrets found in environment."
+
+    def _librarian_search(
+        self,
+        query: str,
+        limit: int = 10,
+        source_type: str | None = None,
+    ) -> str:
+        """Search the document library using hybrid retrieval.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results to return
+            source_type: Optional filter by source type (e.g., 'document', 'book')
+
+        Returns:
+            Formatted search results with citations
+        """
+        try:
+            from pathlib import Path
+
+            from compymac.knowledge_store import KnowledgeStore
+            from compymac.retrieval.hybrid import HybridRetriever
+            from compymac.storage.sqlite_backend import SQLiteBackend
+
+            # Get knowledge store path from environment or use default
+            db_path = os.environ.get(
+                "COMPYMAC_KNOWLEDGE_DB_PATH",
+                str(Path.home() / ".compymac" / "knowledge.db"),
+            )
+
+            # Initialize store and retriever
+            backend = SQLiteBackend(Path(db_path))
+            store = KnowledgeStore(backend)
+            retriever = HybridRetriever(store)
+
+            # Search
+            results = retriever.retrieve(
+                query=query,
+                limit=limit,
+                source_type=source_type,
+            )
+
+            if not results:
+                return f"No results found for query: '{query}'"
+
+            # Format results with citations
+            output_lines = [f"Found {len(results)} results for '{query}':", ""]
+
+            for i, result in enumerate(results, 1):
+                unit = result.memory_unit
+                score = result.score
+                match_type = result.match_type
+
+                # Truncate content for display
+                content = unit.content
+                if len(content) > 300:
+                    content = content[:300] + "..."
+
+                # Build citation
+                metadata = unit.metadata
+                source_info = f"[{unit.source_type}:{unit.source_id}]"
+                if "filename" in metadata:
+                    source_info = f"[{metadata['filename']}]"
+                if "chunk_index" in metadata:
+                    source_info += f" chunk {metadata['chunk_index']}"
+
+                output_lines.append(f"{i}. {source_info} (score: {score:.3f}, {match_type})")
+                output_lines.append(f"   {content}")
+                output_lines.append("")
+
+            return "\n".join(output_lines)
+
+        except ImportError as e:
+            return f"Error: Missing dependency - {e}"
+        except Exception as e:
+            return f"Error searching library: {e}"
 
     def _ask_smart_friend(self, question: str) -> str:
         """Ask a smart friend for help with complex reasoning using Venice.ai LLM.
