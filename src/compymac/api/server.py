@@ -23,6 +23,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from compymac.agent_loop import AgentConfig, AgentLoop
+from compymac.auditor import (
+    AuditPacket,
+    AuditorVerdict,
+    AuditVerdict,
+    ReviewStatus,
+    TodoSafeguards,
+    WorkerClaim,
+    check_escalation,
+    generate_auditor_prompt,
+    parse_auditor_verdict,
+)
 from compymac.browser import BrowserConfig, BrowserMode, BrowserService
 from compymac.config import LLMConfig
 from compymac.harness import HarnessConfig
@@ -79,13 +90,17 @@ class SessionRuntime:
     browser_state: dict[str, Any] | None = None
     created_at: str = ""
     _last_todo_version: int = 0  # Track todo changes
+    # Human intervention state
+    is_paused: bool = False
+    pause_reason: str = ""
+    audit_events: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.created_at:
             self.created_at = datetime.utcnow().isoformat()
 
     def get_harness_todos(self) -> list[dict[str, Any]]:
-        """Get todos from the harness (agent-created todos)."""
+        """Get todos from the harness (agent-created todos) with full audit info."""
         todos = self.harness.get_todos()
         return [
             {
@@ -93,6 +108,13 @@ class SessionRuntime:
                 "content": todo.get("content", ""),
                 "status": todo.get("status", "pending"),
                 "created_at": todo.get("created_at", ""),
+                # Auditor-related fields
+                "review_status": todo.get("review_status", "not_requested"),
+                "explanation": todo.get("explanation", ""),
+                "audit_attempts": todo.get("audit_attempts", 0),
+                "revision_attempts": todo.get("revision_attempts", 0),
+                "auditor_feedback": todo.get("auditor_feedback", ""),
+                "human_notes": todo.get("human_notes", []),
             }
             for todo in todos
         ]
@@ -112,6 +134,15 @@ class SessionRuntime:
     def has_todos(self) -> bool:
         """Check if any todos exist (for planning gate)."""
         return self.harness.has_todos()
+
+    def log_audit_event(self, event_type: str, todo_id: str, details: dict[str, Any]) -> None:
+        """Log an audit event for accountability."""
+        self.audit_events.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "event_type": event_type,
+            "todo_id": todo_id,
+            "details": details,
+        })
 
 
 # Session storage
@@ -304,6 +335,31 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
 
             elif msg_type == "get_state":
                 await handle_get_state(websocket, runtime)
+
+            # Human intervention handlers
+            elif msg_type == "pause_session":
+                await handle_pause_session(websocket, runtime, message)
+
+            elif msg_type == "resume_session":
+                await handle_resume_session(websocket, runtime, message)
+
+            elif msg_type == "todo_approve":
+                await handle_todo_approve(websocket, runtime, message)
+
+            elif msg_type == "todo_reject":
+                await handle_todo_reject(websocket, runtime, message)
+
+            elif msg_type == "todo_add_note":
+                await handle_todo_add_note(websocket, runtime, message)
+
+            elif msg_type == "todo_edit":
+                await handle_todo_edit(websocket, runtime, message)
+
+            elif msg_type == "todo_delete":
+                await handle_todo_delete(websocket, runtime, message)
+
+            elif msg_type == "get_audit_log":
+                await handle_get_audit_log(websocket, runtime, message)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for session {session_id}")
@@ -812,7 +868,395 @@ async def handle_get_state(websocket: WebSocket, runtime: SessionRuntime) -> Non
             "terminal_output": runtime.terminal_output,
             "browser_state": browser_state,
             "browser_control": runtime.browser_control,
+            "is_paused": runtime.is_paused,
+            "pause_reason": runtime.pause_reason,
         },
+    })
+
+
+# ============================================================================
+# Human Intervention Handlers
+# ============================================================================
+
+
+async def handle_pause_session(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle pausing the agent session (human intervention).
+    
+    When paused:
+    - Agent loop stops executing new steps
+    - User can edit todos, approve/reject claims, add notes
+    - Agent resumes when user calls resume
+    """
+    reason = message.get("reason", "User requested pause")
+    
+    runtime.is_paused = True
+    runtime.pause_reason = reason
+    
+    runtime.log_audit_event(
+        event_type="SESSION_PAUSED",
+        todo_id="",
+        details={"reason": reason, "actor": "human"},
+    )
+    
+    await send_event(websocket, "session_paused", {
+        "is_paused": True,
+        "reason": reason,
+    })
+    
+    logger.info(f"Session {runtime.session_id} paused: {reason}")
+
+
+async def handle_resume_session(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle resuming the agent session after pause."""
+    feedback = message.get("feedback", "")
+    
+    runtime.is_paused = False
+    runtime.pause_reason = ""
+    
+    runtime.log_audit_event(
+        event_type="SESSION_RESUMED",
+        todo_id="",
+        details={"feedback": feedback, "actor": "human"},
+    )
+    
+    await send_event(websocket, "session_resumed", {
+        "is_paused": False,
+        "feedback": feedback,
+    })
+    
+    logger.info(f"Session {runtime.session_id} resumed")
+
+
+async def handle_todo_approve(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle human approval of a claimed todo (override auditor).
+    
+    This is a human override that moves a todo from 'claimed' to 'verified'
+    without waiting for auditor approval.
+    """
+    todo_id = message.get("id")
+    reason = message.get("reason", "Human approved")
+    
+    if not todo_id:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_todo_id",
+            "message": "Todo ID is required for approval",
+        })
+        return
+    
+    try:
+        todos = runtime.harness._todos
+        if todo_id not in todos:
+            raise ValueError(f"Todo '{todo_id}' not found")
+        
+        todo = todos[todo_id]
+        current_status = todo.get("status", "pending")
+        
+        # Can only approve claimed todos
+        if current_status != "claimed":
+            raise ValueError(
+                f"Cannot approve todo '{todo_id}': status is '{current_status}', "
+                f"but only 'claimed' todos can be approved"
+            )
+        
+        # Update status
+        todo["status"] = "verified"
+        todo["review_status"] = "overridden"
+        todo["verified_at"] = datetime.utcnow().isoformat()
+        todo["verified_by"] = "human"
+        todo["override_reason"] = reason
+        
+        # Increment version
+        runtime.harness._todo_version += 1
+        
+        runtime.log_audit_event(
+            event_type="TODO_APPROVED_BY_HUMAN",
+            todo_id=todo_id,
+            details={"reason": reason, "actor": "human"},
+        )
+        
+        # Send updated todos
+        todos_list = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos_list})
+        await send_event(websocket, "todo_approved", {
+            "id": todo_id,
+            "reason": reason,
+            "verified_by": "human",
+        })
+        
+        logger.info(f"Todo {todo_id} approved by human: {reason}")
+        
+    except Exception as e:
+        logger.error(f"Todo approve error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
+
+
+async def handle_todo_reject(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle human rejection of a claimed todo (send back to agent).
+    
+    This moves a todo from 'claimed' back to 'in_progress' with feedback
+    for the agent to address.
+    """
+    todo_id = message.get("id")
+    reason = message.get("reason", "")
+    feedback = message.get("feedback", "")
+    
+    if not todo_id:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_todo_id",
+            "message": "Todo ID is required for rejection",
+        })
+        return
+    
+    if not reason and not feedback:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_feedback",
+            "message": "Reason or feedback is required for rejection",
+        })
+        return
+    
+    try:
+        todos = runtime.harness._todos
+        if todo_id not in todos:
+            raise ValueError(f"Todo '{todo_id}' not found")
+        
+        todo = todos[todo_id]
+        current_status = todo.get("status", "pending")
+        
+        # Can only reject claimed todos
+        if current_status != "claimed":
+            raise ValueError(
+                f"Cannot reject todo '{todo_id}': status is '{current_status}', "
+                f"but only 'claimed' todos can be rejected"
+            )
+        
+        # Update status - send back to in_progress
+        todo["status"] = "in_progress"
+        todo["review_status"] = "changes_requested"
+        todo["revision_attempts"] = todo.get("revision_attempts", 0) + 1
+        todo["auditor_feedback"] = feedback or reason
+        
+        # Add to human notes
+        if "human_notes" not in todo:
+            todo["human_notes"] = []
+        todo["human_notes"].append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": "rejection",
+            "reason": reason,
+            "feedback": feedback,
+        })
+        
+        # Increment version
+        runtime.harness._todo_version += 1
+        
+        runtime.log_audit_event(
+            event_type="TODO_REJECTED_BY_HUMAN",
+            todo_id=todo_id,
+            details={"reason": reason, "feedback": feedback, "actor": "human"},
+        )
+        
+        # Send updated todos
+        todos_list = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos_list})
+        await send_event(websocket, "todo_rejected", {
+            "id": todo_id,
+            "reason": reason,
+            "feedback": feedback,
+        })
+        
+        logger.info(f"Todo {todo_id} rejected by human: {reason}")
+        
+    except Exception as e:
+        logger.error(f"Todo reject error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
+
+
+async def handle_todo_add_note(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle adding a human note to a todo."""
+    todo_id = message.get("id")
+    note = message.get("note", "")
+    
+    if not todo_id or not note:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_params",
+            "message": "Todo ID and note are required",
+        })
+        return
+    
+    try:
+        todos = runtime.harness._todos
+        if todo_id not in todos:
+            raise ValueError(f"Todo '{todo_id}' not found")
+        
+        todo = todos[todo_id]
+        
+        # Add to human notes
+        if "human_notes" not in todo:
+            todo["human_notes"] = []
+        todo["human_notes"].append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": "note",
+            "content": note,
+        })
+        
+        # Increment version
+        runtime.harness._todo_version += 1
+        
+        runtime.log_audit_event(
+            event_type="TODO_NOTE_ADDED",
+            todo_id=todo_id,
+            details={"note": note, "actor": "human"},
+        )
+        
+        # Send updated todos
+        todos_list = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos_list})
+        
+        logger.info(f"Note added to todo {todo_id}")
+        
+    except Exception as e:
+        logger.error(f"Todo add note error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
+
+
+async def handle_todo_edit(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle editing a todo's content (human intervention)."""
+    todo_id = message.get("id")
+    new_content = message.get("content")
+    
+    if not todo_id or not new_content:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_params",
+            "message": "Todo ID and content are required",
+        })
+        return
+    
+    try:
+        todos = runtime.harness._todos
+        if todo_id not in todos:
+            raise ValueError(f"Todo '{todo_id}' not found")
+        
+        todo = todos[todo_id]
+        old_content = todo.get("content", "")
+        
+        # Update content
+        todo["content"] = new_content
+        todo["edited_at"] = datetime.utcnow().isoformat()
+        todo["edited_by"] = "human"
+        
+        # Increment version
+        runtime.harness._todo_version += 1
+        
+        runtime.log_audit_event(
+            event_type="TODO_EDITED_BY_HUMAN",
+            todo_id=todo_id,
+            details={"old_content": old_content, "new_content": new_content, "actor": "human"},
+        )
+        
+        # Send updated todos
+        todos_list = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos_list})
+        
+        logger.info(f"Todo {todo_id} edited by human")
+        
+    except Exception as e:
+        logger.error(f"Todo edit error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
+
+
+async def handle_todo_delete(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle deleting a todo (human intervention)."""
+    todo_id = message.get("id")
+    
+    if not todo_id:
+        await websocket.send_json({
+            "type": "error",
+            "code": "missing_todo_id",
+            "message": "Todo ID is required for deletion",
+        })
+        return
+    
+    try:
+        todos = runtime.harness._todos
+        if todo_id not in todos:
+            raise ValueError(f"Todo '{todo_id}' not found")
+        
+        todo = todos[todo_id]
+        
+        # Remove the todo
+        del todos[todo_id]
+        
+        # Increment version
+        runtime.harness._todo_version += 1
+        
+        runtime.log_audit_event(
+            event_type="TODO_DELETED_BY_HUMAN",
+            todo_id=todo_id,
+            details={"content": todo.get("content", ""), "actor": "human"},
+        )
+        
+        # Send updated todos
+        todos_list = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos_list})
+        
+        logger.info(f"Todo {todo_id} deleted by human")
+        
+    except Exception as e:
+        logger.error(f"Todo delete error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
+
+
+async def handle_get_audit_log(
+    websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
+) -> None:
+    """Handle request for audit log."""
+    todo_id = message.get("id")  # Optional filter by todo
+    
+    events = runtime.audit_events
+    if todo_id:
+        events = [e for e in events if e.get("todo_id") == todo_id]
+    
+    await websocket.send_json({
+        "type": "audit_log",
+        "data": {"events": events},
     })
 
 

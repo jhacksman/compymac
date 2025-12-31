@@ -514,22 +514,25 @@ class LocalHarness(Harness):
             category=ToolCategory.TODO,
         )
 
-        # TodoClaim - Claim a todo is complete (agent assertion, not verified)
+        # TodoClaim - Claim a todo is complete (agent assertion, triggers auditor)
         self.register_tool(
             name="TodoClaim",
             schema=ToolSchema(
                 name="TodoClaim",
                 description=(
                     "Claim a todo is complete. IMPORTANT: 'claimed' is NOT done - only 'verified' counts as complete. "
-                    "Moves status from 'in_progress' to 'claimed'. Provide evidence to support the claim. "
-                    "Evidence format: [{\"type\": \"tool_call_id\", \"data\": \"call_xyz\"}, "
-                    "{\"type\": \"file_path\", \"data\": \"/path/to/output\"}]. "
-                    "Use TodoVerify next to check acceptance criteria."
+                    "Moves status from 'in_progress' to 'claimed'. You MUST provide an explanation that is detailed "
+                    "enough for an independent auditor to verify your work without access to your conversation history. "
+                    "Explain WHAT you did, HOW you did it, and reference specific evidence (file paths, test results). "
+                    "Evidence format: [{\"type\": \"file_path\", \"data\": \"/path/to/file\"}, "
+                    "{\"type\": \"command_output\", \"data\": {\"command\": \"pytest\", \"exit_code\": 0}}]. "
+                    "An independent auditor will verify your claim before it can be marked as 'verified'."
                 ),
-                required_params=["id"],
+                required_params=["id", "explanation"],
                 optional_params=["evidence"],
                 param_types={
                     "id": "string",
+                    "explanation": "string",  # REQUIRED: What was done, how, why it satisfies criteria
                     "evidence": "array",  # List of {type, data} objects
                 },
             ),
@@ -2903,25 +2906,37 @@ class LocalHarness(Harness):
     def _todo_claim(
         self,
         id: str,
+        explanation: str,
         evidence: list[dict[str, Any]] | None = None,
     ) -> str:
         """Claim a todo is complete. Moves status from 'in_progress' to 'claimed'.
 
-        This is an agent assertion that the work is done. Actual verification
-        happens separately via TodoVerify which checks acceptance criteria.
+        This is an agent assertion that the work is done. An independent auditor
+        will verify the claim before it can be marked as 'verified'.
 
         Args:
             id: The stable ID of the todo to claim
+            explanation: REQUIRED - Detailed explanation of what was done, how it was done,
+                and why it satisfies the acceptance criteria. Must be self-contained
+                (auditor has no access to worker's conversation history).
             evidence: Optional list of evidence supporting the claim
-                Each item: {"type": "tool_call_id"|"file_path"|"command_output"|..., "data": ...}
+                Each item: {"type": "file_path"|"command_output"|..., "data": ...}
 
         Returns:
-            Confirmation of claim with next steps
+            Confirmation of claim with auditor verification status
         """
         self._init_todo_state()
 
         if id not in self._todos:
             raise ValueError(f"Todo '{id}' not found. Use TodoRead to see available todos.")
+
+        # Validate explanation is provided and meaningful
+        if not explanation or len(explanation.strip()) < 20:
+            raise ValueError(
+                "Explanation is required and must be detailed enough for an independent auditor "
+                "to verify your work. Explain WHAT you did, HOW you did it, and reference "
+                "specific evidence (file paths, test results, etc.)."
+            )
 
         todo = self._todos[id]
         current_status = todo.get("status", "pending")
@@ -2937,9 +2952,14 @@ class LocalHarness(Harness):
         # Capture before state
         before = todo.copy()
 
-        # Update status and add evidence
+        # Update status and add claim details
         todo["status"] = "claimed"
         todo["claimed_at"] = datetime.now(UTC).isoformat()
+        todo["explanation"] = explanation  # Store the worker's explanation
+        todo["review_status"] = "pending_audit"  # New field for auditor tracking
+        todo["audit_attempts"] = 0  # Track audit attempts for loop prevention
+        todo["revision_attempts"] = 0  # Track revision attempts
+        
         if evidence:
             todo["evidence"].extend(evidence)
 
@@ -2949,23 +2969,26 @@ class LocalHarness(Harness):
             todo_id=id,
             before=before,
             after=todo.copy(),
-            extra={"evidence_count": len(evidence) if evidence else 0},
+            extra={
+                "evidence_count": len(evidence) if evidence else 0,
+                "explanation_length": len(explanation),
+            },
         )
 
         result_lines = [
             f"Claimed todo [{id}]: {todo['content']}",
             "Status: in_progress -> claimed",
+            f"Explanation provided: {len(explanation)} characters",
         ]
         if evidence:
             result_lines.append(f"Evidence provided: {len(evidence)} items")
 
-        # Check if acceptance criteria exist
-        criteria = todo.get("acceptance_criteria", [])
-        if criteria:
-            result_lines.append(f"\nThis todo has {len(criteria)} acceptance criteria.")
-            result_lines.append("Use TodoVerify to check if criteria are met and move to 'verified' status.")
-        else:
-            result_lines.append("\nNo acceptance criteria defined - manual verification required.")
+        # Indicate auditor verification is pending
+        result_lines.append("\n--- Auditor Verification ---")
+        result_lines.append("Your claim has been submitted for independent verification.")
+        result_lines.append("An auditor agent will review your explanation and evidence.")
+        result_lines.append("The auditor may ask follow-up questions if more information is needed.")
+        result_lines.append("Status will move to 'verified' only after auditor approval or human override.")
 
         return "\n".join(result_lines)
 

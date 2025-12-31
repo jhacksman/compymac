@@ -42,6 +42,14 @@ export default function Home() {
     setBrowserControlMode,
     createTodo,
     updateTodo,
+    // Human intervention handlers
+    pauseSession,
+    resumeSession,
+    approveTodo,
+    rejectTodo,
+    addTodoNote,
+    editTodo,
+    deleteTodo,
   } = useWebSocket(sessionId)
 
   return (
@@ -60,6 +68,13 @@ export default function Home() {
               onSetBrowserControl={setBrowserControlMode}
               onCreateTodo={createTodo}
               onUpdateTodo={updateTodo}
+              onPauseSession={pauseSession}
+              onResumeSession={resumeSession}
+              onApproveTodo={approveTodo}
+              onRejectTodo={rejectTodo}
+              onAddTodoNote={addTodoNote}
+              onEditTodo={editTodo}
+              onDeleteTodo={deleteTodo}
             />
           </Panel>
         </PanelGroup>
