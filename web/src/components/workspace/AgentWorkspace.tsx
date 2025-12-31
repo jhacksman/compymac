@@ -29,6 +29,14 @@ interface AgentWorkspaceProps {
   onSetBrowserControl?: (control: 'user' | 'agent') => void
   onCreateTodo?: (content: string) => void
   onUpdateTodo?: (id: string, status: 'pending' | 'in_progress' | 'completed') => void
+  // Human intervention handlers
+  onPauseSession?: (reason: string) => void
+  onResumeSession?: (feedback: string) => void
+  onApproveTodo?: (id: string, reason: string) => void
+  onRejectTodo?: (id: string, reason: string, feedback: string) => void
+  onAddTodoNote?: (id: string, note: string) => void
+  onEditTodo?: (id: string, content: string) => void
+  onDeleteTodo?: (id: string) => void
 }
 
 export function AgentWorkspace({
@@ -37,6 +45,13 @@ export function AgentWorkspace({
   onSetBrowserControl,
   onCreateTodo,
   onUpdateTodo,
+  onPauseSession,
+  onResumeSession,
+  onApproveTodo,
+  onRejectTodo,
+  onAddTodoNote,
+  onEditTodo,
+  onDeleteTodo,
 }: AgentWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<TabId>('browser')
 
@@ -84,6 +99,13 @@ export function AgentWorkspace({
             isMaximized 
             onCreateTodo={onCreateTodo}
             onUpdateTodo={onUpdateTodo}
+            onApproveTodo={onApproveTodo}
+            onRejectTodo={onRejectTodo}
+            onAddNote={onAddTodoNote}
+            onEditTodo={onEditTodo}
+            onDeleteTodo={onDeleteTodo}
+            onPauseSession={onPauseSession}
+            onResumeSession={onResumeSession}
           />
         )}
         {activeTab === 'knowledge' && <KnowledgeGraphPanel isMaximized />}

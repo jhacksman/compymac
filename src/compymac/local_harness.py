@@ -514,25 +514,28 @@ class LocalHarness(Harness):
             category=ToolCategory.TODO,
         )
 
-        # TodoClaim - Claim a todo is complete (with auto-verification)
+        # TodoClaim - Claim a todo is complete (agent assertion, triggers auditor)
         self.register_tool(
             name="TodoClaim",
             schema=ToolSchema(
                 name="TodoClaim",
                 description=(
-                    "Claim a todo is complete and automatically verify it. "
-                    "Moves status from 'in_progress' to 'claimed', then auto-verifies to 'verified'. "
-                    "Provide evidence to support the claim for better verification. "
-                    "Evidence format: [{\"type\": \"file_path\", \"data\": \"/path/to/output\"}, "
-                    "{\"type\": \"command_success\", \"data\": {\"exit_code\": 0}}]. "
-                    "Set auto_verify=false to skip automatic verification."
+                    "Claim a todo is complete. IMPORTANT: 'claimed' is NOT done - only 'verified' counts as complete. "
+                    "Moves status from 'in_progress' to 'claimed'. You MUST provide an explanation that is detailed "
+                    "enough for an independent auditor to verify your work without access to your conversation history. "
+                    "Explain WHAT you did, HOW you did it, and reference specific evidence (file paths, test results). "
+                    "Evidence format: [{\"type\": \"file_path\", \"data\": \"/path/to/file\"}, "
+                    "{\"type\": \"command_output\", \"data\": {\"command\": \"pytest\", \"exit_code\": 0}}]. "
+                    "An independent auditor will verify your claim before it can be marked as 'verified'. "
+                    "Set auto_verify=true to run criteria-based verification immediately if acceptance criteria exist."
                 ),
-                required_params=["id"],
+                required_params=["id", "explanation"],
                 optional_params=["evidence", "auto_verify"],
                 param_types={
                     "id": "string",
+                    "explanation": "string",  # REQUIRED: What was done, how, why it satisfies criteria
                     "evidence": "array",  # List of {type, data} objects
-                    "auto_verify": "boolean",  # Default: true
+                    "auto_verify": "boolean",  # Default: false (auditor verification by default)
                 },
             ),
             handler=self._todo_claim,
@@ -2905,27 +2908,40 @@ class LocalHarness(Harness):
     def _todo_claim(
         self,
         id: str,
+        explanation: str,
         evidence: list[dict[str, Any]] | None = None,
-        auto_verify: bool = True,
+        auto_verify: bool = False,
     ) -> str:
         """Claim a todo is complete. Moves status from 'in_progress' to 'claimed'.
 
-        This is an agent assertion that the work is done. With auto_verify=True (default),
-        the system will automatically attempt to verify the todo after claiming.
+        This is an agent assertion that the work is done. An independent auditor
+        will verify the claim before it can be marked as 'verified'.
 
         Args:
             id: The stable ID of the todo to claim
+            explanation: REQUIRED - Detailed explanation of what was done, how it was done,
+                and why it satisfies the acceptance criteria. Must be self-contained
+                (auditor has no access to worker's conversation history).
             evidence: Optional list of evidence supporting the claim
-                Each item: {"type": "tool_call_id"|"file_path"|"command_output"|..., "data": ...}
-            auto_verify: If True, automatically attempt verification after claiming (default: True)
+                Each item: {"type": "file_path"|"command_output"|..., "data": ...}
+            auto_verify: If True and acceptance criteria exist, run criteria-based
+                verification immediately (default: False, auditor verification)
 
         Returns:
-            Confirmation of claim with verification result if auto_verify is enabled
+            Confirmation of claim with auditor verification status
         """
         self._init_todo_state()
 
         if id not in self._todos:
             raise ValueError(f"Todo '{id}' not found. Use TodoRead to see available todos.")
+
+        # Validate explanation is provided and meaningful
+        if not explanation or len(explanation.strip()) < 20:
+            raise ValueError(
+                "Explanation is required and must be detailed enough for an independent auditor "
+                "to verify your work. Explain WHAT you did, HOW you did it, and reference "
+                "specific evidence (file paths, test results, etc.)."
+            )
 
         todo = self._todos[id]
         current_status = todo.get("status", "pending")
@@ -2941,9 +2957,14 @@ class LocalHarness(Harness):
         # Capture before state
         before = todo.copy()
 
-        # Update status and add evidence
+        # Update status and add claim details
         todo["status"] = "claimed"
         todo["claimed_at"] = datetime.now(UTC).isoformat()
+        todo["explanation"] = explanation  # Store the worker's explanation
+        todo["review_status"] = "pending_audit"  # New field for auditor tracking
+        todo["audit_attempts"] = 0  # Track audit attempts for loop prevention
+        todo["revision_attempts"] = 0  # Track revision attempts
+
         if evidence:
             todo["evidence"].extend(evidence)
 
@@ -2953,29 +2974,35 @@ class LocalHarness(Harness):
             todo_id=id,
             before=before,
             after=todo.copy(),
-            extra={"evidence_count": len(evidence) if evidence else 0},
+            extra={
+                "evidence_count": len(evidence) if evidence else 0,
+                "explanation_length": len(explanation),
+            },
         )
 
         result_lines = [
             f"Claimed todo [{id}]: {todo['content']}",
             "Status: in_progress -> claimed",
+            f"Explanation provided: {len(explanation)} characters",
         ]
         if evidence:
             result_lines.append(f"Evidence provided: {len(evidence)} items")
 
-        # Auto-verify if enabled
-        if auto_verify:
-            result_lines.append("\n--- Auto-Verification ---")
-            verify_result = self._auto_verify_todo(id)
+        # Check if acceptance criteria exist for auto-verify
+        criteria = todo.get("acceptance_criteria", [])
+
+        # Auto-verify ONLY if enabled AND acceptance criteria exist
+        if auto_verify and criteria:
+            result_lines.append("\n--- Criteria-Based Verification ---")
+            verify_result = self._todo_verify(id)
             result_lines.append(verify_result)
         else:
-            # Check if acceptance criteria exist
-            criteria = todo.get("acceptance_criteria", [])
-            if criteria:
-                result_lines.append(f"\nThis todo has {len(criteria)} acceptance criteria.")
-                result_lines.append("Use TodoVerify to check if criteria are met and move to 'verified' status.")
-            else:
-                result_lines.append("\nNo acceptance criteria defined - manual verification required.")
+            # Indicate auditor verification is pending
+            result_lines.append("\n--- Auditor Verification ---")
+            result_lines.append("Your claim has been submitted for independent verification.")
+            result_lines.append("An auditor agent will review your explanation and evidence.")
+            result_lines.append("The auditor may ask follow-up questions if more information is needed.")
+            result_lines.append("Status will move to 'verified' only after auditor approval or human override.")
 
         return "\n".join(result_lines)
 

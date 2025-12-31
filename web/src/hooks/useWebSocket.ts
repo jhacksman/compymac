@@ -263,6 +263,75 @@ export function useWebSocket(sessionId: string | null) {
     }
   }, [])
 
+  // Human intervention handlers
+  const pauseSession = useCallback((reason: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'pause_session',
+        reason,
+      }))
+    }
+  }, [])
+
+  const resumeSession = useCallback((feedback: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'resume_session',
+        feedback,
+      }))
+    }
+  }, [])
+
+  const approveTodo = useCallback((id: string, reason: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'todo_approve',
+        id,
+        reason,
+      }))
+    }
+  }, [])
+
+  const rejectTodo = useCallback((id: string, reason: string, feedback: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'todo_reject',
+        id,
+        reason,
+        feedback,
+      }))
+    }
+  }, [])
+
+  const addTodoNote = useCallback((id: string, note: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'todo_add_note',
+        id,
+        note,
+      }))
+    }
+  }, [])
+
+  const editTodo = useCallback((id: string, content: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'todo_edit',
+        id,
+        content,
+      }))
+    }
+  }, [])
+
+  const deleteTodo = useCallback((id: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'todo_delete',
+        id,
+      }))
+    }
+  }, [])
+
   useEffect(() => {
     if (!sessionId) return
     
@@ -294,6 +363,14 @@ export function useWebSocket(sessionId: string | null) {
     setBrowserControlMode,
     createTodo,
     updateTodo,
+    // Human intervention handlers
+    pauseSession,
+    resumeSession,
+    approveTodo,
+    rejectTodo,
+    addTodoNote,
+    editTodo,
+    deleteTodo,
     connect,
     disconnect,
   }
