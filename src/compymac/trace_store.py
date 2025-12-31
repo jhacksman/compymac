@@ -424,12 +424,28 @@ class ArtifactStore:
     Content-addressed storage for large payloads.
 
     Artifacts are stored by SHA-256 hash, enabling deduplication across runs.
+    Optionally redacts secrets before storage using SecretScanner.
     """
 
-    def __init__(self, base_path: Path):
+    def __init__(self, base_path: Path, redact_secrets: bool = True):
+        """
+        Initialize ArtifactStore.
+
+        Args:
+            base_path: Directory to store artifacts
+            redact_secrets: If True, redact secrets before storing (default: True)
+        """
         self.base_path = base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._redact_secrets = redact_secrets
+        self._scanner = None
+        if redact_secrets:
+            try:
+                from compymac.security.scanner import SecretScanner
+                self._scanner = SecretScanner()
+            except ImportError:
+                pass  # SecretScanner not available
 
     def _get_artifact_path(self, artifact_hash: str) -> Path:
         """Get the storage path for an artifact (sharded by first 2 chars)."""
@@ -445,23 +461,45 @@ class ArtifactStore:
         content_type: str,
         metadata: dict[str, Any] | None = None,
     ) -> Artifact:
-        """Store data and return artifact metadata."""
-        artifact_hash = compute_hash(data)
+        """Store data and return artifact metadata.
+
+        If redact_secrets is enabled and the content is text-based,
+        secrets will be redacted before storage.
+        """
+        # Redact secrets from text content if scanner is available
+        stored_data = data
+        secrets_redacted = False
+        if self._scanner and content_type.startswith(("text/", "application/json")):
+            try:
+                text = data.decode("utf-8")
+                redacted_text = self._scanner.redact(text)
+                if redacted_text != text:
+                    stored_data = redacted_text.encode("utf-8")
+                    secrets_redacted = True
+            except (UnicodeDecodeError, Exception):
+                pass  # Not text or redaction failed, store original
+
+        artifact_hash = compute_hash(stored_data)
 
         with self._lock:
             path = self._get_artifact_path(artifact_hash)
 
             if not path.exists():
-                path.write_bytes(data)
+                path.write_bytes(stored_data)
+
+            # Track if secrets were redacted in metadata
+            artifact_metadata = metadata.copy() if metadata else {}
+            if secrets_redacted:
+                artifact_metadata["secrets_redacted"] = True
 
             artifact = Artifact(
                 artifact_hash=artifact_hash,
                 artifact_type=artifact_type,
                 content_type=content_type,
-                byte_len=len(data),
+                byte_len=len(stored_data),
                 storage_path=str(path),
                 created_ts=datetime.now(UTC),
-                metadata=metadata or {},
+                metadata=artifact_metadata,
             )
 
         return artifact
