@@ -681,11 +681,190 @@ class BrowserActionVerifier(Verifier):
         return actual == expected or actual.endswith(expected) or expected.endswith(actual)
 
 
+@dataclass
+class EvidenceRecord:
+    """A record of evidence collected during a run."""
+    evidence_type: str  # "test_pass", "file_edit", "command_success", "verification_pass"
+    timestamp: float
+    tool_name: str
+    description: str
+    details: dict[str, Any] = field(default_factory=dict)
+    verification_result: VerificationResult | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "evidence_type": self.evidence_type,
+            "timestamp": self.timestamp,
+            "tool_name": self.tool_name,
+            "description": self.description,
+            "details": self.details,
+            "verification_result": self.verification_result.to_dict() if self.verification_result else None,
+        }
+
+
+class VerificationTracker:
+    """
+    Tracks evidence collected during a run and gates completion.
+
+    This addresses Gap 3: Verification Before Complete - ensuring agents
+    cannot claim completion without providing evidence of success.
+
+    Evidence types tracked:
+    - test_pass: Test execution with passing results
+    - file_edit: Successful file modifications
+    - command_success: Bash commands with exit code 0
+    - verification_pass: Tool verification checks that passed
+
+    Completion is blocked unless:
+    1. At least one piece of evidence has been collected, OR
+    2. The task explicitly doesn't require evidence (e.g., pure analysis)
+    """
+
+    def __init__(self, require_evidence: bool = True):
+        self.require_evidence = require_evidence
+        self.evidence: list[EvidenceRecord] = []
+        self.completion_blocked_reason: str | None = None
+        self._evidence_requirements: dict[str, bool] = {}  # requirement_name -> satisfied
+
+    def add_evidence(self, record: EvidenceRecord) -> None:
+        """Add an evidence record."""
+        self.evidence.append(record)
+
+    def record_test_pass(self, tool_name: str, test_output: str,
+                         passed_count: int, failed_count: int = 0) -> None:
+        """Record evidence of tests passing."""
+        import time
+        self.evidence.append(EvidenceRecord(
+            evidence_type="test_pass",
+            timestamp=time.time(),
+            tool_name=tool_name,
+            description=f"{passed_count} tests passed, {failed_count} failed",
+            details={
+                "passed_count": passed_count,
+                "failed_count": failed_count,
+                "output_preview": test_output[:500] if test_output else "",
+            }
+        ))
+
+    def record_file_edit(self, tool_name: str, file_path: str,
+                         verification_result: VerificationResult | None = None) -> None:
+        """Record evidence of successful file edit."""
+        import time
+        self.evidence.append(EvidenceRecord(
+            evidence_type="file_edit",
+            timestamp=time.time(),
+            tool_name=tool_name,
+            description=f"Edited {file_path}",
+            details={"file_path": file_path},
+            verification_result=verification_result,
+        ))
+
+    def record_command_success(self, tool_name: str, command: str,
+                               exit_code: int, output: str) -> None:
+        """Record evidence of successful command execution."""
+        import time
+        if exit_code == 0:
+            self.evidence.append(EvidenceRecord(
+                evidence_type="command_success",
+                timestamp=time.time(),
+                tool_name=tool_name,
+                description=f"Command succeeded: {command[:50]}...",
+                details={
+                    "command": command,
+                    "exit_code": exit_code,
+                    "output_preview": output[:500] if output else "",
+                }
+            ))
+
+    def record_verification_pass(self, tool_name: str,
+                                  verification_result: VerificationResult) -> None:
+        """Record evidence of verification passing."""
+        import time
+        if verification_result.all_checks_passed:
+            self.evidence.append(EvidenceRecord(
+                evidence_type="verification_pass",
+                timestamp=time.time(),
+                tool_name=tool_name,
+                description=f"Verification passed for {tool_name}",
+                details={"confidence": verification_result.confidence_score},
+                verification_result=verification_result,
+            ))
+
+    def set_requirement(self, requirement_name: str, satisfied: bool = False) -> None:
+        """Set a specific evidence requirement."""
+        self._evidence_requirements[requirement_name] = satisfied
+
+    def satisfy_requirement(self, requirement_name: str) -> None:
+        """Mark a requirement as satisfied."""
+        if requirement_name in self._evidence_requirements:
+            self._evidence_requirements[requirement_name] = True
+
+    def can_complete(self) -> tuple[bool, str]:
+        """
+        Check if completion is allowed based on collected evidence.
+
+        Returns:
+            Tuple of (can_complete, reason_if_blocked)
+        """
+        if not self.require_evidence:
+            return True, ""
+
+        # Check specific requirements first
+        unsatisfied = [name for name, satisfied in self._evidence_requirements.items()
+                       if not satisfied]
+        if unsatisfied:
+            return False, (
+                f"[COMPLETION BLOCKED] Missing required evidence: {', '.join(unsatisfied)}. "
+                f"You must provide evidence before calling complete()."
+            )
+
+        # Check general evidence collection
+        if not self.evidence:
+            return False, (
+                "[COMPLETION BLOCKED] No evidence of work collected. "
+                "Before calling complete(), you must have at least one of: "
+                "successful test run, verified file edit, or successful command execution. "
+                "Run tests, make edits, or execute commands to collect evidence."
+            )
+
+        return True, ""
+
+    def get_evidence_summary(self) -> str:
+        """Get a summary of collected evidence."""
+        if not self.evidence:
+            return "No evidence collected"
+
+        by_type: dict[str, int] = {}
+        for record in self.evidence:
+            by_type[record.evidence_type] = by_type.get(record.evidence_type, 0) + 1
+
+        parts = [f"{count} {etype}" for etype, count in sorted(by_type.items())]
+        return f"Evidence collected: {', '.join(parts)}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize tracker state."""
+        return {
+            "require_evidence": self.require_evidence,
+            "evidence": [e.to_dict() for e in self.evidence],
+            "requirements": self._evidence_requirements,
+            "can_complete": self.can_complete()[0],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VerificationTracker:
+        """Deserialize tracker state."""
+        tracker = cls(require_evidence=data.get("require_evidence", True))
+        tracker._evidence_requirements = data.get("requirements", {})
+        # Note: evidence records would need to be reconstructed if needed
+        return tracker
+
+
 class VerificationEngine:
     """Engine for managing tool verification."""
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
+        self.tracker: VerificationTracker | None = None  # Optional evidence tracker
         self.verifiers: dict[str, Verifier] = {
             "bash": BashVerifier(),
             "Bash": BashVerifier(),
@@ -746,3 +925,37 @@ class VerificationEngine:
             contract = verifier.create_contract(**tool_call.arguments)
 
         return verifier.check_preconditions(contract)
+
+    # =========================================================================
+    # Evidence Tracking Methods (Gap 3: Verification Before Complete)
+    # =========================================================================
+
+    def enable_evidence_tracking(self, require_evidence: bool = True) -> None:
+        """Enable evidence tracking for completion gating."""
+        self.tracker = VerificationTracker(require_evidence=require_evidence)
+
+    def disable_evidence_tracking(self) -> None:
+        """Disable evidence tracking."""
+        self.tracker = None
+
+    def get_tracker(self) -> VerificationTracker | None:
+        """Get the current evidence tracker."""
+        return self.tracker
+
+    def record_evidence_from_verification(self, tool_name: str,
+                                          result: VerificationResult) -> None:
+        """Record evidence from a verification result."""
+        if self.tracker and result.all_checks_passed:
+            self.tracker.record_verification_pass(tool_name, result)
+
+    def can_complete(self) -> tuple[bool, str]:
+        """Check if completion is allowed based on evidence."""
+        if not self.tracker:
+            return True, ""
+        return self.tracker.can_complete()
+
+    def get_evidence_summary(self) -> str:
+        """Get summary of collected evidence."""
+        if not self.tracker:
+            return "Evidence tracking not enabled"
+        return self.tracker.get_evidence_summary()
