@@ -1,81 +1,61 @@
 'use client'
 
-import { Settings } from 'lucide-react'
-import { useSessionStore, type WorkspacePanel } from '@/store/session'
+import { useState } from 'react'
+import { Settings, Globe, Terminal, CheckSquare, Share2 } from 'lucide-react'
 import { BrowserPanel } from './BrowserPanel'
 import { TerminalPanel } from './TerminalPanel'
 import { TodosPanel } from './TodosPanel'
 import { KnowledgeGraphPanel } from './KnowledgeGraphPanel'
+import { cn } from '@/lib/utils'
+
+type TabId = 'browser' | 'cli' | 'todos' | 'knowledge'
+
+interface Tab {
+  id: TabId
+  label: string
+  icon: React.ReactNode
+}
+
+const tabs: Tab[] = [
+  { id: 'browser', label: 'Browser', icon: <Globe className="w-4 h-4" /> },
+  { id: 'cli', label: 'CLI', icon: <Terminal className="w-4 h-4" /> },
+  { id: 'todos', label: 'Todos', icon: <CheckSquare className="w-4 h-4" /> },
+  { id: 'knowledge', label: 'Knowledge Graph', icon: <Share2 className="w-4 h-4" /> },
+]
 
 export function AgentWorkspace() {
-  const { maximizedPanel, setMaximizedPanel } = useSessionStore()
-
-  const handleMaximize = (panel: WorkspacePanel) => {
-    if (maximizedPanel === panel) {
-      setMaximizedPanel(null)
-    } else {
-      setMaximizedPanel(panel)
-    }
-  }
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && maximizedPanel) {
-      setMaximizedPanel(null)
-    }
-  }
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('keydown', handleKeyDown)
-  }
-
-  if (maximizedPanel) {
-    return (
-      <div className="flex flex-col h-full bg-slate-950 p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-white">Agent Workspace</h2>
-          <button className="p-2 text-slate-400 hover:text-white transition-colors">
-            <Settings className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="flex-1 min-h-0">
-          {maximizedPanel === 'browser' && (
-            <BrowserPanel isMaximized onMaximize={() => handleMaximize('browser')} />
-          )}
-          {maximizedPanel === 'cli' && (
-            <TerminalPanel isMaximized onMaximize={() => handleMaximize('cli')} />
-          )}
-          {maximizedPanel === 'todos' && (
-            <TodosPanel isMaximized onMaximize={() => handleMaximize('todos')} />
-          )}
-          {maximizedPanel === 'knowledge' && (
-            <KnowledgeGraphPanel isMaximized onMaximize={() => handleMaximize('knowledge')} />
-          )}
-        </div>
-      </div>
-    )
-  }
+  const [activeTab, setActiveTab] = useState<TabId>('browser')
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Agent Workspace</h2>
+    <div className="flex flex-col h-full bg-slate-950">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div className="flex items-center gap-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                activeTab === tab.id
+                  ? "bg-slate-700 text-white border-b-2 border-blue-500"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+              )}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <button className="p-2 text-slate-400 hover:text-white transition-colors">
           <Settings className="w-5 h-5" />
         </button>
       </div>
-      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 min-h-0">
-        <div className="min-h-0 cursor-pointer" onClick={() => handleMaximize('browser')}>
-          <BrowserPanel onMaximize={() => handleMaximize('browser')} />
-        </div>
-        <div className="min-h-0 cursor-pointer" onClick={() => handleMaximize('todos')}>
-          <TodosPanel onMaximize={() => handleMaximize('todos')} />
-        </div>
-        <div className="min-h-0 cursor-pointer" onClick={() => handleMaximize('cli')}>
-          <TerminalPanel onMaximize={() => handleMaximize('cli')} />
-        </div>
-        <div className="min-h-0 cursor-pointer" onClick={() => handleMaximize('knowledge')}>
-          <KnowledgeGraphPanel onMaximize={() => handleMaximize('knowledge')} />
-        </div>
+
+      <div className="flex-1 p-4 min-h-0">
+        {activeTab === 'browser' && <BrowserPanel isMaximized />}
+        {activeTab === 'cli' && <TerminalPanel isMaximized />}
+        {activeTab === 'todos' && <TodosPanel isMaximized />}
+        {activeTab === 'knowledge' && <KnowledgeGraphPanel isMaximized />}
       </div>
     </div>
   )

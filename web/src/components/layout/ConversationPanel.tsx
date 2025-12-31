@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { Send, Mic, ChevronRight, User, Bot, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Send, Mic, ChevronRight, User, Bot, Loader2, Wifi, WifiOff } from 'lucide-react'
 import { useSessionStore, type Message, type ToolCall } from '@/store/session'
 import { cn } from '@/lib/utils'
+import { useWebSocket } from '@/hooks/useWebSocket'
 
 function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
   return (
@@ -64,16 +65,12 @@ function MessageBubble({ message }: { message: Message }) {
 
 export function ConversationPanel() {
   const [inputValue, setInputValue] = useState('')
-  const { messages, agentGoal, agentStatus, addMessage, streamingContent, isStreaming } = useSessionStore()
+  const { messages, agentGoal, agentStatus, currentSessionId, streamingContent, isStreaming } = useSessionStore()
+  const { isConnected, isConnecting, sendMessage } = useWebSocket(currentSessionId)
 
   const handleSend = () => {
-    if (!inputValue.trim()) return
-    addMessage({
-      id: Date.now().toString(),
-      role: 'user',
-      content: inputValue,
-      timestamp: new Date(),
-    })
+    if (!inputValue.trim() || !isConnected) return
+    sendMessage(inputValue)
     setInputValue('')
   }
 
@@ -105,11 +102,22 @@ export function ConversationPanel() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 text-slate-400">
-          <span className="text-sm">Goal:</span>
-          <span className="text-sm text-white bg-slate-800 px-3 py-1 rounded-full">
-            {agentGoal}
-          </span>
+        <div className="flex items-center gap-4 text-slate-400">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">Goal:</span>
+            <span className="text-sm text-white bg-slate-800 px-3 py-1 rounded-full">
+              {agentGoal}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {isConnected ? (
+              <Wifi className="w-4 h-4 text-green-400" />
+            ) : isConnecting ? (
+              <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+            ) : (
+              <WifiOff className="w-4 h-4 text-red-400" />
+            )}
+          </div>
         </div>
       </div>
 
