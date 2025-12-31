@@ -526,14 +526,16 @@ class LocalHarness(Harness):
                     "Explain WHAT you did, HOW you did it, and reference specific evidence (file paths, test results). "
                     "Evidence format: [{\"type\": \"file_path\", \"data\": \"/path/to/file\"}, "
                     "{\"type\": \"command_output\", \"data\": {\"command\": \"pytest\", \"exit_code\": 0}}]. "
-                    "An independent auditor will verify your claim before it can be marked as 'verified'."
+                    "An independent auditor will verify your claim before it can be marked as 'verified'. "
+                    "Set auto_verify=true to run criteria-based verification immediately if acceptance criteria exist."
                 ),
                 required_params=["id", "explanation"],
-                optional_params=["evidence"],
+                optional_params=["evidence", "auto_verify"],
                 param_types={
                     "id": "string",
                     "explanation": "string",  # REQUIRED: What was done, how, why it satisfies criteria
                     "evidence": "array",  # List of {type, data} objects
+                    "auto_verify": "boolean",  # Default: false (auditor verification by default)
                 },
             ),
             handler=self._todo_claim,
@@ -2908,6 +2910,7 @@ class LocalHarness(Harness):
         id: str,
         explanation: str,
         evidence: list[dict[str, Any]] | None = None,
+        auto_verify: bool = False,
     ) -> str:
         """Claim a todo is complete. Moves status from 'in_progress' to 'claimed'.
 
@@ -2921,6 +2924,8 @@ class LocalHarness(Harness):
                 (auditor has no access to worker's conversation history).
             evidence: Optional list of evidence supporting the claim
                 Each item: {"type": "file_path"|"command_output"|..., "data": ...}
+            auto_verify: If True and acceptance criteria exist, run criteria-based
+                verification immediately (default: False, auditor verification)
 
         Returns:
             Confirmation of claim with auditor verification status
@@ -2983,14 +2988,208 @@ class LocalHarness(Harness):
         if evidence:
             result_lines.append(f"Evidence provided: {len(evidence)} items")
 
-        # Indicate auditor verification is pending
-        result_lines.append("\n--- Auditor Verification ---")
-        result_lines.append("Your claim has been submitted for independent verification.")
-        result_lines.append("An auditor agent will review your explanation and evidence.")
-        result_lines.append("The auditor may ask follow-up questions if more information is needed.")
-        result_lines.append("Status will move to 'verified' only after auditor approval or human override.")
+        # Check if acceptance criteria exist for auto-verify
+        criteria = todo.get("acceptance_criteria", [])
+
+        # Auto-verify ONLY if enabled AND acceptance criteria exist
+        if auto_verify and criteria:
+            result_lines.append("\n--- Criteria-Based Verification ---")
+            verify_result = self._todo_verify(id)
+            result_lines.append(verify_result)
+        else:
+            # Indicate auditor verification is pending
+            result_lines.append("\n--- Auditor Verification ---")
+            result_lines.append("Your claim has been submitted for independent verification.")
+            result_lines.append("An auditor agent will review your explanation and evidence.")
+            result_lines.append("The auditor may ask follow-up questions if more information is needed.")
+            result_lines.append("Status will move to 'verified' only after auditor approval or human override.")
 
         return "\n".join(result_lines)
+
+    def _auto_verify_todo(self, id: str) -> str:
+        """Automatically verify a claimed todo.
+
+        This method attempts to verify a todo using:
+        1. Explicit acceptance criteria if defined
+        2. Smart inference based on todo content and evidence if no criteria
+
+        Args:
+            id: The stable ID of the todo to verify
+
+        Returns:
+            Verification result message
+        """
+        todo = self._todos.get(id)
+        if not todo:
+            return f"Error: Todo '{id}' not found"
+
+        if todo.get("status") != "claimed":
+            return f"Error: Todo '{id}' is not in 'claimed' status"
+
+        criteria = todo.get("acceptance_criteria", [])
+
+        # If explicit criteria exist, use standard verification
+        if criteria:
+            return self._todo_verify(id)
+
+        # Otherwise, use smart inference based on todo content and evidence
+        return self._smart_verify_todo(id)
+
+    def _smart_verify_todo(self, id: str) -> str:
+        """Smart verification for todos without explicit acceptance criteria.
+
+        Infers verification based on:
+        - Todo content (looking for keywords like 'create', 'write', 'test', etc.)
+        - Evidence provided (file paths, command outputs, etc.)
+        - Recent tool call history
+
+        Args:
+            id: The stable ID of the todo to verify
+
+        Returns:
+            Verification result message
+        """
+        todo = self._todos[id]
+        content = todo.get("content", "").lower()
+        evidence = todo.get("evidence", [])
+
+        # Capture before state
+        before = todo.copy()
+
+        # Analyze todo content for verification hints
+        verification_checks: list[dict[str, Any]] = []
+
+        # Check for file creation/modification evidence
+        file_evidence = [e for e in evidence if e.get("type") in ("file_path", "file_created", "file_modified")]
+        if file_evidence:
+            for fe in file_evidence:
+                path = fe.get("data", {}).get("path") or fe.get("data")
+                if path and isinstance(path, str):
+                    if os.path.exists(path):
+                        verification_checks.append({
+                            "type": "file_exists",
+                            "passed": True,
+                            "message": f"File exists: {path}",
+                        })
+                    else:
+                        verification_checks.append({
+                            "type": "file_exists",
+                            "passed": False,
+                            "message": f"File not found: {path}",
+                        })
+
+        # Check for command success evidence
+        command_evidence = [e for e in evidence if e.get("type") in ("command_output", "command_success")]
+        if command_evidence:
+            for ce in command_evidence:
+                exit_code = ce.get("data", {}).get("exit_code", 0)
+                if exit_code == 0:
+                    verification_checks.append({
+                        "type": "command_success",
+                        "passed": True,
+                        "message": "Command completed successfully",
+                    })
+                else:
+                    verification_checks.append({
+                        "type": "command_success",
+                        "passed": False,
+                        "message": f"Command failed with exit code {exit_code}",
+                    })
+
+        # Check for test-related todos
+        if any(word in content for word in ["test", "verify", "check", "validate"]):
+            # Look for test pass evidence
+            test_evidence = [e for e in evidence if "test" in str(e.get("type", "")).lower() or "test" in str(e.get("data", "")).lower()]
+            if test_evidence:
+                verification_checks.append({
+                    "type": "test_evidence",
+                    "passed": True,
+                    "message": "Test-related evidence found",
+                })
+
+        # Check for PR-related todos
+        if any(word in content for word in ["pr", "pull request", "merge"]):
+            pr_evidence = [e for e in evidence if e.get("type") == "pr_created" or "pr" in str(e.get("data", "")).lower()]
+            if pr_evidence:
+                verification_checks.append({
+                    "type": "pr_evidence",
+                    "passed": True,
+                    "message": "PR-related evidence found",
+                })
+
+        # If we have evidence and all checks pass, verify the todo
+        if verification_checks:
+            all_passed = all(check["passed"] for check in verification_checks)
+
+            if all_passed:
+                # Move to verified
+                todo["status"] = "verified"
+                todo["verified_at"] = datetime.now(UTC).isoformat()
+                todo["verification_results"] = verification_checks
+                todo["verification_method"] = "smart_inference"
+
+                # Log state change
+                self._log_todo_event(
+                    event_type="TODO_VERIFY",
+                    todo_id=id,
+                    before=before,
+                    after=todo.copy(),
+                    extra={"all_passed": True, "method": "smart_inference", "checks_count": len(verification_checks)},
+                )
+
+                result_lines = [
+                    f"AUTO-VERIFIED: Todo [{id}] passed smart verification!",
+                    "Status: claimed -> verified",
+                    "",
+                    "Verification checks:",
+                ]
+                for check in verification_checks:
+                    result_lines.append(f"  [PASS] {check['type']}: {check['message']}")
+
+                return "\n".join(result_lines)
+            else:
+                # Some checks failed
+                self._log_todo_event(
+                    event_type="TODO_VERIFY_FAILED",
+                    todo_id=id,
+                    before=before,
+                    after=todo.copy(),
+                    extra={"all_passed": False, "method": "smart_inference", "checks_count": len(verification_checks)},
+                )
+
+                result_lines = [
+                    f"AUTO-VERIFICATION FAILED: Todo [{id}] did not pass all checks.",
+                    "Status remains: claimed",
+                    "",
+                    "Verification checks:",
+                ]
+                for check in verification_checks:
+                    status = "[PASS]" if check["passed"] else "[FAIL]"
+                    result_lines.append(f"  {status} {check['type']}: {check['message']}")
+
+                return "\n".join(result_lines)
+
+        # No evidence to verify - auto-verify based on claim (trust the agent)
+        # This is a fallback for simple todos without explicit verification needs
+        todo["status"] = "verified"
+        todo["verified_at"] = datetime.now(UTC).isoformat()
+        todo["verification_results"] = [{"type": "agent_claim", "passed": True, "message": "Verified based on agent claim (no explicit criteria)"}]
+        todo["verification_method"] = "agent_claim"
+
+        # Log state change
+        self._log_todo_event(
+            event_type="TODO_VERIFY",
+            todo_id=id,
+            before=before,
+            after=todo.copy(),
+            extra={"all_passed": True, "method": "agent_claim"},
+        )
+
+        return (
+            f"AUTO-VERIFIED: Todo [{id}] verified based on agent claim.\n"
+            "Status: claimed -> verified\n"
+            "(No explicit acceptance criteria - trusting agent assertion)"
+        )
 
     def _todo_verify(self, id: str) -> str:
         """Verify a claimed todo by checking its acceptance criteria.
