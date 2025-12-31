@@ -2,6 +2,13 @@
 
 from pathlib import Path
 
+from compymac.prompts.assembly import (
+    assemble_prompt,
+    get_stable_prefix,
+    get_swe_bench_prompt,
+    list_available_workflows,
+)
+
 PROMPTS_DIR = Path(__file__).parent
 
 
@@ -15,4 +22,11 @@ def load_swe_bench_v5_prompt() -> str:
     return prompt_file.read_text()
 
 
-__all__ = ["load_swe_bench_v5_prompt", "PROMPTS_DIR"]
+__all__ = [
+    "load_swe_bench_v5_prompt",
+    "PROMPTS_DIR",
+    "assemble_prompt",
+    "get_stable_prefix",
+    "get_swe_bench_prompt",
+    "list_available_workflows",
+]
