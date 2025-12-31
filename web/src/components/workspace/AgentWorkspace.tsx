@@ -23,7 +23,21 @@ const tabs: Tab[] = [
   { id: 'knowledge', label: 'Knowledge Graph', icon: <Share2 className="w-4 h-4" /> },
 ]
 
-export function AgentWorkspace() {
+interface AgentWorkspaceProps {
+  onRunCommand?: (command: string, execDir?: string) => void
+  onBrowserNavigate?: (url: string) => void
+  onSetBrowserControl?: (control: 'user' | 'agent') => void
+  onCreateTodo?: (content: string) => void
+  onUpdateTodo?: (id: string, status: 'pending' | 'in_progress' | 'completed') => void
+}
+
+export function AgentWorkspace({
+  onRunCommand,
+  onBrowserNavigate,
+  onSetBrowserControl,
+  onCreateTodo,
+  onUpdateTodo,
+}: AgentWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<TabId>('browser')
 
   return (
@@ -52,9 +66,26 @@ export function AgentWorkspace() {
       </div>
 
       <div className="flex-1 p-4 min-h-0">
-        {activeTab === 'browser' && <BrowserPanel isMaximized />}
-        {activeTab === 'cli' && <TerminalPanel isMaximized />}
-        {activeTab === 'todos' && <TodosPanel isMaximized />}
+        {activeTab === 'browser' && (
+          <BrowserPanel 
+            isMaximized 
+            onNavigate={onBrowserNavigate}
+            onSetControl={onSetBrowserControl}
+          />
+        )}
+        {activeTab === 'cli' && (
+          <TerminalPanel 
+            isMaximized 
+            onRunCommand={onRunCommand}
+          />
+        )}
+        {activeTab === 'todos' && (
+          <TodosPanel 
+            isMaximized 
+            onCreateTodo={onCreateTodo}
+            onUpdateTodo={onUpdateTodo}
+          />
+        )}
         {activeTab === 'knowledge' && <KnowledgeGraphPanel isMaximized />}
       </div>
     </div>
