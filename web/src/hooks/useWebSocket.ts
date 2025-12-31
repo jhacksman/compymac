@@ -3,6 +3,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useSessionStore, type Todo } from '@/store/session'
 
+type AgentStatus = 'active' | 'paused' | 'idle' | 'planning' | 'executing' | 'working' | 'error'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8000'
 
 interface TerminalEntry {
@@ -37,7 +39,7 @@ interface WebSocketMessage {
     todos?: Array<{
       id: string
       content: string
-      status: 'pending' | 'in_progress' | 'completed'
+      status: 'pending' | 'in_progress' | 'claimed' | 'verified'
     }>
     lines?: TerminalEntry[]
     new_entry?: TerminalEntry
@@ -46,6 +48,7 @@ interface WebSocketMessage {
     screenshot_url?: string | null
     elements?: BrowserState['elements']
     control?: 'user' | 'agent'
+    status?: string  // For agent_status events
   }
   events?: Array<{
     type: string
@@ -72,6 +75,7 @@ export function useWebSocket(sessionId: string | null) {
     setBrowserState, 
     setBrowserControl,
     setTerminalOutput,
+    setAgentStatus,
   } = useSessionStore()
 
   const connect = useCallback(() => {
@@ -121,6 +125,24 @@ export function useWebSocket(sessionId: string | null) {
             )
           } else if (evt.type === 'browser_control' && evt.control) {
             setBrowserControl(evt.control)
+          } else if (evt.type === 'agent_status' && evt.status) {
+            // Map backend status to frontend status
+            const statusMap: Record<string, AgentStatus> = {
+              'planning': 'planning',
+              'executing': 'executing',
+              'working': 'working',
+              'idle': 'idle',
+              'error': 'error',
+            }
+            const mappedStatus = statusMap[evt.status] || 'idle'
+            setAgentStatus(mappedStatus)
+            
+            // Also update streaming state based on status
+            if (evt.status === 'planning' || evt.status === 'executing' || evt.status === 'working') {
+              setIsStreaming(true)
+            } else {
+              setIsStreaming(false)
+            }
           }
         } else if (data.type === 'backfill' && data.events) {
           data.events.forEach((evt) => {
@@ -154,7 +176,7 @@ export function useWebSocket(sessionId: string | null) {
     }
 
     wsRef.current = ws
-  }, [sessionId, addMessage, setIsStreaming, setTodos, setBrowserState, setBrowserControl, setTerminalOutput])
+  }, [sessionId, addMessage, setIsStreaming, setTodos, setBrowserState, setBrowserControl, setTerminalOutput, setAgentStatus])
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {

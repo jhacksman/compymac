@@ -1,23 +1,28 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckSquare, Circle, Loader2, Maximize2, Minimize2, Plus } from 'lucide-react'
+import { CheckSquare, Circle, Loader2, Maximize2, Minimize2, Plus, HelpCircle, CheckCircle2 } from 'lucide-react'
 import { useSessionStore } from '@/store/session'
 import { cn } from '@/lib/utils'
+
+// Status types matching harness: pending -> in_progress -> claimed -> verified
+type TodoStatus = 'pending' | 'in_progress' | 'claimed' | 'verified'
 
 interface TodosPanelProps {
   isMaximized?: boolean
   onMaximize?: () => void
   onCreateTodo?: (content: string) => void
-  onUpdateTodo?: (id: string, status: 'pending' | 'in_progress' | 'completed') => void
+  onUpdateTodo?: (id: string, status: TodoStatus) => void
 }
 
 export function TodosPanel({ isMaximized, onMaximize, onCreateTodo, onUpdateTodo }: TodosPanelProps) {
   const { todos } = useSessionStore()
   const [newTodoContent, setNewTodoContent] = useState('')
 
-  const currentTasks = todos.filter(t => t.status === 'in_progress' || t.status === 'pending').slice(0, isMaximized ? undefined : 3)
-  const upcomingTasks = todos.filter(t => t.status === 'pending').slice(isMaximized ? 0 : 1)
+  // Group todos by status: in_progress/claimed are "current", pending are "upcoming", verified are "completed"
+  const currentTasks = todos.filter(t => t.status === 'in_progress' || t.status === 'claimed').slice(0, isMaximized ? undefined : 3)
+  const upcomingTasks = todos.filter(t => t.status === 'pending').slice(isMaximized ? 0 : 3)
+  const completedTasks = todos.filter(t => t.status === 'verified')
 
   return (
     <div className={cn(
@@ -90,28 +95,35 @@ export function TodosPanel({ isMaximized, onMaximize, onCreateTodo, onUpdateTodo
                     className="flex items-start gap-2 cursor-pointer hover:bg-slate-800/50 rounded p-1 -m-1"
                     onClick={() => {
                       if (onUpdateTodo) {
-                        const nextStatus = todo.status === 'pending' ? 'in_progress' : 
-                                          todo.status === 'in_progress' ? 'completed' : 'pending'
+                        // Status flow: pending -> in_progress -> claimed -> verified
+                        const nextStatus: TodoStatus = todo.status === 'pending' ? 'in_progress' : 
+                                          todo.status === 'in_progress' ? 'claimed' : 
+                                          todo.status === 'claimed' ? 'verified' : 'pending'
                         onUpdateTodo(todo.id, nextStatus)
                       }
                     }}
                   >
                     {todo.status === 'in_progress' ? (
                       <Loader2 className="w-4 h-4 text-blue-400 animate-spin mt-0.5" />
-                    ) : todo.status === 'completed' ? (
-                      <CheckSquare className="w-4 h-4 text-green-400 mt-0.5" />
+                    ) : todo.status === 'claimed' ? (
+                      <HelpCircle className="w-4 h-4 text-yellow-400 mt-0.5" />
+                    ) : todo.status === 'verified' ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-400 mt-0.5" />
                     ) : (
                       <Circle className="w-4 h-4 text-slate-500 mt-0.5" />
                     )}
                     <div className="flex-1 min-w-0">
                       <p className={cn(
                         "text-sm",
-                        todo.status === 'completed' ? "text-slate-500 line-through" : "text-slate-200"
+                        todo.status === 'verified' ? "text-slate-500 line-through" : "text-slate-200"
                       )}>
                         {todo.content}
                       </p>
                       {todo.status === 'in_progress' && (
                         <span className="text-xs text-blue-400">In Progress</span>
+                      )}
+                      {todo.status === 'claimed' && (
+                        <span className="text-xs text-yellow-400">Claimed (awaiting verification)</span>
                       )}
                     </div>
                   </div>
@@ -120,7 +132,7 @@ export function TodosPanel({ isMaximized, onMaximize, onCreateTodo, onUpdateTodo
             </div>
 
             {(isMaximized || upcomingTasks.length > 0) && upcomingTasks.length > 0 && (
-              <div>
+              <div className="mb-4">
                 <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
                   Upcoming
                 </h4>
@@ -137,6 +149,25 @@ export function TodosPanel({ isMaximized, onMaximize, onCreateTodo, onUpdateTodo
                     >
                       <Circle className="w-4 h-4 text-slate-600" />
                       <p className="text-sm text-slate-400">{todo.content}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isMaximized && completedTasks.length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+                  Completed
+                </h4>
+                <div className="space-y-2">
+                  {completedTasks.map((todo) => (
+                    <div 
+                      key={todo.id} 
+                      className="flex items-center gap-2"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                      <p className="text-sm text-slate-500 line-through">{todo.content}</p>
                     </div>
                   ))}
                 </div>

@@ -2671,6 +2671,55 @@ class LocalHarness(Harness):
     # See docs/guardrail-architecture.md for design rationale
     # =========================================================================
 
+    # Public API for todo access (used by web server and other external code)
+    def get_todos(self) -> list[dict[str, Any]]:
+        """Get all todos as a list of dicts (public API).
+
+        Returns:
+            List of todo dicts with id, content, status, created_at, etc.
+        """
+        self._init_todo_state()
+        return list(self._todos.values())
+
+    def get_todo_version(self) -> int:
+        """Get the current todo version (monotonically increasing).
+
+        Returns:
+            Number of events in the audit log (increases with each todo mutation)
+        """
+        self._init_todo_state()
+        return len(self._todo_audit_log)
+
+    def has_todos(self) -> bool:
+        """Check if any todos exist (useful for planning gate).
+
+        Returns:
+            True if at least one todo exists
+        """
+        self._init_todo_state()
+        return len(self._todos) > 0
+
+    def is_completion_signaled(self) -> bool:
+        """Check if the complete tool was called (public API).
+
+        Returns:
+            True if _completion_signaled flag is set
+        """
+        return getattr(self, '_completion_signaled', False)
+
+    def get_completion_answer(self) -> str:
+        """Get the completion answer if complete was called (public API).
+
+        Returns:
+            The answer passed to complete() or empty string
+        """
+        return getattr(self, '_completion_answer', '')
+
+    def reset_completion_signal(self) -> None:
+        """Reset the completion signal after handling (public API)."""
+        self._completion_signaled = False
+        self._completion_answer = ''
+
     # Valid status transitions (state machine)
     _TODO_VALID_TRANSITIONS: dict[str, list[str]] = {
         "pending": ["in_progress"],

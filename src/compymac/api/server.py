@@ -22,11 +22,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.browser import BrowserConfig, BrowserMode, BrowserService
 from compymac.config import LLMConfig
 from compymac.harness import HarnessConfig
-from compymac.llm import ChatResponse, LLMClient
-from compymac.local_harness import LocalHarness
+from compymac.llm import LLMClient
+from compymac.local_harness import LocalHarness, ToolCategory
 from compymac.types import ToolCall
 
 logger = logging.getLogger(__name__)
@@ -50,23 +51,67 @@ SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOT_DIR)), name="screenshots")
 
 
+# System prompt for the agent that instructs it to create todo plans
+AGENT_SYSTEM_PROMPT = """You are CompyMac, an AI coding assistant with access to tools.
+
+When given a task:
+1. FIRST, create a todo list using TodoCreate for each step you plan to take
+2. Before working on each step, call TodoStart with the todo ID
+3. After completing a step, call TodoClaim with evidence
+4. Use TodoVerify to verify completion when possible
+
+Available tools include: Read, Edit, Write, bash, grep, glob, think, TodoCreate, TodoRead, TodoStart, TodoClaim, TodoVerify, and more.
+
+Be helpful, thorough, and always create a plan before executing."""
+
+
 @dataclass
 class SessionRuntime:
     """Runtime state for a session including harness and tools."""
     session_id: str
     harness: LocalHarness
     llm_client: LLMClient
+    agent_loop: AgentLoop | None = None
     browser_service: BrowserService | None = None
     browser_control: str = "user"  # "user" or "agent"
     messages: list[dict[str, Any]] = field(default_factory=list)
-    todos: list[dict[str, Any]] = field(default_factory=list)
     terminal_output: list[dict[str, Any]] = field(default_factory=list)
     browser_state: dict[str, Any] | None = None
     created_at: str = ""
+    _last_todo_version: int = 0  # Track todo changes
 
     def __post_init__(self) -> None:
         if not self.created_at:
             self.created_at = datetime.utcnow().isoformat()
+
+    def get_harness_todos(self) -> list[dict[str, Any]]:
+        """Get todos from the harness (agent-created todos)."""
+        todos = self.harness.get_todos()
+        return [
+            {
+                "id": todo.get("id", ""),
+                "content": todo.get("content", ""),
+                "status": todo.get("status", "pending"),
+                "created_at": todo.get("created_at", ""),
+            }
+            for todo in todos
+        ]
+
+    def get_todo_version(self) -> int:
+        """Get current todo version (for change detection)."""
+        return self.harness.get_todo_version()
+
+    def todos_changed(self) -> bool:
+        """Check if todos have changed since last check."""
+        current_version = self.get_todo_version()
+        if current_version != self._last_todo_version:
+            self._last_todo_version = current_version
+            return True
+        return False
+
+    def has_todos(self) -> bool:
+        """Check if any todos exist (for planning gate)."""
+        return self.harness.has_todos()
 
 
 # Session storage
@@ -87,15 +132,35 @@ def get_llm_client() -> LLMClient:
 
 
 def create_session_runtime(session_id: str) -> SessionRuntime:
-    """Create a new session runtime with harness and tools."""
+    """Create a new session runtime with harness, agent loop, and tools."""
     harness_config = HarnessConfig()
     harness = LocalHarness(config=harness_config)
+
+    # Enable TODO tools for the agent
+    harness._active_toolset.enable_category(ToolCategory.TODO)
+
     llm_client = get_llm_client()
+
+    # Create agent config with system prompt
+    agent_config = AgentConfig(
+        max_steps=50,
+        system_prompt=AGENT_SYSTEM_PROMPT,
+        action_gated=True,  # Agent must call tools
+        require_complete_tool=True,  # Agent must call complete() to finish
+    )
+
+    # Create agent loop
+    agent_loop = AgentLoop(
+        harness=harness,
+        llm_client=llm_client,
+        config=agent_config,
+    )
 
     return SessionRuntime(
         session_id=session_id,
         harness=harness,
         llm_client=llm_client,
+        agent_loop=agent_loop,
     )
 
 
@@ -253,7 +318,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
 async def handle_send_message(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
-    """Handle sending a message to the agent."""
+    """Handle sending a message to the agent using AgentLoop.
+
+    Implements agent-driven todos like Manus/Devin:
+    1. Planning gate: Agent must create todos before executing other tools
+    2. Proper termination: Check harness.is_completion_signaled() after each step
+    3. Real-time streaming: Broadcast todo updates as agent works
+    """
     content = message.get("content", "")
     if not content:
         return
@@ -268,39 +339,108 @@ async def handle_send_message(
     runtime.messages.append(user_msg)
     await send_event(websocket, "message_complete", {"message": user_msg})
 
-    # Get LLM response
+    # Run agent loop with streaming updates
     try:
-        chat_messages = [
-            {"role": "system", "content": "You are CompyMac, an AI coding assistant. Be helpful and concise."},
-        ]
-        for msg in runtime.messages:
-            chat_messages.append({"role": msg["role"], "content": msg["content"]})
+        if runtime.agent_loop is None:
+            raise ValueError("Agent loop not initialized")
 
-        def call_llm(client: LLMClient, msgs: list[dict[str, str]]) -> ChatResponse:
-            return client.chat(msgs)
+        # Add user message to agent loop
+        runtime.agent_loop.add_user_message(content)
 
+        # Send initial "agent working" event with planning phase
+        await send_event(websocket, "agent_status", {"status": "planning"})
+
+        # Run agent steps until completion
         loop = asyncio.get_event_loop()
-        response: ChatResponse = await loop.run_in_executor(
-            None, call_llm, runtime.llm_client, chat_messages
-        )
+        max_steps = runtime.agent_loop.config.max_steps
+        planning_phase = True  # Start in planning phase
+        planning_reminder_sent = False
+
+        while runtime.agent_loop.state.step_count < max_steps:
+            # Run one step in executor (blocking LLM call)
+            def run_step() -> tuple[str | None, list]:
+                return runtime.agent_loop.run_step()
+
+            text_response, tool_results = await loop.run_in_executor(None, run_step)
+
+            # Check for todo changes and broadcast
+            if runtime.todos_changed():
+                todos = runtime.get_harness_todos()
+                await send_event(websocket, "todos_updated", {"todos": todos})
+
+                # If we now have todos, transition from planning to executing
+                if planning_phase and runtime.has_todos():
+                    planning_phase = False
+                    await send_event(websocket, "agent_status", {"status": "executing"})
+
+            # Planning gate: If still in planning phase after first step and no todos,
+            # inject a reminder to create todos (like Manus/Devin pattern)
+            if planning_phase and runtime.agent_loop.state.step_count >= 2 and not runtime.has_todos():
+                if not planning_reminder_sent:
+                    # Add system message to remind agent to create todos
+                    runtime.agent_loop.add_system_message(
+                        "REMINDER: You must create a todo plan before proceeding. "
+                        "Use TodoCreate to create at least one todo item describing your plan. "
+                        "Do not execute other tools until you have created your plan."
+                    )
+                    planning_reminder_sent = True
+
+            # Check for completion using harness signal (fixes termination bug)
+            if runtime.harness.is_completion_signaled():
+                # Get the completion answer
+                completion_answer = runtime.harness.get_completion_answer()
+                if completion_answer:
+                    runtime.agent_loop.state.final_response = completion_answer
+                runtime.agent_loop.state.is_complete = True
+                runtime.harness.reset_completion_signal()
+                break
+
+            # Also check agent loop's own completion flag
+            if runtime.agent_loop.state.is_complete:
+                break
+
+            # If we got a text response with no tool calls in non-action-gated mode
+            if text_response is not None and not tool_results:
+                if not runtime.agent_loop.config.action_gated:
+                    break
+
+            # Small delay to allow UI updates
+            await asyncio.sleep(0.1)
+
+        # Get final response
+        final_response = runtime.agent_loop.state.final_response
+        if not final_response and runtime.agent_loop.state.messages:
+            # Get last assistant message content
+            for msg in reversed(runtime.agent_loop.state.messages):
+                if msg.role == "assistant" and msg.content:
+                    final_response = msg.content
+                    break
 
         # Add assistant message
         assistant_msg = {
             "id": str(uuid.uuid4()),
             "role": "assistant",
-            "content": response.content,
+            "content": final_response or "Task completed.",
             "timestamp": datetime.utcnow().isoformat(),
         }
         runtime.messages.append(assistant_msg)
         await send_event(websocket, "message_complete", {"message": assistant_msg})
 
+        # Send final todo state
+        todos = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos})
+
+        # Send agent done status
+        await send_event(websocket, "agent_status", {"status": "idle"})
+
     except Exception as e:
-        logger.error(f"LLM error: {e}")
+        logger.error(f"Agent error: {e}")
         await websocket.send_json({
             "type": "error",
-            "code": "llm_error",
+            "code": "agent_error",
             "message": str(e),
         })
+        await send_event(websocket, "agent_status", {"status": "error"})
 
 
 async def handle_subscribe(websocket: WebSocket, runtime: SessionRuntime) -> None:
@@ -314,8 +454,9 @@ async def handle_subscribe(websocket: WebSocket, runtime: SessionRuntime) -> Non
         ],
     })
 
-    # Send current todos
-    await send_event(websocket, "todos_updated", {"todos": runtime.todos})
+    # Send current todos (from harness - agent-created)
+    todos = runtime.get_harness_todos()
+    await send_event(websocket, "todos_updated", {"todos": todos})
 
     # Send current terminal output
     await send_event(websocket, "terminal_output", {"lines": runtime.terminal_output})
@@ -565,39 +706,93 @@ async def handle_browser_control(
 async def handle_todo_create(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
-    """Handle creating a new todo."""
+    """Handle creating a new todo (user-initiated, uses harness TodoCreate)."""
     content = message.get("content", "")
     if not content:
         return
 
-    todo = {
-        "id": str(uuid.uuid4()),
-        "content": content,
-        "status": "pending",
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    runtime.todos.append(todo)
-    await send_event(websocket, "todos_updated", {"todos": runtime.todos})
+    try:
+        loop = asyncio.get_event_loop()
+
+        def create_todo() -> str:
+            tool_call = ToolCall(
+                id=str(uuid.uuid4()),
+                name="TodoCreate",
+                arguments={"content": content},
+            )
+            result = runtime.harness.execute(tool_call)
+            return result.content
+
+        await loop.run_in_executor(None, create_todo)
+
+        # Send updated todos from harness
+        todos = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos})
+
+    except Exception as e:
+        logger.error(f"Todo create error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
 
 
 async def handle_todo_update(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
-    """Handle updating a todo."""
+    """Handle updating a todo status (user-initiated, uses harness tools)."""
     todo_id = message.get("id")
     status = message.get("status")
 
-    if not todo_id:
+    if not todo_id or not status:
         return
 
-    for todo in runtime.todos:
-        if todo["id"] == todo_id:
-            if status:
-                todo["status"] = status
-            todo["updated_at"] = datetime.utcnow().isoformat()
-            break
+    try:
+        loop = asyncio.get_event_loop()
 
-    await send_event(websocket, "todos_updated", {"todos": runtime.todos})
+        def update_todo() -> str:
+            # Map status to appropriate harness tool
+            # pending -> in_progress: TodoStart
+            # in_progress -> claimed: TodoClaim
+            # claimed -> verified: TodoVerify
+            if status == "in_progress":
+                tool_call = ToolCall(
+                    id=str(uuid.uuid4()),
+                    name="TodoStart",
+                    arguments={"id": todo_id},
+                )
+            elif status == "claimed":
+                tool_call = ToolCall(
+                    id=str(uuid.uuid4()),
+                    name="TodoClaim",
+                    arguments={"id": todo_id, "evidence": []},
+                )
+            elif status == "verified":
+                tool_call = ToolCall(
+                    id=str(uuid.uuid4()),
+                    name="TodoVerify",
+                    arguments={"id": todo_id},
+                )
+            else:
+                return "Invalid status"
+
+            result = runtime.harness.execute(tool_call)
+            return result.content
+
+        await loop.run_in_executor(None, update_todo)
+
+        # Send updated todos from harness
+        todos = runtime.get_harness_todos()
+        await send_event(websocket, "todos_updated", {"todos": todos})
+
+    except Exception as e:
+        logger.error(f"Todo update error: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "code": "todo_error",
+            "message": str(e),
+        })
 
 
 async def handle_get_state(websocket: WebSocket, runtime: SessionRuntime) -> None:
@@ -606,11 +801,14 @@ async def handle_get_state(websocket: WebSocket, runtime: SessionRuntime) -> Non
     if runtime.browser_service:
         browser_state = await get_browser_state(runtime)
 
+    # Get todos from harness (agent-created)
+    todos = runtime.get_harness_todos()
+
     await websocket.send_json({
         "type": "state",
         "data": {
             "messages": runtime.messages,
-            "todos": runtime.todos,
+            "todos": todos,
             "terminal_output": runtime.terminal_output,
             "browser_state": browser_state,
             "browser_control": runtime.browser_control,
