@@ -29,7 +29,7 @@ from compymac.harness import HarnessConfig
 from compymac.llm import LLMClient
 from compymac.local_harness import LocalHarness, ToolCategory
 from compymac.session import Session
-from compymac.storage.run_store import RunStore, RunStatus, SavedRun
+from compymac.storage.run_store import RunStatus, RunStore
 from compymac.types import ToolCall
 
 logger = logging.getLogger(__name__)
@@ -1262,14 +1262,14 @@ async def list_sessions(
 ) -> dict[str, Any]:
     """
     List all persisted sessions from RunStore.
-    
+
     Gap 4: Session Continuity - allows users to see all past sessions.
-    
+
     Args:
         status: Optional filter by status (pending, running, paused, completed, failed, interrupted)
         limit: Maximum number of sessions to return
         offset: Number of sessions to skip for pagination
-    
+
     Returns:
         List of session metadata with id, status, task_description, timestamps, etc.
     """
@@ -1277,9 +1277,9 @@ async def list_sessions(
         status_filter = RunStatus(status) if status else None
     except ValueError:
         status_filter = None
-    
+
     runs = run_store.list_runs(status=status_filter, limit=limit, offset=offset)
-    
+
     return {
         "sessions": [
             {
@@ -1306,14 +1306,14 @@ async def list_sessions(
 async def list_resumable_sessions() -> dict[str, Any]:
     """
     List all sessions that can be resumed (paused or interrupted).
-    
+
     Gap 4: Session Continuity - allows users to see which sessions can be resumed.
-    
+
     Returns:
         List of resumable session metadata.
     """
     runs = run_store.get_resumable_runs()
-    
+
     return {
         "sessions": [
             {
@@ -1335,19 +1335,19 @@ async def list_resumable_sessions() -> dict[str, Any]:
 async def get_persisted_session(session_id: str) -> dict[str, Any]:
     """
     Get details of a persisted session including conversation history.
-    
+
     Gap 4: Session Continuity - allows viewing full session state.
-    
+
     Args:
         session_id: The session ID to retrieve
-    
+
     Returns:
         Full session data including messages and metadata.
     """
     saved_run = run_store.load_run(session_id)
     if not saved_run:
         return {"error": "Session not found", "session_id": session_id}
-    
+
     return {
         "id": saved_run.metadata.run_id,
         "status": saved_run.metadata.status.value,
@@ -1368,44 +1368,44 @@ async def get_persisted_session(session_id: str) -> dict[str, Any]:
 async def resume_session(session_id: str) -> dict[str, Any]:
     """
     Resume a paused or interrupted session.
-    
+
     Gap 4: Session Continuity - allows users to resume interrupted sessions.
-    
+
     This loads the session from RunStore and creates a new active runtime
     with the restored conversation history.
-    
+
     Args:
         session_id: The session ID to resume
-    
+
     Returns:
         The resumed session info with a new runtime session ID.
     """
     saved_run = run_store.load_run(session_id)
     if not saved_run:
         return {"error": "Session not found", "session_id": session_id}
-    
+
     if saved_run.metadata.status not in [RunStatus.PAUSED, RunStatus.INTERRUPTED]:
         return {
             "error": f"Session cannot be resumed (status: {saved_run.metadata.status.value})",
             "session_id": session_id,
         }
-    
+
     if not saved_run.session:
         return {"error": "Session has no conversation history to resume", "session_id": session_id}
-    
+
     # Create a new runtime with the restored session
     runtime = create_session_runtime(session_id)
-    
+
     # Restore messages from the saved session
     for msg in saved_run.session.messages:
         runtime.messages.append(msg.to_dict())
-    
+
     # Update the session status to running
     run_store.update_status(session_id, RunStatus.RUNNING)
-    
+
     # Store the runtime
     sessions[session_id] = runtime
-    
+
     return {
         "id": session_id,
         "status": "running",
@@ -1420,34 +1420,34 @@ async def resume_session(session_id: str) -> dict[str, Any]:
 async def save_session(session_id: str, task_description: str = "") -> dict[str, Any]:
     """
     Save the current session state to RunStore.
-    
+
     Gap 4: Session Continuity - allows persisting session state.
-    
+
     Args:
         session_id: The session ID to save
         task_description: Optional description of the task
-    
+
     Returns:
         Confirmation of the save operation.
     """
     if session_id not in sessions:
         return {"error": "Session not found in active sessions", "session_id": session_id}
-    
+
     runtime = sessions[session_id]
-    
+
     # Create a Session object from the runtime messages
     from compymac.message import Message, Role
-    
+
     session = Session(id=session_id, system_prompt=AGENT_SYSTEM_PROMPT)
     for msg_dict in runtime.messages:
         role_str = msg_dict.get("role", "user")
         role = Role.USER if role_str == "user" else Role.ASSISTANT if role_str == "assistant" else Role.SYSTEM
         content = msg_dict.get("content", "")
         session.add_message(Message(role=role, content=content))
-    
+
     # Determine status based on runtime state
     status = RunStatus.PAUSED if runtime.is_paused else RunStatus.RUNNING
-    
+
     # Save to RunStore
     run_store.save_run(
         run_id=session_id,
@@ -1457,7 +1457,7 @@ async def save_session(session_id: str, task_description: str = "") -> dict[str,
         step_count=len(runtime.messages),
         tool_calls_count=len([m for m in runtime.messages if m.get("tool_calls")]),
     )
-    
+
     return {
         "id": session_id,
         "status": status.value,
@@ -1470,19 +1470,19 @@ async def save_session(session_id: str, task_description: str = "") -> dict[str,
 async def delete_session(session_id: str) -> dict[str, Any]:
     """
     Delete a persisted session from RunStore.
-    
+
     Args:
         session_id: The session ID to delete
-    
+
     Returns:
         Confirmation of the delete operation.
     """
     success = run_store.delete_run(session_id)
-    
+
     # Also remove from active sessions if present
     if session_id in sessions:
         del sessions[session_id]
-    
+
     return {
         "id": session_id,
         "deleted": success,
