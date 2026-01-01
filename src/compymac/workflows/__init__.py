@@ -6,6 +6,7 @@ This module implements:
 - Gap 4: Git PR Loop Automation - GitPRWorkflow with approval gates
 - Gap 6 Phase 1: Multi-Agent Orchestration - Structured artifact handoffs between agents
 - Gap 6 Phase 2: Parallel Workstreams - Merge/review with conflict detection
+- Gap 6 Phase 3: Dynamic Orchestration - Capability-based routing with feedback learning
 
 Based on arxiv research - see docs/GAP3_WORKFLOW_CLOSURE_RESEARCH.md, GAP6_MULTI_AGENT_RESEARCH.md
 """
@@ -35,6 +36,23 @@ from compymac.workflows.ci_integration import (
     CIIntegration,
     CIStatus,
     Fix,
+)
+
+# Gap 6 Phase 3: Dynamic Orchestration
+from compymac.workflows.dynamic_orchestration import (
+    AgentCapability,
+    AgentCapabilityProfile,
+    CapabilityRouter,
+    DynamicOrchestrator,
+    HeuristicRouter,
+    RoutingDecision,
+    RoutingFeedbackStore,
+    RoutingHeuristic,
+    RoutingOutcome,
+    TaskAnalysis,
+    TaskAnalyzer,
+    TaskComplexity,
+    TaskType,
 )
 from compymac.workflows.failure_recovery import (
     FailureRecord,
@@ -115,4 +133,18 @@ __all__ = [
     "EnhancedWorkspaceMerger",
     "ReviewerArbiter",
     "ParallelWorkstreamOrchestrator",
+    # Gap 6 Phase 3: Dynamic Orchestration
+    "AgentCapability",
+    "TaskType",
+    "TaskComplexity",
+    "AgentCapabilityProfile",
+    "TaskAnalysis",
+    "RoutingDecision",
+    "RoutingOutcome",
+    "TaskAnalyzer",
+    "CapabilityRouter",
+    "RoutingHeuristic",
+    "HeuristicRouter",
+    "RoutingFeedbackStore",
+    "DynamicOrchestrator",
 ]
