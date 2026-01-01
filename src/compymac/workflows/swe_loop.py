@@ -104,17 +104,16 @@ class SWEWorkflow:
     pr_info: dict[str, Any] = field(default_factory=dict)
     ci_status: dict[str, Any] = field(default_factory=dict)
 
-    # Stage order for advancement
+    # Stage order for normal advancement (success path)
+    # DEBUG and ITERATE are side-paths only entered on failures
     STAGE_ORDER = [
         WorkflowStage.UNDERSTAND,
         WorkflowStage.PLAN,
         WorkflowStage.LOCATE,
         WorkflowStage.MODIFY,
         WorkflowStage.VALIDATE,
-        WorkflowStage.DEBUG,
         WorkflowStage.PR,
         WorkflowStage.CI,
-        WorkflowStage.ITERATE,
         WorkflowStage.COMPLETE,
     ]
 
