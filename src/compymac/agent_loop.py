@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from compymac.memory import MemoryManager
     from compymac.storage.run_store import RunStore
     from compymac.trace_store import TraceContext, TraceStore
+    from compymac.workflows.ci_integration import CIIntegration
+    from compymac.workflows.failure_recovery import FailureRecovery
+    from compymac.workflows.swe_loop import SWEWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,11 @@ class AgentConfig:
     enable_persistence: bool = False  # If True, save run state after each step
     persistence_dir: str = "~/.compymac/runs"  # Directory for run storage
     run_id: str | None = None  # Optional run ID for resuming (auto-generated if None)
+    # Gap 3: SWE Workflow Closure (full SWE loop orchestration)
+    use_swe_workflow: bool = False  # If True, enable SWE workflow orchestration
+    swe_task_description: str = ""  # Task description for workflow
+    swe_repo_path: str = ""  # Repository path for workflow
+    swe_max_iterations: int = 5  # Max iterations before failing
 
 
 @dataclass
@@ -133,6 +141,25 @@ class AgentLoop:
                 compression_threshold=self.config.memory_compression_threshold,
             )
 
+        # Gap 3: Initialize SWE workflow orchestration if enabled
+        self._swe_workflow: "SWEWorkflow | None" = None  # noqa: UP037
+        self._failure_recovery: "FailureRecovery | None" = None  # noqa: UP037
+        self._ci_integration: "CIIntegration | None" = None  # noqa: UP037
+        if self.config.use_swe_workflow:
+            from compymac.workflows.ci_integration import CIIntegration
+            from compymac.workflows.failure_recovery import FailureRecovery
+            from compymac.workflows.swe_loop import SWEWorkflow
+            self._swe_workflow = SWEWorkflow(
+                task_description=self.config.swe_task_description,
+                repo_path=Path(self.config.swe_repo_path) if self.config.swe_repo_path else Path.cwd(),
+                max_iterations=self.config.swe_max_iterations,
+            )
+            self._failure_recovery = FailureRecovery()
+            self._ci_integration = CIIntegration(
+                repo_path=Path(self.config.swe_repo_path) if self.config.swe_repo_path else None
+            )
+            logger.info(f"[SWE_WORKFLOW] Initialized workflow for task: {self.config.swe_task_description[:50]}...")
+
         # Initialize with system prompt if provided
         if self.config.system_prompt:
             self.state.messages.append(Message(
@@ -153,6 +180,17 @@ class AgentLoop:
         - If LLM returns tool calls: (None, [results])
         """
         self.state.step_count += 1
+
+        # Gap 3: Inject SWE workflow stage prompt if workflow is active
+        if self._swe_workflow:
+            from compymac.workflows.swe_loop import WorkflowStatus
+            if self._swe_workflow.status != WorkflowStatus.COMPLETE:
+                stage_prompt = self._swe_workflow.get_stage_prompt()
+                self.state.messages.append(Message(
+                    role="user",
+                    content=f"[SWE_WORKFLOW_STAGE: {self._swe_workflow.current_stage.value}]\n{stage_prompt}",
+                ))
+                logger.info(f"[SWE_WORKFLOW] Stage: {self._swe_workflow.current_stage.value}")
 
         self._event_log.log_event(
             EventType.AGENT_TURN_START,
@@ -405,6 +443,46 @@ class AgentLoop:
                     ),
                 ))
             text_response, tool_results = self.run_step()
+
+            # Gap 3: Advance SWE workflow on successful tool execution (before completion check)
+            if self._swe_workflow and tool_results:
+                from compymac.workflows.swe_loop import StageResult, WorkflowStatus
+                all_successful = all(r.success for r in tool_results)
+                any_failed = any(not r.success for r in tool_results)
+
+                if all_successful:
+                    old_stage = self._swe_workflow.current_stage
+                    stage_result = StageResult(
+                        stage=old_stage,
+                        success=True,
+                        message=f"Stage {old_stage.value} completed successfully",
+                        artifacts={"tool_results": [r.tool_call_id for r in tool_results]},
+                    )
+                    self._swe_workflow.advance(stage_result)
+                    new_stage = self._swe_workflow.current_stage
+                    if old_stage != new_stage:
+                        logger.info(f"[SWE_WORKFLOW] Advanced: {old_stage.value} -> {new_stage.value}")
+
+                elif any_failed and self._failure_recovery:
+                    failed_results = [r for r in tool_results if not r.success]
+                    for result in failed_results:
+                        error_msg = result.error or result.content
+                        failure_type = self._failure_recovery.detect_failure(error_msg)
+                        if failure_type:
+                            recovery_action = self._failure_recovery.get_recovery_action(failure_type, error_msg)
+                            self._failure_recovery.record_failure(
+                                failure_type=failure_type,
+                                message=error_msg,
+                                context=f"stage:{self._swe_workflow.current_stage.value}",
+                            )
+                            self.state.messages.append(Message(
+                                role="user",
+                                content=f"[SWE_WORKFLOW_RECOVERY] {recovery_action.description}",
+                            ))
+                            logger.info(f"[SWE_WORKFLOW] Recovery suggested: {recovery_action.action_type}")
+
+                if self._swe_workflow.status == WorkflowStatus.COMPLETE:
+                    logger.info("[SWE_WORKFLOW] Workflow completed successfully")
 
             # Check if 'complete' tool was called (signals task completion)
             complete_called = False
