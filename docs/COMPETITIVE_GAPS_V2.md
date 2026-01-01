@@ -389,16 +389,16 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 1. **Gap 1: Auto-Verify** - DONE - Todos auto-verify after claim
 2. **Gap 4: Session Continuity** - DONE - UI shows real sessions from RunStore
-3. **Gap 3: Workflow Closure** - Next priority, requires research-backed implementation (see GAP3_WORKFLOW_CLOSURE_RESEARCH.md)
-4. **Gap 2: Persistent Workspace** - Design complete (Firecracker microVMs), implementation pending on NUC hardware
-5. **Gap 6: Multi-Agent** - Research-heavy, longer term
+3. **Gap 3: Workflow Closure** - DONE - Full SWE workflow with stages, failure recovery, CI integration, artifact storage
+4. **Gap 6: Multi-Agent** - Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), ready for implementation
+5. **Gap 2: Persistent Workspace** - Design complete (Firecracker microVMs), implementation pending on NUC hardware
 6. **Gap 5: Safety Controls** - Low priority, optional until unattended operation is a goal
 
 ## Status
 
 - Gap 1: COMPLETED
 - Gap 4: COMPLETED
-- Gap 3: Research complete, implementation pending
+- Gap 3: COMPLETED - Full SWE workflow implemented with stages, failure recovery, CI integration, and artifact storage
 - Gap 2: Design complete, implementation pending (requires NUC setup)
 - Gap 5: Deprioritized
-- Gap 6: Not started
+- Gap 6: Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), implementation pending
