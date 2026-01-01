@@ -19,9 +19,13 @@ export interface ToolCall {
 export interface Session {
   id: string
   title: string
-  status: 'running' | 'paused' | 'completed' | 'failed'
+  status: 'running' | 'paused' | 'completed' | 'failed' | 'interrupted'
   createdAt: Date
   updatedAt: Date
+  taskDescription?: string
+  stepCount?: number
+  toolCallsCount?: number
+  errorMessage?: string
 }
 
 export interface Todo {
@@ -33,12 +37,15 @@ export interface Todo {
 export type WorkspacePanel = 'browser' | 'cli' | 'todos' | 'knowledge'
 export type AutonomyLevel = 'high' | 'medium' | 'low'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 interface SessionState {
   sessions: Session[]
   currentSessionId: string | null
   messages: Message[]
   streamingContent: string
   isStreaming: boolean
+  isLoadingSessions: boolean
   
   browserUrl: string
   browserTitle: string
@@ -72,63 +79,38 @@ interface SessionState {
   setAgentGoal: (goal: string) => void
   setAgentStatus: (status: 'active' | 'paused' | 'idle' | 'planning' | 'executing' | 'working' | 'error') => void
   createSession: (title: string) => void
+  
+  // Gap 4: Session Continuity - new methods
+  fetchSessions: () => Promise<void>
+  resumeSession: (sessionId: string) => Promise<boolean>
+  saveSession: (sessionId: string, taskDescription?: string) => Promise<boolean>
+  deleteSession: (sessionId: string) => Promise<boolean>
+  setSessions: (sessions: Session[]) => void
 }
 
-export const useSessionStore = create<SessionState>((set) => ({
-  sessions: [
-    { id: '1', title: 'Project Alpha Research', status: 'running', createdAt: new Date(Date.now() - 60000), updatedAt: new Date() },
-    { id: '2', title: 'Code Refactoring Session', status: 'completed', createdAt: new Date(Date.now() - 120000), updatedAt: new Date(Date.now() - 60000) },
-    { id: '3', title: 'Market Analysis Q4', status: 'completed', createdAt: new Date(Date.now() - 180000), updatedAt: new Date(Date.now() - 120000) },
-  ],
-  currentSessionId: '1',
-  messages: [
-    {
-      id: '1',
-      role: 'user',
-      content: 'Research the latest trends in decentralized finance and draft a summary for the Q3 report. Also, check my todos.',
-      timestamp: new Date(Date.now() - 30000),
-    },
-    {
-      id: '2',
-      role: 'assistant',
-      content: "Certainly. I've started researching DeFi trends. A browser tab is open with my findings. I'm also drafting the summary and have updated your task list.",
-      timestamp: new Date(Date.now() - 20000),
-      toolCalls: [
-        { id: 't1', name: 'Browsing: Coindesk, Bloomberg...', status: 'completed' },
-        { id: 't2', name: 'Drafting Summary', status: 'running' },
-        { id: 't3', name: 'Updating Todos', status: 'completed' },
-      ],
-    },
-  ],
+export const useSessionStore = create<SessionState>((set, get) => ({
+  sessions: [],
+  currentSessionId: null,
+  messages: [],
   streamingContent: '',
   isStreaming: false,
+  isLoadingSessions: false,
   
-  browserUrl: 'https://bloomberg.com/defi-trends-2025',
-  browserTitle: 'Top 10 DeFi Trends for 2025 - Bloomberg',
+  browserUrl: '',
+  browserTitle: '',
   browserScreenshotUrl: null,
   browserControl: 'agent',
   
-  terminalOutput: [
-    'Analyzing data streams...',
-    '> Fetching API data from source X...',
-    '> Processing natural language summary...',
-    '> Updating task database: OK',
-    '> _',
-  ],
+  terminalOutput: [],
   terminalControl: 'agent',
   
-  todos: [
-    { id: '1', content: 'Research DeFi Trends', status: 'in_progress' },
-    { id: '2', content: 'Draft Q3 Summary', status: 'in_progress' },
-    { id: '3', content: 'Review Draft with User', status: 'pending' },
-    { id: '4', content: 'Schedule Team Meeting', status: 'pending' },
-  ],
+  todos: [],
   
   maximizedPanel: null,
   historySidebarCollapsed: false,
   autonomyLevel: 'high',
-  agentGoal: 'Create Q3 Report',
-  agentStatus: 'active',
+  agentGoal: '',
+  agentStatus: 'idle',
   
   setCurrentSession: (sessionId) => set({ currentSessionId: sessionId }),
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
@@ -145,10 +127,138 @@ export const useSessionStore = create<SessionState>((set) => ({
   setAutonomyLevel: (level) => set({ autonomyLevel: level }),
   setAgentGoal: (goal) => set({ agentGoal: goal }),
   setAgentStatus: (status) => set({ agentStatus: status }),
+  
   createSession: (title) => set((state) => ({
     sessions: [
       { id: Date.now().toString(), title, status: 'running', createdAt: new Date(), updatedAt: new Date() },
       ...state.sessions,
     ],
+    currentSessionId: Date.now().toString(),
   })),
+  
+  setSessions: (sessions) => set({ sessions }),
+  
+  // Gap 4: Session Continuity - Fetch sessions from API
+  fetchSessions: async () => {
+    set({ isLoadingSessions: true })
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions`)
+      if (!response.ok) {
+        console.error('Failed to fetch sessions:', response.statusText)
+        set({ isLoadingSessions: false })
+        return
+      }
+      const data = await response.json()
+      const sessions: Session[] = data.sessions.map((s: {
+        id: string
+        title: string
+        status: string
+        created_at: string
+        updated_at: string
+        task_description?: string
+        step_count?: number
+        tool_calls_count?: number
+        error_message?: string
+      }) => ({
+        id: s.id,
+        title: s.title || s.task_description || `Session ${s.id.slice(0, 8)}`,
+        status: s.status as Session['status'],
+        createdAt: new Date(s.created_at),
+        updatedAt: new Date(s.updated_at),
+        taskDescription: s.task_description,
+        stepCount: s.step_count,
+        toolCallsCount: s.tool_calls_count,
+        errorMessage: s.error_message,
+      }))
+      set({ sessions, isLoadingSessions: false })
+    } catch (error) {
+      console.error('Error fetching sessions:', error)
+      set({ isLoadingSessions: false })
+    }
+  },
+  
+  // Gap 4: Session Continuity - Resume a paused/interrupted session
+  resumeSession: async (sessionId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/resume`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        console.error('Failed to resume session:', response.statusText)
+        return false
+      }
+      const data = await response.json()
+      if (data.error) {
+        console.error('Resume error:', data.error)
+        return false
+      }
+      
+      // Update the session in the list
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId ? { ...s, status: 'running' as const } : s
+        ),
+        currentSessionId: sessionId,
+      }))
+      
+      // Refresh the session list to get updated state
+      await get().fetchSessions()
+      return true
+    } catch (error) {
+      console.error('Error resuming session:', error)
+      return false
+    }
+  },
+  
+  // Gap 4: Session Continuity - Save current session state
+  saveSession: async (sessionId: string, taskDescription?: string) => {
+    try {
+      const url = new URL(`${API_BASE}/api/sessions/${sessionId}/save`)
+      if (taskDescription) {
+        url.searchParams.set('task_description', taskDescription)
+      }
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        console.error('Failed to save session:', response.statusText)
+        return false
+      }
+      const data = await response.json()
+      if (data.error) {
+        console.error('Save error:', data.error)
+        return false
+      }
+      
+      // Refresh the session list
+      await get().fetchSessions()
+      return true
+    } catch (error) {
+      console.error('Error saving session:', error)
+      return false
+    }
+  },
+  
+  // Gap 4: Session Continuity - Delete a session
+  deleteSession: async (sessionId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        console.error('Failed to delete session:', response.statusText)
+        return false
+      }
+      
+      // Remove from local state
+      set((state) => ({
+        sessions: state.sessions.filter((s) => s.id !== sessionId),
+        currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
+      }))
+      return true
+    } catch (error) {
+      console.error('Error deleting session:', error)
+      return false
+    }
+  },
 }))
