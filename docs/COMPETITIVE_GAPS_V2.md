@@ -389,8 +389,8 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 1. **Gap 1: Auto-Verify** - DONE - Todos auto-verify after claim
 2. **Gap 4: Session Continuity** - DONE - UI shows real sessions from RunStore
-3. **Gap 3: Workflow Closure** - DONE - Full SWE workflow with stages, failure recovery, CI integration, artifact storage
-4. **Gap 6: Multi-Agent** - Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), ready for implementation
+3. **Gap 3: Workflow Closure** - Infrastructure complete, integration/validation pending
+4. **Gap 6: Multi-Agent** - Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), primitives exist but not wired for structured handoffs
 5. **Gap 2: Persistent Workspace** - Design complete (Firecracker microVMs), implementation pending on NUC hardware
 6. **Gap 5: Safety Controls** - Low priority, optional until unattended operation is a goal
 
@@ -398,7 +398,14 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 - Gap 1: COMPLETED
 - Gap 4: COMPLETED
-- Gap 3: COMPLETED - Full SWE workflow implemented with stages, failure recovery, CI integration, and artifact storage
+- Gap 3: INFRASTRUCTURE COMPLETE - `swe_loop.py`, `failure_recovery.py`, `ci_integration.py`, `artifact_store.py` exist but:
+  - Not wired into main agent loop
+  - No end-to-end integration tests
+  - No SWE-bench validation
+  - Needs: integration with AgentLoop, real-world validation
 - Gap 2: Design complete, implementation pending (requires NUC setup)
 - Gap 5: Deprioritized
-- Gap 6: Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), implementation pending
+- Gap 6: RESEARCH COMPLETE (see GAP6_MULTI_AGENT_RESEARCH.md)
+  - Primitives exist (`multi_agent.py`, `parallel.py`) but share raw workspace state
+  - Not using structured artifact handoffs as research recommends
+  - Needs: typed artifact handoffs, agent-to-agent communication protocol
