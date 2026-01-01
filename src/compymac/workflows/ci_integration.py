@@ -127,28 +127,28 @@ class CIIntegration:
         self.repo_path = repo_path
         self.check_history: list[CICheckResult] = []
 
-    def poll_status(self, pr_url: str) -> tuple[CIStatus, list[CICheckResult]]:
+    def poll_status(self, pr_url: str, fetch_logs: bool = True) -> tuple[CIStatus, list[CICheckResult]]:
         """
         Poll CI status for PR.
 
         Args:
             pr_url: URL of the pull request
+            fetch_logs: If True, fetch logs for failed checks (slower but enables error parsing)
 
         Returns:
             Tuple of (overall_status, list of check results)
         """
-        # Extract repo and PR number from URL
-        # Format: https://github.com/owner/repo/pull/123
+        import json
+
         match = re.search(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)", pr_url)
         if not match:
             return CIStatus.UNKNOWN, []
 
         owner, repo, pr_number = match.groups()
 
-        # Use gh CLI to get PR checks
         try:
             result = subprocess.run(
-                ["gh", "pr", "checks", pr_number, "--repo", f"{owner}/{repo}", "--json", "name,state,conclusion"],
+                ["gh", "pr", "checks", pr_number, "--repo", f"{owner}/{repo}", "--json", "name,state,conclusion,detailsUrl"],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -157,7 +157,6 @@ class CIIntegration:
             if result.returncode != 0:
                 return CIStatus.UNKNOWN, []
 
-            import json
             checks_data = json.loads(result.stdout)
 
             checks = []
@@ -167,6 +166,7 @@ class CIIntegration:
                 name = check.get("name", "unknown")
                 state = check.get("state", "").lower()
                 conclusion = check.get("conclusion", "").lower()
+                details_url = check.get("detailsUrl", "")
 
                 if state == "pending" or state == "queued":
                     status = CIStatus.PENDING
@@ -186,13 +186,61 @@ class CIIntegration:
                 else:
                     status = CIStatus.UNKNOWN
 
-                checks.append(CICheckResult(name=name, status=status))
+                raw_log = ""
+                if fetch_logs and status == CIStatus.FAILED and details_url:
+                    raw_log = self._fetch_job_logs(owner, repo, details_url)
+
+                checks.append(CICheckResult(name=name, status=status, url=details_url, raw_log=raw_log))
 
             self.check_history.extend(checks)
             return overall_status, checks
 
         except Exception:
             return CIStatus.UNKNOWN, []
+
+    def _fetch_job_logs(self, owner: str, repo: str, details_url: str) -> str:
+        """
+        Fetch logs for a failed CI job.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            details_url: URL to the job details (contains run ID)
+
+        Returns:
+            Raw log content or empty string on failure
+        """
+        run_id_match = re.search(r"/runs/(\d+)", details_url)
+        if not run_id_match:
+            return ""
+
+        run_id = run_id_match.group(1)
+
+        try:
+            result = subprocess.run(
+                ["gh", "run", "view", run_id, "--repo", f"{owner}/{repo}", "--log"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if result.returncode == 0:
+                return result.stdout[:50000]
+
+            result = subprocess.run(
+                ["gh", "run", "view", run_id, "--repo", f"{owner}/{repo}", "--log-failed"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if result.returncode == 0:
+                return result.stdout[:50000]
+
+        except Exception:
+            pass
+
+        return ""
 
     def parse_logs(self, log_content: str) -> list[CIError]:
         """
