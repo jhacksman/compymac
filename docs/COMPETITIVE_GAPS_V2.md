@@ -389,8 +389,8 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 1. **Gap 1: Auto-Verify** - DONE - Todos auto-verify after claim
 2. **Gap 4: Session Continuity** - DONE - UI shows real sessions from RunStore
-3. **Gap 3: Workflow Closure** - Infrastructure complete, integration/validation pending
-4. **Gap 6: Multi-Agent** - Research complete (see GAP6_MULTI_AGENT_RESEARCH.md), primitives exist but not wired for structured handoffs
+3. **Gap 3: Workflow Closure** - DONE - SWE workflow integrated into AgentLoop (PRs #167, #168)
+4. **Gap 6: Multi-Agent** - DONE - All 3 phases implemented (PRs #170, #171, #172)
 5. **Gap 2: Persistent Workspace** - Design complete (Firecracker microVMs), implementation pending on NUC hardware
 6. **Gap 5: Safety Controls** - Low priority, optional until unattended operation is a goal
 
@@ -398,14 +398,15 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 - Gap 1: COMPLETED
 - Gap 4: COMPLETED
-- Gap 3: INFRASTRUCTURE COMPLETE - `swe_loop.py`, `failure_recovery.py`, `ci_integration.py`, `artifact_store.py` exist but:
-  - Not wired into main agent loop
-  - No end-to-end integration tests
-  - No SWE-bench validation
-  - Needs: integration with AgentLoop, real-world validation
+- Gap 3: COMPLETED - Full SWE workflow integrated into AgentLoop:
+  - `swe_loop.py`, `failure_recovery.py`, `ci_integration.py`, `artifact_store.py` implemented
+  - Integrated into AgentLoop via `use_swe_workflow` config flag (PR #167)
+  - CI integration with status polling and log parsing (PR #168)
+  - Workflow stages: UNDERSTAND → PLAN → LOCATE → MODIFY → VALIDATE → DEBUG → PR → CI → ITERATE
 - Gap 2: Design complete, implementation pending (requires NUC setup)
 - Gap 5: Deprioritized
-- Gap 6: RESEARCH COMPLETE (see GAP6_MULTI_AGENT_RESEARCH.md)
-  - Primitives exist (`multi_agent.py`, `parallel.py`) but share raw workspace state
-  - Not using structured artifact handoffs as research recommends
-  - Needs: typed artifact handoffs, agent-to-agent communication protocol
+- Gap 6: COMPLETED - Multi-Agent Orchestration (3 phases):
+  - Phase 1 (PR #170): Structured artifact handoffs between agents (`agent_handoffs.py`)
+  - Phase 2 (PR #171): Parallel workstreams with merge/review (`parallel_workstreams.py`)
+  - Phase 3 (PR #172): Dynamic orchestration heuristics (`dynamic_orchestration.py`)
+  - See `docs/GAP6_MULTI_AGENT_RESEARCH.md` for research background
