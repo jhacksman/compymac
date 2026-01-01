@@ -45,7 +45,7 @@ pending → in_progress → claimed → verified (AUTO)
 
 ---
 
-## Gap 2: Persistent Workspace Substrate
+## Gap 2: Persistent Workspace Substrate (Firecracker microVMs)
 
 ### Problem
 Manus/Devin operate a persistent VM/container where software installs, credentials, browser profiles, and artifacts persist across turns and sessions. CompyMac has tools glued to an agent loop, not an always-on development machine.
@@ -57,48 +57,84 @@ Manus/Devin operate a persistent VM/container where software installs, credentia
 - Browser state lost between sessions
 
 ### Target State
-- Containerized workspace per project/user
-- Persistent filesystem with snapshotting
+- Isolated microVM workspace per project/user (Firecracker-based)
+- Persistent filesystem with snapshotting via Firecracker snapshots
 - Browser profile persistence
 - Credential storage per workspace
+- Sub-second VM boot times (~125ms)
+
+### Decision / Rationale
+
+**Docker was evaluated and rejected** for the following reasons:
+- Docker containers share the host kernel, providing weaker isolation
+- Container state is brittle ("pet container" problem)
+- Snapshot/restore semantics are not first-class in Docker
+- Security boundary is insufficient for untrusted agent code execution
+
+**Firecracker microVMs were chosen** because:
+- Strong isolation boundary (separate kernel per VM)
+- First-class snapshot/restore via Firecracker API
+- Sub-second boot times make on-demand VMs practical
+- Same architecture as E2B (which Manus uses)
+- Can run on bare metal (Intel NUC with 16GB RAM)
 
 ### Implementation Plan
 
-1. **Phase 1: Docker-based workspaces**
-   - Create workspace containers on-demand
-   - Mount persistent volumes for project files
-   - Expose tools via container exec
+A complete design document exists at: `/home/ubuntu/firecracker-workspace-service/DESIGN.md`
 
-2. **Phase 2: Snapshotting**
-   - Implement checkpoint/restore using Docker commits
-   - Allow rollback to previous states
-   - Track workspace history
+The implementation is a separate service that CompyMac integrates with:
 
-3. **Phase 3: Browser persistence**
-   - Persist Playwright browser profiles
-   - Store cookies/sessions per workspace
+1. **Firecracker Workspace Service** (separate repo/service)
+   - FastAPI REST API for sandbox management
+   - Sandbox Manager for Firecracker VM lifecycle
+   - Guest Agent (vsock) for command execution inside VMs
+   - Persistence Manager for pause/resume/snapshot
 
-### Code Changes
+2. **CompyMac Integration**
+   - Workspace Provider client to call the service API
+   - Tool execution routed through workspace sandboxes
+   - Session-to-workspace mapping
 
-**New file: `src/compymac/workspace/container.py`**
-- `WorkspaceContainer` class for managing Docker containers
-- Methods: `create()`, `snapshot()`, `restore()`, `destroy()`
+3. **Key Features**
+   - `/sandboxes` - create/list/destroy sandboxes
+   - `/sandboxes/{id}/exec` - execute commands in sandbox
+   - `/sandboxes/{id}/pause` - snapshot sandbox state
+   - `/sandboxes/{id}/resume` - restore from snapshot
+   - `/sandboxes/{id}/files/*` - read/write files in sandbox
 
-**New file: `src/compymac/workspace/volume.py`**
-- `PersistentVolume` class for managing workspace storage
-- Methods: `mount()`, `unmount()`, `list_snapshots()`
+### Architecture
+
+```
+CompyMac Agent
+      │
+      │ HTTP/REST API
+      ▼
+Workspace Service (FastAPI)
+      │
+      │ Unix Socket API
+      ▼
+Firecracker VMM Process
+      │
+      ▼
+MicroVM (Guest)
+  - Kernel (6.x)
+  - Root FS (Alpine)
+  - Guest Agent (vsock)
+  - Workspace Dir (/workspace)
+```
 
 ### Success Criteria
-- Each project gets isolated workspace
-- Workspaces persist across sessions
-- Can snapshot and restore workspace state
+- Each project gets isolated microVM workspace
+- Workspaces persist across sessions via snapshots
+- Can pause and resume workspace state in <1 second
+- Agent code execution is fully sandboxed
 
 ---
 
 ## Gap 3: Workflow Closure (Full SWE Loop)
 
 ### Problem
-Devin's killer feature is completing the full SWE loop: understand task → plan → modify code → run tests/lint → debug failures → create PR → respond to CI → iterate. CompyMac has pieces but lacks hardened orchestration.
+Devin's killer feature is completing the full SWE loop: understand task -> plan -> modify code -> run tests/lint -> debug failures -> create PR -> respond to CI -> iterate. CompyMac has pieces but lacks hardened orchestration.
 
 ### Current State
 - Individual tools exist (git, file ops, CLI)
@@ -112,19 +148,49 @@ Devin's killer feature is completing the full SWE loop: understand task → plan
 - CI status polling and response
 - Structured artifact storage (logs, diffs, test output)
 
+### Research Required
+
+**This gap requires research-backed implementation.** See: `docs/GAP3_WORKFLOW_CLOSURE_RESEARCH.md`
+
+Key arxiv papers informing the design:
+- **SWE-agent** (arXiv:2405.15793): Agent-Computer Interface design, search-replace format
+- **HyperAgent** (OpenReview): Four-agent architecture (Planner, Navigator, Editor, Executor)
+- **Meta Engineering Agent** (arXiv:2507.18755): ReAct harness, 15 actions, static analysis + test feedback
+- **RepairAgent** (arXiv:2403.17134): FSM-guided tool invocation, interleaved actions
+- **PALADIN** (arXiv:2509.25238): Failure recovery patterns, 89.68% recovery rate
+
+### Workflow Stages (from research)
+
+```
+UNDERSTAND -> PLAN -> LOCATE -> MODIFY -> VALIDATE -> DEBUG -> PR -> CI -> ITERATE
+```
+
+### Key Implementation Patterns (from research)
+
+1. **Search-Replace Format** (not unified diff) - Meta found this outperforms standard diffs
+2. **Feedback Loops** - Static analysis + test execution traces significantly improve solve rate
+3. **Failure Recovery** - Explicit failure detection and recovery actions (PALADIN patterns)
+4. **LLM-as-Judge** - Validate patches meet quality standards before PR creation
+5. **Artifact Storage** - Store all outputs for debugging and review
+
 ### Implementation Plan
 
-1. **SWE Workflow Orchestrator**
-   - Define standard workflow stages
-   - Implement stage transitions with validation
-   - Add retry logic for each stage
+1. **Workflow State Machine**
+   - Define stages with validation criteria
+   - Implement stage transitions
+   - Add retry logic with backoff
 
-2. **CI Integration**
-   - Poll CI status after PR creation
-   - Parse CI logs for actionable errors
-   - Auto-fix common CI failures (lint, type errors)
+2. **Feedback Loop Integration**
+   - Test execution with structured output parsing
+   - Static analysis (lint, type check) feedback
+   - CI status polling and log parsing
 
-3. **Artifact Management**
+3. **Failure Recovery**
+   - Detect failure types from tool output
+   - Match to known patterns
+   - Execute recovery actions
+
+4. **Artifact Management**
    - Store all tool outputs in structured format
    - Link artifacts to workflow stages
    - Make artifacts reviewable in UI
@@ -132,8 +198,18 @@ Devin's killer feature is completing the full SWE loop: understand task → plan
 ### Code Changes
 
 **New file: `src/compymac/workflows/swe_loop.py`**
-- `SWEWorkflow` class with stages: PLAN, CODE, TEST, DEBUG, PR, CI, ITERATE
+- `SWEWorkflow` class with stages: UNDERSTAND, PLAN, LOCATE, MODIFY, VALIDATE, DEBUG, PR, CI, ITERATE
 - Methods: `advance()`, `retry()`, `get_artifacts()`
+- Feedback loop integration
+
+**New file: `src/compymac/workflows/failure_recovery.py`**
+- `FailureRecovery` class with failure pattern matching
+- Recovery action execution
+
+**New file: `src/compymac/workflows/ci_integration.py`**
+- `CIIntegration` class for CI status polling
+- Log parsing for actionable errors
+- Auto-fix generation for common errors
 
 **File: `src/compymac/api/server.py`**
 - Add workflow status to WebSocket broadcasts
@@ -141,7 +217,8 @@ Devin's killer feature is completing the full SWE loop: understand task → plan
 
 ### Success Criteria
 - Agent can complete full PR workflow without manual intervention
-- CI failures are automatically addressed
+- CI failures are automatically addressed (lint, type errors)
+- Failure recovery rate > 80% for known failure patterns
 - All artifacts are stored and reviewable
 
 ---
@@ -310,13 +387,18 @@ Current parallel cognition is "parallel thoughts", not specialized roles (planne
 
 ## Implementation Priority
 
-1. **Gap 1: Auto-Verify** - Quick win, fixes broken UX
-2. **Gap 4: Session Continuity** - High user value, moderate effort
-3. **Gap 5: Safety Controls** - Required for unattended use
-4. **Gap 3: Workflow Closure** - Core value proposition
-5. **Gap 2: Persistent Workspace** - Infrastructure heavy
-6. **Gap 6: Multi-Agent** - Research-heavy, longer term
+1. **Gap 1: Auto-Verify** - DONE - Todos auto-verify after claim
+2. **Gap 4: Session Continuity** - DONE - UI shows real sessions from RunStore
+3. **Gap 3: Workflow Closure** - Next priority, requires research-backed implementation (see GAP3_WORKFLOW_CLOSURE_RESEARCH.md)
+4. **Gap 2: Persistent Workspace** - Design complete (Firecracker microVMs), implementation pending on NUC hardware
+5. **Gap 6: Multi-Agent** - Research-heavy, longer term
+6. **Gap 5: Safety Controls** - Low priority, optional until unattended operation is a goal
 
-## Next Steps
+## Status
 
-Starting with Gap 1 implementation immediately.
+- Gap 1: COMPLETED
+- Gap 4: COMPLETED
+- Gap 3: Research complete, implementation pending
+- Gap 2: Design complete, implementation pending (requires NUC setup)
+- Gap 5: Deprioritized
+- Gap 6: Not started
