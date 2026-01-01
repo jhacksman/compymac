@@ -593,3 +593,126 @@ class TestToolFiltering:
         active_schemas = harness.get_active_tool_schemas()
         active_tool_names = {t["function"]["name"] for t in active_schemas}
         assert active_tool_names == expected_tools
+
+
+class TestSWEWorkflowIntegration:
+    """Tests for Gap 3: SWE Workflow Closure integration."""
+
+    def test_swe_workflow_config_defaults(self):
+        """Test that SWE workflow config options have correct defaults."""
+        config = AgentConfig()
+        assert config.use_swe_workflow is False
+        assert config.swe_task_description == ""
+        assert config.swe_repo_path == ""
+        assert config.swe_max_iterations == 5
+
+    def test_swe_workflow_initialization(self):
+        """Test that SWE workflow is initialized when enabled."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Fix the bug in calculator.py",
+            swe_repo_path="/tmp/test-repo",
+            action_gated=True,
+            require_complete_tool=True,
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        assert loop._swe_workflow is not None
+        assert loop._failure_recovery is not None
+        assert loop._ci_integration is not None
+        assert loop._swe_workflow.task_description == "Fix the bug in calculator.py"
+
+    def test_swe_workflow_stage_prompt_injected(self):
+        """Test that stage prompts are injected into messages."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Fix the bug",
+            action_gated=True,
+            require_complete_tool=True,
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        loop.run("Start task")
+
+        user_messages = [m for m in loop.state.messages if m.role == "user"]
+        stage_messages = [m for m in user_messages if "[SWE_WORKFLOW_STAGE:" in m.content]
+        assert len(stage_messages) > 0
+        assert "UNDERSTAND" in stage_messages[0].content
+
+    def test_swe_workflow_not_initialized_when_disabled(self):
+        """Test that SWE workflow is not initialized when disabled."""
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient()
+        config = AgentConfig(use_swe_workflow=False)
+        loop = AgentLoop(harness, llm, config)
+
+        assert loop._swe_workflow is None
+        assert loop._failure_recovery is None
+        assert loop._ci_integration is None
+
+    def test_swe_workflow_advances_on_success(self):
+        """Test that workflow advances stages on successful tool execution."""
+        from compymac.local_harness import LocalHarness
+        from compymac.workflows.swe_loop import WorkflowStage
+
+        harness = LocalHarness()
+        llm = MockLLMClient(responses=[
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_1", name="think", arguments={"thought": "Understanding the task"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+            ChatResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_2", name="complete", arguments={"final_answer": "Done"}),
+                ],
+                finish_reason="tool_calls",
+                raw_response={},
+            ),
+        ])
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Test task",
+            action_gated=True,
+            require_complete_tool=True,
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        initial_stage = loop._swe_workflow.current_stage
+        assert initial_stage == WorkflowStage.UNDERSTAND
+
+        loop.run("Start task")
+
+        assert len(loop._swe_workflow.stage_results) > 0
