@@ -4,7 +4,8 @@ CompyMac Workflows - Automated workflow patterns for common tasks.
 This module implements:
 - Gap 3: Workflow Closure (Full SWE Loop) - SWEWorkflow, FailureRecovery, CIIntegration
 - Gap 4: Git PR Loop Automation - GitPRWorkflow with approval gates
-- Gap 6: Multi-Agent Orchestration - Structured artifact handoffs between agents
+- Gap 6 Phase 1: Multi-Agent Orchestration - Structured artifact handoffs between agents
+- Gap 6 Phase 2: Parallel Workstreams - Merge/review with conflict detection
 
 Based on arxiv research - see docs/GAP3_WORKFLOW_CLOSURE_RESEARCH.md, GAP6_MULTI_AGENT_RESEARCH.md
 """
@@ -43,6 +44,20 @@ from compymac.workflows.failure_recovery import (
 )
 from compymac.workflows.git_pr import ApprovalGate, GitPRWorkflow, WorkflowState
 
+# Gap 6 Phase 2: Parallel Workstreams
+from compymac.workflows.parallel_workstreams import (
+    ConflictDetector,
+    ConflictReport,
+    ConflictType,
+    EnhancedWorkspaceMerger,
+    FileConflict,
+    MergeStrategy,
+    ParallelWorkstreamOrchestrator,
+    ResolutionStrategy,
+    ReviewerArbiter,
+    StructuredHypothesisResult,
+)
+
 # Gap 3: SWE Loop components
 from compymac.workflows.swe_loop import (
     StageResult,
@@ -77,7 +92,7 @@ __all__ = [
     "ArtifactStore",
     "Artifact",
     "ArtifactType",
-    # Gap 6: Multi-Agent Handoffs
+    # Gap 6 Phase 1: Multi-Agent Handoffs
     "AgentArtifactType",
     "HandoffValidationStatus",
     "ProblemStatement",
@@ -89,4 +104,15 @@ __all__ = [
     "StructuredHandoff",
     "HandoffValidator",
     "HandoffManager",
+    # Gap 6 Phase 2: Parallel Workstreams
+    "MergeStrategy",
+    "ConflictType",
+    "ResolutionStrategy",
+    "FileConflict",
+    "ConflictReport",
+    "StructuredHypothesisResult",
+    "ConflictDetector",
+    "EnhancedWorkspaceMerger",
+    "ReviewerArbiter",
+    "ParallelWorkstreamOrchestrator",
 ]
