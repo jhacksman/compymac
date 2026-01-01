@@ -446,7 +446,7 @@ class AgentLoop:
 
             # Gap 3: Advance SWE workflow on successful tool execution (before completion check)
             if self._swe_workflow and tool_results:
-                from compymac.workflows.swe_loop import StageResult, WorkflowStatus
+                from compymac.workflows.swe_loop import StageResult, WorkflowStage, WorkflowStatus
                 all_successful = all(r.success for r in tool_results)
                 any_failed = any(not r.success for r in tool_results)
 
@@ -462,6 +462,16 @@ class AgentLoop:
                     new_stage = self._swe_workflow.current_stage
                     if old_stage != new_stage:
                         logger.info(f"[SWE_WORKFLOW] Advanced: {old_stage.value} -> {new_stage.value}")
+
+                    # Phase 3: CI Integration - detect PR creation and poll CI
+                    if old_stage == WorkflowStage.PR and new_stage == WorkflowStage.CI:
+                        pr_url = self._detect_pr_url_from_results(tool_results)
+                        if pr_url and self._ci_integration:
+                            self._handle_ci_stage(pr_url)
+
+                    # Phase 4: Validation Integration - run tests/lint in VALIDATE stage
+                    if old_stage == WorkflowStage.MODIFY and new_stage == WorkflowStage.VALIDATE:
+                        self._handle_validation_stage()
 
                 elif any_failed and self._failure_recovery:
                     failed_results = [r for r in tool_results if not r.success]
@@ -754,6 +764,136 @@ class AgentLoop:
     def set_task_description(self, description: str) -> None:
         """Set the task description for the current run."""
         self._task_description = description
+
+    def _detect_pr_url_from_results(self, tool_results: list[ToolResult]) -> str | None:
+        """
+        Phase 3: Detect PR URL from tool results.
+
+        Looks for GitHub PR URLs in tool output (e.g., from git_create_pr or bash git push).
+        """
+        import re
+        pr_pattern = r"https://github\.com/[^/]+/[^/]+/pull/\d+"
+
+        for result in tool_results:
+            content = result.content or ""
+            match = re.search(pr_pattern, content)
+            if match:
+                pr_url = match.group(0)
+                logger.info(f"[SWE_WORKFLOW] Detected PR URL: {pr_url}")
+                if self._swe_workflow:
+                    pr_number_match = re.search(r"/pull/(\d+)", pr_url)
+                    pr_number = int(pr_number_match.group(1)) if pr_number_match else 0
+                    self._swe_workflow.set_pr_info(pr_url, pr_number, "")
+                return pr_url
+        return None
+
+    def _handle_ci_stage(self, pr_url: str) -> None:
+        """
+        Phase 3: Handle CI stage - poll CI status, parse logs, inject error summary.
+
+        Based on research document Phase 3 requirements:
+        1. Poll CI status for PR
+        2. Parse CI logs for actionable errors
+        3. Inject error summary into context
+        4. Advance to ITERATE stage on CI failure
+        """
+        if not self._ci_integration or not self._swe_workflow:
+            return
+
+        from compymac.workflows.ci_integration import CIStatus
+        from compymac.workflows.swe_loop import StageResult, WorkflowStage
+
+        logger.info(f"[SWE_WORKFLOW] Polling CI for PR: {pr_url}")
+
+        ci_status, checks = self._ci_integration.poll_status(pr_url)
+
+        if ci_status == CIStatus.PASSED:
+            self._swe_workflow.set_ci_status(passed=True, details={"checks": [c.to_dict() for c in checks]})
+            self.state.messages.append(Message(
+                role="user",
+                content="[SWE_WORKFLOW_CI] CI passed. All checks successful.",
+            ))
+            logger.info("[SWE_WORKFLOW] CI passed")
+
+        elif ci_status == CIStatus.FAILED:
+            all_errors = []
+            for check in checks:
+                if check.status == CIStatus.FAILED and check.raw_log:
+                    errors = self._ci_integration.parse_logs(check.raw_log)
+                    all_errors.extend(errors)
+
+            error_summary = self._ci_integration.summarize_errors(all_errors)
+            self._swe_workflow.set_ci_status(passed=False, details={
+                "checks": [c.to_dict() for c in checks],
+                "errors": [e.to_dict() for e in all_errors],
+            })
+
+            self.state.messages.append(Message(
+                role="user",
+                content=f"[SWE_WORKFLOW_CI] CI failed.\n{error_summary}\n\nFix these errors and push a new commit.",
+            ))
+
+            stage_result = StageResult(
+                stage=WorkflowStage.CI,
+                success=False,
+                message="CI failed - advancing to ITERATE stage",
+                artifacts={"errors": [e.to_dict() for e in all_errors]},
+                errors=[e.message for e in all_errors[:5]],
+            )
+            self._swe_workflow.advance(stage_result)
+            logger.info(f"[SWE_WORKFLOW] CI failed with {len(all_errors)} errors, advancing to ITERATE")
+
+        elif ci_status in [CIStatus.PENDING, CIStatus.RUNNING]:
+            self.state.messages.append(Message(
+                role="user",
+                content="[SWE_WORKFLOW_CI] CI is still running. Wait for completion or check status again.",
+            ))
+            logger.info("[SWE_WORKFLOW] CI still running")
+
+    def _handle_validation_stage(self) -> None:
+        """
+        Phase 4: Handle VALIDATE stage - run tests and lint, inject results.
+
+        Based on research document Phase 4 requirements:
+        1. Run tests using SWEWorkflow.run_tests()
+        2. Run lint using SWEWorkflow.run_lint()
+        3. Inject validation results into context
+        """
+        if not self._swe_workflow:
+            return
+
+        logger.info("[SWE_WORKFLOW] Running validation (tests + lint)")
+
+        test_passed, test_output, test_errors = self._swe_workflow.run_tests()
+        lint_passed, lint_output, lint_errors = self._swe_workflow.run_lint()
+
+        validation_results = {
+            "tests": {"passed": test_passed, "errors": test_errors},
+            "lint": {"passed": lint_passed, "errors": lint_errors},
+        }
+        self._swe_workflow.set_validation_results(validation_results)
+
+        validation_msg_parts = ["[SWE_WORKFLOW_VALIDATION]"]
+
+        if test_passed:
+            validation_msg_parts.append("Tests: PASSED")
+        else:
+            validation_msg_parts.append("Tests: FAILED\nErrors:\n" + "\n".join(test_errors[:5]))
+
+        if lint_passed:
+            validation_msg_parts.append("Lint: PASSED")
+        else:
+            validation_msg_parts.append("Lint: FAILED\nErrors:\n" + "\n".join(lint_errors[:5]))
+
+        self.state.messages.append(Message(
+            role="user",
+            content="\n\n".join(validation_msg_parts),
+        ))
+
+        if test_passed and lint_passed:
+            logger.info("[SWE_WORKFLOW] Validation passed (tests + lint)")
+        else:
+            logger.info(f"[SWE_WORKFLOW] Validation failed: tests={test_passed}, lint={lint_passed}")
 
 
 class Policy:

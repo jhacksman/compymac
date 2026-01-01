@@ -716,3 +716,107 @@ class TestSWEWorkflowIntegration:
         loop.run("Start task")
 
         assert len(loop._swe_workflow.stage_results) > 0
+
+    def test_detect_pr_url_from_results(self):
+        """Test Phase 3: PR URL detection from tool results."""
+        from compymac.harness import ToolResult
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient()
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Test task",
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        tool_results = [
+            ToolResult(
+                tool_call_id="call_1",
+                success=True,
+                content="Created PR: https://github.com/owner/repo/pull/123",
+            ),
+        ]
+
+        pr_url = loop._detect_pr_url_from_results(tool_results)
+        assert pr_url == "https://github.com/owner/repo/pull/123"
+        assert loop._swe_workflow.pr_info["url"] == pr_url
+        assert loop._swe_workflow.pr_info["number"] == 123
+
+    def test_detect_pr_url_no_match(self):
+        """Test Phase 3: No PR URL when not present in results."""
+        from compymac.harness import ToolResult
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient()
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Test task",
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        tool_results = [
+            ToolResult(
+                tool_call_id="call_1",
+                success=True,
+                content="Some other output without PR URL",
+            ),
+        ]
+
+        pr_url = loop._detect_pr_url_from_results(tool_results)
+        assert pr_url is None
+
+    def test_handle_validation_stage(self):
+        """Test Phase 4: Validation stage runs tests and lint."""
+        from unittest.mock import patch
+
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient()
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Test task",
+            swe_repo_path="/tmp/test-repo",
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        with patch.object(loop._swe_workflow, 'run_tests', return_value=(True, "All tests passed", [])):
+            with patch.object(loop._swe_workflow, 'run_lint', return_value=(True, "No lint errors", [])):
+                loop._handle_validation_stage()
+
+        assert loop._swe_workflow.validation_results["tests"]["passed"] is True
+        assert loop._swe_workflow.validation_results["lint"]["passed"] is True
+
+        validation_messages = [m for m in loop.state.messages if "[SWE_WORKFLOW_VALIDATION]" in m.content]
+        assert len(validation_messages) == 1
+        assert "Tests: PASSED" in validation_messages[0].content
+        assert "Lint: PASSED" in validation_messages[0].content
+
+    def test_handle_validation_stage_with_failures(self):
+        """Test Phase 4: Validation stage reports failures."""
+        from unittest.mock import patch
+
+        from compymac.local_harness import LocalHarness
+
+        harness = LocalHarness()
+        llm = MockLLMClient()
+        config = AgentConfig(
+            use_swe_workflow=True,
+            swe_task_description="Test task",
+            swe_repo_path="/tmp/test-repo",
+        )
+        loop = AgentLoop(harness, llm, config)
+
+        with patch.object(loop._swe_workflow, 'run_tests', return_value=(False, "Test failed", ["AssertionError"])):
+            with patch.object(loop._swe_workflow, 'run_lint', return_value=(False, "Lint error", ["E501 line too long"])):
+                loop._handle_validation_stage()
+
+        assert loop._swe_workflow.validation_results["tests"]["passed"] is False
+        assert loop._swe_workflow.validation_results["lint"]["passed"] is False
+
+        validation_messages = [m for m in loop.state.messages if "[SWE_WORKFLOW_VALIDATION]" in m.content]
+        assert len(validation_messages) == 1
+        assert "Tests: FAILED" in validation_messages[0].content
+        assert "Lint: FAILED" in validation_messages[0].content
