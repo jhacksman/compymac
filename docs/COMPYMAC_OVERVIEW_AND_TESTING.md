@@ -324,9 +324,50 @@ uv run python -m compymac.evaluation.runner
 | Gap 2: Persistent Workspace | Design complete | Pending NUC hardware |
 | Gap 5: Safety Controls | Deprioritized | Not implemented |
 
+## Validation Results (2025-12-27)
+
+### Unit Tests: PASSED
+
+```
+======================= 535 passed, 88 warnings in 2.79s =======================
+```
+
+All 535 unit tests pass, including:
+- 35 dynamic orchestration tests (Gap 6 Phase 3)
+- Agent loop tests with SWE workflow integration
+- Parallel workstreams and handoff tests
+
+### Tier 1: Toolchain Reality Check - PASSED
+
+**Task: file_001** - Create directory structure
+
+```
+Task file_001: SUCCESS in 7 steps (37.3s)
+Success Rate: 100.0%
+```
+
+Evidence: Files created at `/tmp/eval_file_001/` with correct structure (src/, tests/, README.md)
+
+### Tier 2: Code Fix Task - PASSED
+
+**Task: fix_001** - Fix division by zero bug
+
+```
+Task fix_001: SUCCESS in 10 steps (50.5s)
+Success Rate: 100.0%
+```
+
+Evidence: `/tmp/eval_fix_001/buggy.py` contains fixed code with proper error handling:
+```python
+def calculate_average(numbers):
+    if len(numbers) == 0:
+        raise ValueError("Cannot calculate average of empty list")
+    return total / len(numbers)
+```
+
 ## Next Steps
 
-1. Run Tier 1-3 tests to validate current functionality
-2. Document any failures or issues discovered
+1. Run Tier 3 (Web UI smoke test) for interactive validation
+2. Run Tier 5 (full evaluation suite) for comprehensive coverage
 3. Address any gaps between expected and actual behavior
 4. Consider implementing Gap 5 (Safety Controls) if unattended operation is desired
