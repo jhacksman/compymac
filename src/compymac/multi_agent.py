@@ -29,10 +29,15 @@ from compymac.harness import EventLog, EventType, Harness
 from compymac.llm import LLMClient
 from compymac.memory import MemoryFacts, MemoryManager, MemoryState
 from compymac.types import Message
+from compymac.workflows.agent_handoffs import (
+    AgentArtifactType,
+    HandoffManager,
+)
 
 if TYPE_CHECKING:
     from compymac.parallel import ParallelStepExecutor
     from compymac.trace_store import TraceContext, TraceStore
+    from compymac.workflows.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
 
@@ -962,6 +967,9 @@ class ManagerAgent:
     It drives the workflow: Plan → Execute → Reflect → (repeat or replan).
 
     Supports optional TraceContext for complete execution capture.
+
+    Gap 6 Phase 1: Uses structured artifact handoffs between agents via HandoffManager.
+    This reduces error propagation by validating artifacts at each transition point.
     """
 
     def __init__(
@@ -972,6 +980,8 @@ class ManagerAgent:
         enable_memory: bool = False,
         trace_base_path: Path | None = None,
         trace_context: "TraceContext | None" = None,
+        artifact_store: "ArtifactStore | None" = None,
+        enable_structured_handoffs: bool = True,
     ):
         self.harness = harness
         self.llm_client = llm_client
@@ -1001,6 +1011,12 @@ class ManagerAgent:
             self.memory_manager = MemoryManager(
                 llm_client=llm_client,
             )
+
+        # Gap 6 Phase 1: Structured handoffs between agents
+        self._enable_structured_handoffs = enable_structured_handoffs
+        self._handoff_manager: HandoffManager | None = None
+        if enable_structured_handoffs:
+            self._handoff_manager = HandoffManager(artifact_store=artifact_store)
 
         # State
         self.workspace = Workspace()
@@ -1114,6 +1130,20 @@ class ManagerAgent:
         self.workspace.plan = plan
         self.workspace.current_step_index = 0
         self.state = ManagerState.EXECUTING
+
+        # Gap 6 Phase 1: Create structured handoff from planner to executor
+        if self._handoff_manager:
+            self._handoff_manager.create_handoff(
+                from_agent="planner",
+                to_agent="executor",
+                artifact_type=AgentArtifactType.EXECUTION_PLAN,
+                content={
+                    "steps": [s.to_dict() for s in plan],
+                    "goal": self.workspace.goal,
+                    "constraints": self.workspace.constraints,
+                    "is_valid": validation_result.is_valid if validation_result else True,
+                },
+            )
 
         # Store parallel groups for parallel execution
         if validation_result and validation_result.parallel_groups:
@@ -1236,6 +1266,23 @@ class ManagerAgent:
         # Store results for reflection (we'll reflect on the whole group)
         self._last_group_results = results
 
+        # Gap 6 Phase 1: Create structured handoff from executor to reflector
+        if self._handoff_manager:
+            all_success = all(r.success for r in results)
+            self._handoff_manager.create_handoff(
+                from_agent="executor",
+                to_agent="reflector",
+                artifact_type=AgentArtifactType.TEST_RESULT if all_success else AgentArtifactType.FAILURE_ANALYSIS,
+                content={
+                    "passed": all_success,
+                    "output": "; ".join(r.summary for r in results),
+                    "step_indices": [r.step_index for r in results],
+                    "errors": [e for r in results for e in r.errors],
+                    "failure_type": "execution" if not all_success else None,
+                    "error_message": results[0].errors[0] if results and results[0].errors else None,
+                },
+            )
+
         # Update workspace current_step_index to the last step in the group
         max_step_index = max(s.index for s in steps_in_group)
         self.workspace.current_step_index = max_step_index
@@ -1304,6 +1351,21 @@ class ManagerAgent:
 
         step = self.workspace.plan[result_to_reflect.step_index]
         reflection = self.reflector.reflect(self.workspace, step, result_to_reflect)
+
+        # Gap 6 Phase 1: Create structured handoff from reflector to manager
+        if self._handoff_manager:
+            self._handoff_manager.create_handoff(
+                from_agent="reflector",
+                to_agent="manager",
+                artifact_type=AgentArtifactType.REFLECTION,
+                content={
+                    "action": reflection.action.value,
+                    "reasoning": reflection.reasoning,
+                    "suggested_changes": reflection.suggested_changes,
+                    "step_index": result_to_reflect.step_index,
+                    "all_success": all_success,
+                },
+            )
 
         self._log_event(
             "reflection_result",
@@ -1432,3 +1494,15 @@ class ManagerAgent:
     def get_state(self) -> ManagerState:
         """Get the current manager state."""
         return self.state
+
+    def get_handoff_manager(self) -> HandoffManager | None:
+        """Get the handoff manager for debugging/testing."""
+        return self._handoff_manager
+
+    def get_handoff_stats(self) -> dict[str, Any]:
+        """Get statistics about structured handoffs."""
+        if not self._handoff_manager:
+            return {"enabled": False}
+        stats = self._handoff_manager.get_validation_stats()
+        stats["enabled"] = True
+        return stats

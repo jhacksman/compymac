@@ -4,10 +4,24 @@ CompyMac Workflows - Automated workflow patterns for common tasks.
 This module implements:
 - Gap 3: Workflow Closure (Full SWE Loop) - SWEWorkflow, FailureRecovery, CIIntegration
 - Gap 4: Git PR Loop Automation - GitPRWorkflow with approval gates
+- Gap 6: Multi-Agent Orchestration - Structured artifact handoffs between agents
 
-Based on arxiv research - see docs/GAP3_WORKFLOW_CLOSURE_RESEARCH.md
+Based on arxiv research - see docs/GAP3_WORKFLOW_CLOSURE_RESEARCH.md, GAP6_MULTI_AGENT_RESEARCH.md
 """
 
+from compymac.workflows.agent_handoffs import (
+    AgentArtifactType,
+    FailureAnalysis,
+    FileTarget,
+    HandoffManager,
+    HandoffValidationStatus,
+    HandoffValidator,
+    PatchPlan,
+    ProblemStatement,
+    ReviewFeedback,
+    StructuredHandoff,
+    TestPlan,
+)
 from compymac.workflows.artifact_store import (
     Artifact,
     ArtifactStore,
@@ -63,4 +77,16 @@ __all__ = [
     "ArtifactStore",
     "Artifact",
     "ArtifactType",
+    # Gap 6: Multi-Agent Handoffs
+    "AgentArtifactType",
+    "HandoffValidationStatus",
+    "ProblemStatement",
+    "FileTarget",
+    "PatchPlan",
+    "TestPlan",
+    "FailureAnalysis",
+    "ReviewFeedback",
+    "StructuredHandoff",
+    "HandoffValidator",
+    "HandoffManager",
 ]
