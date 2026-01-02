@@ -5,9 +5,11 @@ This module provides pluggable storage backends for TraceStore and KnowledgeStor
 Supports SQLite (local development) and PostgreSQL (production with pgvector).
 
 Gap 1: Also provides RunStore for session persistence and resume.
+Library: Provides LibraryStore for document collection management.
 """
 
 from compymac.storage.backend import StorageBackend
+from compymac.storage.library_store import DocumentStatus, LibraryDocument, LibraryStore
 from compymac.storage.run_store import RunMetadata, RunStatus, RunStore, SavedRun
 from compymac.storage.sqlite_backend import SQLiteBackend
 
@@ -22,6 +24,9 @@ try:
         "RunStatus",
         "RunMetadata",
         "SavedRun",
+        "LibraryStore",
+        "LibraryDocument",
+        "DocumentStatus",
     ]
 except ImportError:
     __all__ = [
@@ -31,4 +36,7 @@ except ImportError:
         "RunStatus",
         "RunMetadata",
         "SavedRun",
+        "LibraryStore",
+        "LibraryDocument",
+        "DocumentStatus",
     ]
