@@ -952,11 +952,169 @@ const supportsDirectoryUpload = 'webkitdirectory' in document.createElement('inp
 
 ---
 
-## 15. References
+## 15. Library-Agent RAG Integration
+
+This section documents research on Retrieval-Augmented Generation (RAG) techniques for integrating the document library with the agent's query pipeline. The goal is to enable the agent to answer questions about uploaded documents by retrieving relevant chunks and using them as context for Venice.ai LLM responses.
+
+### 15.1 Research Summary (arXiv 2024)
+
+The following papers inform our RAG integration design:
+
+**Core RAG Techniques:**
+
+1. **DR-RAG (arXiv:2406.07348)** - Dynamic Document Relevance for multi-hop QA. Key insight: even documents with low direct relevance to a query can help retrieve other relevant documents when combined with the query. Proposes a two-stage retrieval framework that improves recall while calling the LLM only once for efficiency.
+
+2. **REAR (arXiv:2402.17497)** - Relevance-Aware RAG for open-domain QA. Addresses the problem that LLMs cannot precisely assess relevance of retrieved documents, leading to incorrect utilization of external knowledge. Proposes an assessment module that evaluates document relevance before generation, using bi-granularity relevance fusion.
+
+3. **RQ-RAG (arXiv:2404.00610)** - Learning to Refine Queries. Addresses ambiguous or complex queries that need clarification or decomposition. Equips the model with explicit rewriting, decomposition, and disambiguation capabilities. Achieves 1.9% improvement over SOTA on single-hop QA.
+
+4. **RAIDD (arXiv:2410.03754)** - Retrieval from AI Derived Documents. Proposes deriving inferred features (summaries, example questions) from documents at ingest time, then retrieving against these derived features rather than raw text. Significantly improves performance on subjective QA tasks where the answer isn't directly stated.
+
+**Chunking Strategies:**
+
+5. **Semantic Chunking Analysis (arXiv:2410.13070)** - Evaluates whether semantic chunking is worth the computational cost. Finding: semantic chunking does NOT consistently outperform simple fixed-size chunking across document retrieval, evidence retrieval, and answer generation tasks. Recommendation: use fixed-size chunking (200-500 tokens) with overlap for efficiency unless domain-specific needs justify semantic chunking.
+
+**Agent-RAG Integration:**
+
+6. **GeAR (arXiv:2412.18431)** - Graph-enhanced Agent for RAG. Addresses multi-hop retrieval scenarios where traditional retrievers struggle. Proposes: (i) graph expansion mechanism that augments base retrievers like BM25, and (ii) agent framework for multi-step retrieval. Achieves 10%+ improvement on MuSiQue dataset while consuming fewer tokens.
+
+7. **RAG Survey (arXiv:2409.14924)** - Comprehensive survey on external data integration. Proposes task categorization: explicit fact queries, implicit fact queries, interpretable rationale queries, and hidden rationale queries. Each level requires different retrieval and generation strategies.
+
+8. **RAG Text Generation Survey (arXiv:2404.10981)** - Organizes RAG into four stages: pre-retrieval, retrieval, post-retrieval, and generation. Highlights that RAG provides cost-effective solution to hallucination by grounding responses in real-world data.
+
+### 15.2 Recommended Architecture for CompyMac
+
+Based on the research, we recommend a **tool-based RAG integration** where the agent explicitly calls library search tools rather than automatic context injection:
+
+```
+User Query: "What does the Data Science book say about A/B tests?"
+    ↓
+Agent receives query
+    ↓
+Agent decides to use library_search tool
+    ↓
+library_search("A/B tests", top_k=5) → returns relevant chunks
+    ↓
+Agent incorporates chunks into context
+    ↓
+Venice.ai generates response with citations
+    ↓
+User receives grounded answer
+```
+
+**Why tool-based over automatic injection?**
+- Agent can decide when retrieval is needed (not all queries need library context)
+- Explicit tool calls are auditable and debuggable
+- Aligns with GeAR's agent framework approach
+- Supports multi-step retrieval for complex queries
+- Avoids context pollution for non-library queries
+
+### 15.3 Librarian Tools Design
+
+Two tools for agent-library interaction (already implemented in PR #183):
+
+**Tool 1: library_search**
+```python
+def library_search(
+    query: str,
+    top_k: int = 5,
+    doc_ids: list[str] | None = None,  # Optional: limit to specific documents
+    min_score: float = 0.0,
+) -> list[dict]:
+    """
+    Search the document library for chunks relevant to the query.
+    
+    Returns:
+        List of chunks with: id, text, score, doc_id, doc_title, page_num
+    """
+```
+
+**Tool 2: library_get_chunk**
+```python
+def library_get_chunk(chunk_id: str) -> dict:
+    """
+    Get full content of a specific chunk by ID.
+    
+    Returns:
+        Chunk with: id, text, doc_id, doc_title, page_num, metadata
+    """
+```
+
+### 15.4 Retrieval Strategy
+
+Based on research findings, we recommend:
+
+**Chunking (at ingest time):**
+- Fixed-size chunks: 500 tokens with 50-token overlap
+- Preserve page boundaries where possible (don't split mid-sentence across pages)
+- Store chunk metadata: doc_id, page_num, section_title (from navigation)
+
+**Embedding:**
+- Use Venice.ai embedding endpoint (if available) or sentence-transformers
+- Store embeddings in vector store (existing hybrid search infrastructure)
+
+**Retrieval (at query time):**
+- Hybrid search: combine BM25 keyword matching with vector similarity
+- Top-k retrieval with k=5-10 chunks
+- Optional: reranking step using LLM relevance scoring (REAR approach)
+
+**Context Assembly:**
+- Deduplicate overlapping chunks
+- Order by relevance score
+- Include source citations (doc title, page number)
+- Limit total context to ~2000 tokens to leave room for generation
+
+### 15.5 Implementation Phases
+
+**Phase 1: Wire Librarian Tools to Agent**
+- Add `library_search` and `library_get_chunk` to agent's tool registry
+- Update system prompt to describe library tools
+- Test basic retrieval flow
+
+**Phase 2: Improve Retrieval Quality**
+- Implement hybrid search (BM25 + vector)
+- Add chunk overlap handling
+- Add relevance score thresholding
+
+**Phase 3: Enhanced Features (Optional)**
+- Query rewriting for ambiguous queries (RQ-RAG)
+- Multi-step retrieval for complex queries (GeAR)
+- Derived features at ingest (RAIDD) - summaries, example questions
+
+### 15.6 Evaluation Metrics
+
+To measure RAG quality:
+- **Retrieval Recall@k**: % of relevant chunks in top-k results
+- **Answer Accuracy**: correctness of generated answers (manual eval)
+- **Groundedness**: % of claims that can be traced to retrieved chunks
+- **Latency**: time from query to response
+
+### 15.7 Venice.ai Integration Notes
+
+Per project guidelines, CompyMac uses Venice.ai API for LLM hosting. The RAG integration should:
+- Use Venice.ai chat completion endpoint for generation
+- Pass retrieved chunks as system context or user message prefix
+- Request citations in the response format
+- Handle rate limits gracefully
+
+---
+
+## 16. References
 
 - GAP1_INTERACTIVE_UI_DESIGN.md - Overall UI architecture
 - PDF_INGESTION_IMPLEMENTATION_PLAN.md - PDF processing pipeline
 - PR #184 - OCR provider abstraction
+- PR #183 - Librarian tools implementation
 - PyMuPDF `get_toc()` - https://pymupdf.readthedocs.io/en/latest/document.html#Document.get_toc
 - EbookLib - https://github.com/aerkalov/ebooklib
 - webkitdirectory MDN - https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/webkitdirectory
+
+**arXiv Papers:**
+- DR-RAG: https://arxiv.org/abs/2406.07348
+- REAR: https://arxiv.org/abs/2402.17497
+- RQ-RAG: https://arxiv.org/abs/2404.00610
+- RAIDD: https://arxiv.org/abs/2410.03754
+- Semantic Chunking Analysis: https://arxiv.org/abs/2410.13070
+- GeAR: https://arxiv.org/abs/2412.18431
+- RAG Survey: https://arxiv.org/abs/2409.14924
+- RAG Text Generation Survey: https://arxiv.org/abs/2404.10981
