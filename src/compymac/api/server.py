@@ -88,20 +88,23 @@ Available tools include: Read, Edit, Write, bash, grep, glob, think, TodoCreate,
 
 ## Document Library Tools
 
-You have access to a document library containing uploaded PDFs and EPUBs. Use these tools to search and retrieve information:
+You have access to a document library containing uploaded PDFs and EPUBs. Use the `librarian` tool to search and retrieve information. The librarian is a specialist agent that handles all library operations.
 
-- library_list: List all documents in the library with their IDs and metadata
-- library_activate_source: Activate a document for searching (use document ID from library_list)
-- library_deactivate_source: Remove a document from active search sources
-- library_get_active_sources: See which documents are currently active for search
-- library_search: Search for relevant content across active documents
-- library_get_content: Get the full content of a specific document or page
+**Librarian Actions:**
+- `list`: List all documents in the library with their IDs and metadata
+- `activate`: Activate a document for searching (requires document_id)
+- `deactivate`: Remove a document from active search sources (requires document_id)
+- `status`: See which documents are currently active for search
+- `search`: Search for relevant content across active documents (requires query)
+- `get_content`: Get the full content of a specific document or page (requires document_id)
+- `answer`: Search and synthesize an answer with citations (requires query)
 
-Workflow for using the library:
-1. Call library_list to see available documents
-2. Call library_activate_source with the document ID you want to search
-3. Call library_search with your query to find relevant content
-4. Optionally use library_get_content to read more context from a document
+**Example workflow:**
+1. `librarian(action="list")` - see available documents
+2. `librarian(action="activate", document_id="...")` - enable a document for search
+3. `librarian(action="answer", query="What does the document say about X?")` - get grounded answer with citations
+
+The librarian returns structured JSON with answer, citations, excerpts, and actions_taken.
 
 Be helpful, thorough, and always create a plan before executing."""
 
