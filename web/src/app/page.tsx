@@ -17,7 +17,7 @@ export default function Home() {
   useEffect(() => {
     const createSession = async () => {
       try {
-        const response = await fetch('http://localhost:8000/sessions', {
+        const response = await fetch('http://localhost:8080/sessions', {
           method: 'POST',
         })
         const data = await response.json()

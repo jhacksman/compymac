@@ -1596,11 +1596,14 @@ async def upload_document(
 
 @app.get("/api/documents/{document_id}")
 async def get_document(document_id: str) -> dict[str, Any]:
-    """Get document details by ID."""
+    """Get document details by ID, including chunks."""
     doc = library_store.get_document(document_id)
     if not doc:
         return {"error": "Document not found"}
-    return doc.to_dict()
+    result = doc.to_dict()
+    # Include chunks for content viewing
+    result["chunks"] = doc.chunks
+    return result
 
 
 @app.get("/api/library")

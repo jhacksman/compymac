@@ -1,14 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Settings, Globe, Terminal, CheckSquare, Share2 } from 'lucide-react'
+import { Settings, Globe, Terminal, CheckSquare, Share2, BookOpen } from 'lucide-react'
 import { BrowserPanel } from './BrowserPanel'
 import { TerminalPanel } from './TerminalPanel'
 import { TodosPanel } from './TodosPanel'
 import { KnowledgeGraphPanel } from './KnowledgeGraphPanel'
+import { LibraryPanel } from './LibraryPanel'
 import { cn } from '@/lib/utils'
 
-type TabId = 'browser' | 'cli' | 'todos' | 'knowledge'
+type TabId = 'browser' | 'cli' | 'todos' | 'knowledge' | 'library'
 
 interface Tab {
   id: TabId
@@ -21,6 +22,7 @@ const tabs: Tab[] = [
   { id: 'cli', label: 'CLI', icon: <Terminal className="w-4 h-4" /> },
   { id: 'todos', label: 'Todos', icon: <CheckSquare className="w-4 h-4" /> },
   { id: 'knowledge', label: 'Knowledge Graph', icon: <Share2 className="w-4 h-4" /> },
+  { id: 'library', label: 'Library', icon: <BookOpen className="w-4 h-4" /> },
 ]
 
 interface AgentWorkspaceProps {
@@ -109,6 +111,7 @@ export function AgentWorkspace({
           />
         )}
         {activeTab === 'knowledge' && <KnowledgeGraphPanel isMaximized />}
+        {activeTab === 'library' && <LibraryPanel isMaximized />}
       </div>
     </div>
   )
