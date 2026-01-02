@@ -14,6 +14,11 @@ Phase 2 additions:
 Phase 3 additions:
 - Venice.ai vision API integration for complex pages
 - Image/diagram description extraction
+
+Phase 3.1 additions:
+- Pluggable OCR provider abstraction (Venice, vLLM, OpenAI-compatible)
+- OCR-first approach using Gemma 3 27B (default) or custom models
+- Support for SOTA OCR models via vLLM (olmOCR-2, DeepSeek-OCR, Qwen2.5-VL)
 """
 
 from pathlib import Path
@@ -48,14 +53,14 @@ try:
 except ImportError:
     TESSERACT_AVAILABLE = False
 
-# Try to import PDF vision client for complex page analysis
+# Try to import OCR client for vision-based text extraction
 try:
-    from compymac.ingestion.pdf_vision import PDFVisionClient, VisionAnalysisResult
-    VISION_AVAILABLE = True
+    from compymac.ingestion.ocr_provider import OCRClient, OCRResult
+    OCR_AVAILABLE = True
 except ImportError:
-    VISION_AVAILABLE = False
-    PDFVisionClient = None  # type: ignore[misc, assignment]
-    VisionAnalysisResult = None  # type: ignore[misc, assignment]
+    OCR_AVAILABLE = False
+    OCRClient = None  # type: ignore[misc, assignment]
+    OCRResult = None  # type: ignore[misc, assignment]
 
 
 class PDFClassification:
@@ -142,28 +147,27 @@ class DocumentParser:
     def __init__(
         self,
         use_docling: bool = True,
-        use_vision: bool = True,
-        vision_api_key: str | None = None,
+        use_ocr: bool = True,
+        ocr_api_key: str | None = None,
     ):
         """
         Initialize document parser.
 
         Args:
             use_docling: Whether to use docling for PDF/EPUB parsing
-            use_vision: Whether to use Venice.ai vision for complex pages
-            vision_api_key: API key for vision analysis (uses env var if None)
+            use_ocr: Whether to use vision-based OCR for complex pages
+            ocr_api_key: API key for OCR (uses LLM_API_KEY env var if None)
         """
         self.use_docling = use_docling and DOCLING_AVAILABLE
-        self.use_vision = use_vision and VISION_AVAILABLE
-        self.vision_api_key = vision_api_key
+        self.use_ocr = use_ocr and OCR_AVAILABLE
         self._converter = None
-        self._vision_client: PDFVisionClient | None = None
+        self._ocr_client: OCRClient | None = None
 
         if self.use_docling:
             self._converter = DocumentConverter()
 
-        if self.use_vision and PDFVisionClient is not None:
-            self._vision_client = PDFVisionClient(api_key=vision_api_key)
+        if self.use_ocr and OCRClient is not None:
+            self._ocr_client = OCRClient(api_key=ocr_api_key)
 
     def parse(self, file_path: Path | str) -> ParseResult:
         """
@@ -264,29 +268,23 @@ class DocumentParser:
             if text.strip() and len(text.strip()) >= min_chars_threshold:
                 pages_text.append(f"--- Page {page_num + 1} ---\n{text}")
             else:
-                # Page still has little/no text - try vision analysis if available
-                vision_text = ""
-                if self._vision_client is not None:
-                    vision_result = self._analyze_page_with_vision(
-                        doc, page_num, file_path.name
-                    )
-                    if vision_result:
-                        vision_analyses.append(vision_result.to_dict())
-                        vision_text = (
-                            f"\n[Vision Analysis]\n{vision_result.description}"
-                        )
-                        if vision_result.detected_elements:
-                            vision_text += (
-                                f"\n[Detected Elements: "
-                                f"{', '.join(vision_result.detected_elements)}]"
-                            )
+                # Page still has little/no text - try vision-based OCR if available
+                ocr_text = ""
+                if self._ocr_client is not None:
+                    ocr_result = self._ocr_page_with_vision(doc, page_num)
+                    if ocr_result and ocr_result.text and ocr_result.confidence > 0:
+                        vision_analyses.append(ocr_result.to_dict())
+                        ocr_text = ocr_result.text
 
-                # Include whatever text we have plus vision analysis
+                # Include whatever text we have plus OCR result
                 page_content = f"--- Page {page_num + 1} ---\n"
                 if text.strip():
                     page_content += text
-                if vision_text:
-                    page_content += vision_text
+                if ocr_text:
+                    if text.strip():
+                        page_content += f"\n[OCR]\n{ocr_text}"
+                    else:
+                        page_content += ocr_text
                 if page_content.strip() != f"--- Page {page_num + 1} ---":
                     pages_text.append(page_content)
 
@@ -314,9 +312,9 @@ class DocumentParser:
                 "page_count": page_count,
                 "classification": classification.to_dict(),
                 "table_count": len(tables),
-                "ocr_used": len(classification.scanned_pages) > 0 and TESSERACT_AVAILABLE,
-                "vision_analyses": vision_analyses,
-                "vision_pages_analyzed": len(vision_analyses),
+                "tesseract_ocr_used": len(classification.scanned_pages) > 0 and TESSERACT_AVAILABLE,
+                "vision_ocr_results": vision_analyses,
+                "vision_ocr_pages": len(vision_analyses),
             },
             format="pdf",
             classification=classification,
@@ -369,41 +367,38 @@ class DocumentParser:
             confidence=confidence,
         )
 
-    def _analyze_page_with_vision(
+    def _ocr_page_with_vision(
         self,
         doc: "fitz.Document",
         page_idx: int,
-        doc_name: str,
-    ) -> "VisionAnalysisResult | None":
+    ) -> "OCRResult | None":
         """
-        Analyze a PDF page using Venice.ai vision API.
+        Perform OCR on a PDF page using vision-language model.
 
         Args:
             doc: Open PyMuPDF document.
             page_idx: Page index (0-based).
-            doc_name: Document name for context.
 
         Returns:
-            VisionAnalysisResult or None if analysis fails.
+            OCRResult or None if OCR fails.
         """
-        if self._vision_client is None:
+        if self._ocr_client is None:
             return None
 
         try:
-            # Render page to image at 150 DPI
+            # Render page to image at 150 DPI (good balance of quality vs size)
             page = doc[page_idx]
             mat = fitz.Matrix(150 / 72, 150 / 72)
             pix = page.get_pixmap(matrix=mat)
             page_image = pix.tobytes("png")
 
-            # Analyze with vision client
-            return self._vision_client.analyze_page(
-                page_image=page_image,
+            # Perform OCR
+            return self._ocr_client.ocr_page(
+                image_bytes=page_image,
                 page_num=page_idx + 1,
-                context=f"Document: {doc_name}",
             )
         except Exception:
-            # Vision analysis failed, return None
+            # OCR failed, return None
             return None
 
     def _ocr_page(self, doc: "fitz.Document", page_num: int) -> str:
