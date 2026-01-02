@@ -21,7 +21,6 @@ from typing import Any
 
 import httpx
 
-
 # Default OCR prompt - works well with most vision models
 DEFAULT_OCR_PROMPT = """You are an OCR system. Transcribe ALL text visible in this image exactly as it appears.
 
@@ -59,7 +58,7 @@ class OCRResult:
 def _strip_yaml_frontmatter(text: str) -> str:
     """
     Strip YAML front-matter from olmOCR-style output.
-    
+
     olmOCR-2 returns output like:
     ---
     primary_language: en
@@ -67,24 +66,24 @@ def _strip_yaml_frontmatter(text: str) -> str:
     ...
     ---
     Actual text content here
-    
+
     This function strips the YAML header and returns just the text.
     """
     if not text.startswith("---"):
         return text
-    
+
     # Find the closing ---
     match = re.match(r'^---\n.*?\n---\n?', text, re.DOTALL)
     if match:
         return text[match.end():].strip()
-    
+
     return text
 
 
 class OCRClient:
     """
     OCR client using vision-language models.
-    
+
     Configuration via environment variables:
         OCR_BASE_URL: API base URL (default: uses LLM_BASE_URL or Venice.ai)
         OCR_MODEL: Model to use (default: google-gemma-3-27b-it)
@@ -115,30 +114,30 @@ class OCRClient:
             timeout: Request timeout in seconds.
         """
         self.base_url = (
-            base_url 
+            base_url
             or os.environ.get("OCR_BASE_URL")
             or os.environ.get("LLM_BASE_URL")
             or self.DEFAULT_BASE_URL
         ).rstrip("/")
-        
+
         self.model = (
-            model 
-            or os.environ.get("OCR_MODEL") 
+            model
+            or os.environ.get("OCR_MODEL")
             or self.DEFAULT_MODEL
         )
-        
+
         self.api_key = (
-            api_key 
-            or os.environ.get("LLM_API_KEY") 
+            api_key
+            or os.environ.get("LLM_API_KEY")
             or os.environ.get("OPENAI_API_KEY", "")
         )
-        
+
         self.prompt = (
             prompt
             or os.environ.get("OCR_PROMPT")
             or DEFAULT_OCR_PROMPT
         )
-        
+
         self.timeout = timeout
         self._client: httpx.Client | None = None
 
@@ -186,19 +185,19 @@ class OCRClient:
             response = self.client.post(f"{self.base_url}/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
-            
+
             text = data["choices"][0]["message"]["content"].strip()
-            
+
             # Strip YAML front-matter from olmOCR-style output
             text = _strip_yaml_frontmatter(text)
-            
+
             # Clean up common wrapper patterns
             if text.startswith("```") and text.endswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
-            
+
             processing_time = (time.time() - start_time) * 1000
-            
+
             return OCRResult(
                 page_num=page_num,
                 text=text,
@@ -234,11 +233,11 @@ class OCRClient:
 def ocr_image(image_bytes: bytes, page_num: int = 1) -> OCRResult:
     """
     OCR a single image using default configuration.
-    
+
     Args:
         image_bytes: PNG/JPEG image bytes.
         page_num: Page number (1-indexed).
-    
+
     Returns:
         OCRResult with extracted text.
     """
