@@ -171,6 +171,10 @@ class AgentLoop:
         """Add a user message to the conversation."""
         self.state.messages.append(Message(role="user", content=content))
 
+    def add_system_message(self, content: str) -> None:
+        """Add a system message to the conversation (injected as user message with system prefix)."""
+        self.state.messages.append(Message(role="user", content=f"[SYSTEM]: {content}"))
+
     def run_step(self) -> tuple[str | None, list[ToolResult]]:
         """
         Run a single step of the agent loop with optional trace capture.
