@@ -56,6 +56,7 @@ from compymac.verification import (
 )
 
 if TYPE_CHECKING:
+    from compymac.storage.library_store import LibraryStore
     from compymac.trace_store import TraceContext
 
 
@@ -1706,8 +1707,6 @@ class LocalHarness(Harness):
             library_store: The LibraryStore instance for document access
             session_id: Session ID for source activation tracking
         """
-        from compymac.storage.library_store import LibraryStore  # noqa: F811
-
         # Tool: Search library
         def library_search(query: str, top_k: int = 5) -> str:
             """Search for relevant content across documents."""
