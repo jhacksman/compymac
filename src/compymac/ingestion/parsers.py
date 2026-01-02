@@ -244,7 +244,7 @@ class DocumentParser:
 
         page_count = len(doc)
         vision_analyses: list[dict[str, Any]] = []
-        min_chars_threshold = 50  # Pages with less text may need OCR/vision analysis
+        ocr_errors: list[dict[str, Any]] = []  # Track OCR failures for debugging
 
         # Phase 2: Classify document (digital vs scanned)
         classification = self._classify_pdf(doc)
@@ -254,39 +254,37 @@ class DocumentParser:
         for page_num in range(page_count):
             page = doc[page_num]
             text = page.get_text()
+            is_scanned_page = (page_num + 1) in classification.scanned_pages
 
-            # Phase 2: If page is scanned and OCR is available, try OCR first
-            if (
-                page_num + 1 in classification.scanned_pages
-                and TESSERACT_AVAILABLE
-            ):
+            # For scanned pages, use vision OCR as primary method (not Tesseract)
+            # This is more accurate than Tesseract for most documents
+            if is_scanned_page and self._ocr_client is not None:
+                ocr_result = self._ocr_page_with_vision(doc, page_num)
+                if ocr_result:
+                    if ocr_result.confidence > 0 and ocr_result.text:
+                        # Successful OCR - use the extracted text
+                        vision_analyses.append(ocr_result.to_dict())
+                        pages_text.append(
+                            f"--- Page {page_num + 1} ---\n{ocr_result.text}"
+                        )
+                        continue
+                    elif ocr_result.confidence == 0:
+                        # OCR failed - track the error for debugging
+                        ocr_errors.append({
+                            "page_num": page_num + 1,
+                            "error": ocr_result.text,
+                            "model": ocr_result.model_used,
+                        })
+
+            # Fallback: If page is scanned and Tesseract is available, try it
+            if is_scanned_page and TESSERACT_AVAILABLE:
                 ocr_text = self._ocr_page(doc, page_num)
                 if ocr_text.strip():
                     text = ocr_text
 
-            # Check if page has sufficient text after OCR attempt
-            if text.strip() and len(text.strip()) >= min_chars_threshold:
+            # Use whatever text we have (extracted or OCR'd)
+            if text.strip():
                 pages_text.append(f"--- Page {page_num + 1} ---\n{text}")
-            else:
-                # Page still has little/no text - try vision-based OCR if available
-                ocr_text = ""
-                if self._ocr_client is not None:
-                    ocr_result = self._ocr_page_with_vision(doc, page_num)
-                    if ocr_result and ocr_result.text and ocr_result.confidence > 0:
-                        vision_analyses.append(ocr_result.to_dict())
-                        ocr_text = ocr_result.text
-
-                # Include whatever text we have plus OCR result
-                page_content = f"--- Page {page_num + 1} ---\n"
-                if text.strip():
-                    page_content += text
-                if ocr_text:
-                    if text.strip():
-                        page_content += f"\n[OCR]\n{ocr_text}"
-                    else:
-                        page_content += ocr_text
-                if page_content.strip() != f"--- Page {page_num + 1} ---":
-                    pages_text.append(page_content)
 
         # Phase 2: Extract tables if Camelot is available
         tables = []
@@ -315,6 +313,7 @@ class DocumentParser:
                 "tesseract_ocr_used": len(classification.scanned_pages) > 0 and TESSERACT_AVAILABLE,
                 "vision_ocr_results": vision_analyses,
                 "vision_ocr_pages": len(vision_analyses),
+                "vision_ocr_errors": ocr_errors,
             },
             format="pdf",
             classification=classification,
