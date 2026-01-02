@@ -56,6 +56,7 @@ from compymac.verification import (
 )
 
 if TYPE_CHECKING:
+    from compymac.storage.library_store import LibraryStore
     from compymac.trace_store import TraceContext
 
 
@@ -75,6 +76,7 @@ class ToolCategory(Enum):
     AI = "ai"  # ask_smart_friend, visual_checker
     SECRETS = "secrets"  # list_secrets
     TODO = "todo"  # TodoCreate, TodoRead, TodoStart, TodoClaim, TodoVerify
+    LIBRARY = "library"  # library_search, library_list, library_activate_source, etc.
 
 
 @dataclass
@@ -1688,6 +1690,310 @@ class LocalHarness(Harness):
             handler=browser_restart,
             category=ToolCategory.BROWSER,
         )
+
+    def register_library_tools(
+        self,
+        library_store: "LibraryStore",
+        session_id: str,
+    ) -> None:
+        """
+        Register library tools for document search and retrieval.
+
+        This enables the agent to search and query documents in the library.
+        Based on RAG research (arXiv papers), uses tool-based retrieval where
+        the agent explicitly calls search tools rather than automatic context injection.
+
+        Args:
+            library_store: The LibraryStore instance for document access
+            session_id: Session ID for source activation tracking
+        """
+        # Tool: Search library
+        def library_search(query: str, top_k: int = 5) -> str:
+            """Search for relevant content across documents."""
+            import json
+
+            # Get active sources for this session
+            active_docs = library_store.get_active_sources(session_id)
+            doc_ids = [doc.id for doc in active_docs] if active_docs else None
+
+            results = library_store.search_chunks(
+                query=query,
+                doc_ids=doc_ids,
+                top_k=top_k,
+            )
+
+            if not results:
+                return json.dumps({
+                    "status": "no_results",
+                    "message": f"No relevant content found for query: {query}",
+                    "active_sources": len(active_docs) if active_docs else 0,
+                    "hint": "Try library_list to see documents, "
+                            "then library_activate_source to activate them.",
+                })
+
+            return json.dumps({
+                "status": "success",
+                "query": query,
+                "result_count": len(results),
+                "results": results,
+            })
+
+        self.register_tool(
+            name="library_search",
+            schema=ToolSchema(
+                name="library_search",
+                description=(
+                    "Search for relevant content in the document library. "
+                    "Returns matching chunks from active source documents. "
+                    "Use this to find information from uploaded PDFs and EPUBs. "
+                    "First use library_list to see documents, "
+                    "then library_activate_source to enable them for search."
+                ),
+                required_params=["query"],
+                optional_params=["top_k"],
+                param_types={"query": "string", "top_k": "integer"},
+            ),
+            handler=library_search,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Tool: List documents
+        def library_list(user_id: str = "default") -> str:
+            """List all documents in the library."""
+            import json
+
+            docs = library_store.get_user_documents(user_id)
+
+            if not docs:
+                return json.dumps({
+                    "status": "empty",
+                    "message": "No documents in library. Upload documents via the Library tab in the UI.",
+                })
+
+            doc_list = [
+                {
+                    "id": doc.id,
+                    "title": doc.title,
+                    "filename": doc.filename,
+                    "page_count": doc.page_count,
+                    "status": doc.status.value if hasattr(doc.status, 'value') else str(doc.status),
+                    "library_path": getattr(doc, 'library_path', ''),
+                    "doc_format": getattr(doc, 'doc_format', 'pdf'),
+                }
+                for doc in docs
+            ]
+            return json.dumps({
+                "status": "success",
+                "document_count": len(docs),
+                "documents": doc_list,
+            })
+
+        self.register_tool(
+            name="library_list",
+            schema=ToolSchema(
+                name="library_list",
+                description=(
+                    "List all documents in the document library. "
+                    "Shows document titles, status, page counts, and IDs. "
+                    "Use the document ID with library_activate_source to enable searching."
+                ),
+                required_params=[],
+                optional_params=["user_id"],
+                param_types={"user_id": "string"},
+            ),
+            handler=library_list,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Tool: Activate source
+        def library_activate_source(document_id: str) -> str:
+            """Activate a document as a source for search."""
+            import json
+
+            doc = library_store.get_document(document_id)
+            if not doc:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Document not found: {document_id}",
+                })
+
+            success = library_store.add_active_source(session_id, document_id)
+            if success:
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Activated source: {doc.title}",
+                    "document_id": document_id,
+                })
+            else:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Failed to activate source: {document_id}",
+                })
+
+        self.register_tool(
+            name="library_activate_source",
+            schema=ToolSchema(
+                name="library_activate_source",
+                description=(
+                    "Activate a document as a source for search queries. "
+                    "When a document is activated, its content will be included in library_search results. "
+                    "Use library_list to get document IDs."
+                ),
+                required_params=["document_id"],
+                optional_params=[],
+                param_types={"document_id": "string"},
+            ),
+            handler=library_activate_source,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Tool: Deactivate source
+        def library_deactivate_source(document_id: str) -> str:
+            """Deactivate a document as a source for search."""
+            import json
+
+            doc = library_store.get_document(document_id)
+            if not doc:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Document not found: {document_id}",
+                })
+
+            success = library_store.remove_active_source(session_id, document_id)
+            if success:
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Deactivated source: {doc.title}",
+                    "document_id": document_id,
+                })
+            else:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Source was not active: {document_id}",
+                })
+
+        self.register_tool(
+            name="library_deactivate_source",
+            schema=ToolSchema(
+                name="library_deactivate_source",
+                description=(
+                    "Deactivate a document as a source for search queries. "
+                    "The document will no longer be included in library_search results."
+                ),
+                required_params=["document_id"],
+                optional_params=[],
+                param_types={"document_id": "string"},
+            ),
+            handler=library_deactivate_source,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Tool: Get active sources
+        def library_get_active_sources() -> str:
+            """Get list of currently active source documents."""
+            import json
+
+            active_docs = library_store.get_active_sources(session_id)
+
+            if not active_docs:
+                return json.dumps({
+                    "status": "empty",
+                    "message": "No active sources. Use library_activate_source to enable documents for search.",
+                })
+
+            doc_list = [
+                {
+                    "id": doc.id,
+                    "title": doc.title,
+                    "filename": doc.filename,
+                }
+                for doc in active_docs
+            ]
+            return json.dumps({
+                "status": "success",
+                "active_count": len(active_docs),
+                "active_sources": doc_list,
+            })
+
+        self.register_tool(
+            name="library_get_active_sources",
+            schema=ToolSchema(
+                name="library_get_active_sources",
+                description=(
+                    "Get the list of currently active source documents. "
+                    "These are the documents that will be searched when using library_search."
+                ),
+                required_params=[],
+                optional_params=[],
+                param_types={},
+            ),
+            handler=library_get_active_sources,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Tool: Get document content
+        def library_get_content(document_id: str, page: int | None = None) -> str:
+            """Get the content of a specific document or page."""
+            import json
+
+            doc = library_store.get_document(document_id)
+            if not doc:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Document not found: {document_id}",
+                })
+
+            if not doc.chunks:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Document has no content: {doc.title}",
+                })
+
+            # Filter by page if specified
+            if page is not None:
+                chunks = [
+                    c for c in doc.chunks
+                    if c.get("metadata", {}).get("page") == page
+                ]
+                if not chunks:
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"No content found for page {page}",
+                    })
+            else:
+                chunks = doc.chunks
+
+            # Combine chunk content
+            content = "\n\n".join(c.get("content", "") for c in chunks)
+
+            return json.dumps({
+                "status": "success",
+                "document_id": document_id,
+                "title": doc.title,
+                "page": page,
+                "chunk_count": len(chunks),
+                "content": content[:10000],  # Limit content size
+                "truncated": len(content) > 10000,
+            })
+
+        self.register_tool(
+            name="library_get_content",
+            schema=ToolSchema(
+                name="library_get_content",
+                description=(
+                    "Get the content of a specific document or page. "
+                    "Use this to read the full text of a document after finding it with library_search."
+                ),
+                required_params=["document_id"],
+                optional_params=["page"],
+                param_types={"document_id": "string", "page": "integer"},
+            ),
+            handler=library_get_content,
+            category=ToolCategory.LIBRARY,
+        )
+
+        # Enable the LIBRARY category
+        self._active_toolset.enable_category(ToolCategory.LIBRARY)
 
     def _read_file(
         self,
