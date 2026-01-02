@@ -67,19 +67,19 @@ class PDFClassification:
     """Classification of a PDF document type."""
 
     DIGITAL = "digital"  # Text-based, extractable text
-    SCANNED = "scanned"  # Image-based, needs OCR
-    MIXED = "mixed"  # Some pages digital, some scanned
+    IMAGE_BASED = "image_based"  # Image-based, needs OCR
+    MIXED = "mixed"  # Some pages have extractable text, some need OCR
 
     def __init__(
         self,
         doc_type: str,
         text_pages: list[int],
-        scanned_pages: list[int],
+        ocr_required_pages: list[int],
         confidence: float,
     ):
         self.doc_type = doc_type
         self.text_pages = text_pages
-        self.scanned_pages = scanned_pages
+        self.ocr_required_pages = ocr_required_pages
         self.confidence = confidence
 
     def to_dict(self) -> dict[str, Any]:
@@ -87,7 +87,7 @@ class PDFClassification:
         return {
             "doc_type": self.doc_type,
             "text_pages": self.text_pages,
-            "scanned_pages": self.scanned_pages,
+            "ocr_required_pages": self.ocr_required_pages,
             "confidence": self.confidence,
         }
 
@@ -254,11 +254,11 @@ class DocumentParser:
         for page_num in range(page_count):
             page = doc[page_num]
             text = page.get_text()
-            is_scanned_page = (page_num + 1) in classification.scanned_pages
+            needs_ocr = (page_num + 1) in classification.ocr_required_pages
 
-            # For scanned pages, use vision OCR as primary method (not Tesseract)
+            # For pages that need OCR, use vision OCR as primary method (not Tesseract)
             # This is more accurate than Tesseract for most documents
-            if is_scanned_page and self._ocr_client is not None:
+            if needs_ocr and self._ocr_client is not None:
                 ocr_result = self._ocr_page_with_vision(doc, page_num)
                 if ocr_result:
                     if ocr_result.confidence > 0 and ocr_result.text:
@@ -276,8 +276,8 @@ class DocumentParser:
                             "model": ocr_result.model_used,
                         })
 
-            # Fallback: If page is scanned and Tesseract is available, try it
-            if is_scanned_page and TESSERACT_AVAILABLE:
+            # Fallback: If page needs OCR and Tesseract is available, try it
+            if needs_ocr and TESSERACT_AVAILABLE:
                 ocr_text = self._ocr_page(doc, page_num)
                 if ocr_text.strip():
                     text = ocr_text
@@ -310,7 +310,7 @@ class DocumentParser:
                 "page_count": page_count,
                 "classification": classification.to_dict(),
                 "table_count": len(tables),
-                "tesseract_ocr_used": len(classification.scanned_pages) > 0 and TESSERACT_AVAILABLE,
+                "tesseract_ocr_used": len(classification.ocr_required_pages) > 0 and TESSERACT_AVAILABLE,
                 "vision_ocr_results": vision_analyses,
                 "vision_ocr_pages": len(vision_analyses),
                 "vision_ocr_errors": ocr_errors,
@@ -322,14 +322,14 @@ class DocumentParser:
 
     def _classify_pdf(self, doc: "fitz.Document") -> PDFClassification:
         """
-        Classify PDF as digital, scanned, or mixed.
+        Classify PDF as digital, image-based, or mixed.
 
-        A page is considered "scanned" if it has very little extractable text
+        A page is considered to require OCR if it has very little extractable text
         relative to its image content, or if it has large images covering most
-        of the page (common for scanned documents with text overlays like stamps).
+        of the page (common for image-based PDFs with text overlays like stamps).
         """
         text_pages = []
-        scanned_pages = []
+        ocr_required_pages = []
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -356,17 +356,17 @@ class DocumentParser:
 
             # Classification logic:
             # - High text density (>5 chars/1000 sq pts) AND no large images = digital
-            # - Has large images = likely scanned (even with some text overlay)
-            # - Very low text density (<1) = scanned
+            # - Has large images = likely image-based, needs OCR (even with some text overlay)
+            # - Very low text density (<1) = needs OCR
             if has_large_images:
-                # Large image covering page = scanned, even if there's some text overlay
-                scanned_pages.append(page_num + 1)
+                # Large image covering page = needs OCR, even if there's some text overlay
+                ocr_required_pages.append(page_num + 1)
             elif text_density > 5:
                 # Good amount of text relative to page size = digital
                 text_pages.append(page_num + 1)
             elif text_density < 1:
-                # Almost no text = scanned
-                scanned_pages.append(page_num + 1)
+                # Almost no text = needs OCR
+                ocr_required_pages.append(page_num + 1)
             else:
                 # Ambiguous - check if text is just headers/footers
                 blocks = page.get_text("blocks")
@@ -376,18 +376,18 @@ class DocumentParser:
                     if b[1] > rect.height * 0.1 and b[3] < rect.height * 0.9
                 ]
                 if len(content_blocks) < 2:
-                    # Only header/footer text, no real content = scanned
-                    scanned_pages.append(page_num + 1)
+                    # Only header/footer text, no real content = needs OCR
+                    ocr_required_pages.append(page_num + 1)
                 else:
                     text_pages.append(page_num + 1)
 
         # Determine document type
         total_pages = len(doc)
-        if not scanned_pages:
+        if not ocr_required_pages:
             doc_type = PDFClassification.DIGITAL
             confidence = 1.0
         elif not text_pages:
-            doc_type = PDFClassification.SCANNED
+            doc_type = PDFClassification.IMAGE_BASED
             confidence = 1.0
         else:
             doc_type = PDFClassification.MIXED
@@ -397,7 +397,7 @@ class DocumentParser:
         return PDFClassification(
             doc_type=doc_type,
             text_pages=text_pages,
-            scanned_pages=scanned_pages,
+            ocr_required_pages=ocr_required_pages,
             confidence=confidence,
         )
 
