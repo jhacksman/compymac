@@ -18,7 +18,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -1616,44 +1624,44 @@ async def get_document_page_image(
 ) -> Response:
     """
     Render a PDF page as a PNG image.
-    
+
     Args:
         document_id: UUID of the document
         page_num: 1-indexed page number
         dpi: Resolution (default 150)
-    
+
     Returns:
         PNG image of the rendered page
     """
     import fitz
-    
+
     doc = library_store.get_document(document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    
+
     # Get file path from metadata
     file_path = doc.metadata.get("file_path")
     if not file_path:
         # Try chunks metadata
         if doc.chunks and doc.chunks[0].get("metadata", {}).get("filepath"):
             file_path = doc.chunks[0]["metadata"]["filepath"]
-    
+
     if not file_path or not Path(file_path).exists():
         raise HTTPException(status_code=404, detail="Document file not found")
-    
+
     # Security: validate file is in upload directory
     upload_dir = Path("/tmp/compymac_uploads").resolve()
     file_path_resolved = Path(file_path).resolve()
     if not str(file_path_resolved).startswith(str(upload_dir)):
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
     # Validate page number
     if page_num < 1 or page_num > doc.page_count:
         raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid page number. Document has {doc.page_count} pages."
+            status_code=400,
+            detail=f"Invalid page number. Document has {doc.page_count} pages.",
         )
-    
+
     # Render page to image
     try:
         pdf_doc = fitz.open(file_path)
@@ -1662,10 +1670,12 @@ async def get_document_page_image(
         pix = page.get_pixmap(matrix=mat)
         image_bytes = pix.tobytes("png")
         pdf_doc.close()
-        
+
         return Response(content=image_bytes, media_type="image/png")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to render page: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to render page: {e}"
+        ) from e
 
 
 @app.get("/api/library")
