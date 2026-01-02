@@ -42,6 +42,11 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.8.0",
 ]
+pdf-enhanced = [
+    "camelot-py[cv]>=0.11.0",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/jhacksman/compymac"
