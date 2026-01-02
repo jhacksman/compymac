@@ -21,6 +21,7 @@ from typing import Annotated, Any
 from fastapi import (
     FastAPI,
     File,
+    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -1516,48 +1517,63 @@ async def delete_session(session_id: str) -> dict[str, Any]:
 async def upload_document(
     file: Annotated[UploadFile, File()],
     user_id: str = "default",
+    library_path: str = "",
     add_to_library: bool = True,
 ) -> dict[str, Any]:
     """
-    Upload a PDF document for processing.
+    Upload a PDF or EPUB document for processing.
 
     Args:
-        file: The PDF file to upload
+        file: The PDF or EPUB file to upload
         user_id: User ID for library storage (default: "default")
+        library_path: Relative path for folder structure (default: filename)
         add_to_library: Whether to add to persistent library (default: True)
 
     Returns:
         Document metadata including ID and processing status.
     """
+    from compymac.ingestion.parsers import extract_navigation
+
     if not file.filename:
         return {"error": "No filename provided"}
 
     # Validate file type
-    if not file.filename.lower().endswith(".pdf"):
-        return {"error": "Only PDF files are supported"}
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".pdf", ".epub"):
+        return {"error": "Only PDF and EPUB files are supported"}
+
+    doc_format = "epub" if ext == ".epub" else "pdf"
+
+    # Sanitize library_path
+    safe_library_path = _sanitize_library_path(library_path or file.filename)
 
     # Create document entry
     doc = library_store.create_document(
         user_id=user_id,
         filename=file.filename,
         file_size_bytes=file.size or 0,
+        library_path=safe_library_path,
+        doc_format=doc_format,
     )
 
     try:
-        # Save uploaded file
-        file_path = UPLOAD_DIR / f"{doc.id}.pdf"
+        # Save uploaded file with correct extension
+        file_path = UPLOAD_DIR / f"{doc.id}{ext}"
         content = await file.read()
         file_path.write_bytes(content)
 
         # Update document with file path
         library_store.update_document(doc.id, metadata={"file_path": str(file_path)})
 
-        # Process the PDF
+        # Process the document
         library_store.update_document(doc.id, status=DocumentStatus.PROCESSING)
 
-        # Parse PDF
+        # Parse document
         parser = DocumentParser()
         parse_result = parser.parse(file_path)
+
+        # Extract navigation (TOC/bookmarks)
+        navigation = extract_navigation(file_path, doc_format)
 
         # Chunk the text
         chunker = DocumentChunker(chunk_size=512, chunk_overlap=50)
@@ -1580,12 +1596,18 @@ async def upload_document(
         ]
 
         # Update document with results
+        page_count = parse_result.metadata.get("page_count", 0)
+        if doc_format == "epub":
+            # For EPUB, use chapter count as "page count"
+            page_count = parse_result.metadata.get("chapter_count", 0)
+
         library_store.update_document(
             doc.id,
             status=DocumentStatus.READY,
-            page_count=parse_result.metadata.get("page_count", 0),
+            page_count=page_count,
             chunks=chunk_dicts,
             metadata=parse_result.metadata,
+            navigation=navigation,
         )
 
         doc = library_store.get_document(doc.id)
@@ -1600,6 +1622,158 @@ async def upload_document(
         )
         doc = library_store.get_document(doc.id)
         return doc.to_dict() if doc else {"error": str(e)}
+
+
+def _sanitize_library_path(path: str) -> str:
+    """Sanitize user-provided path to prevent traversal attacks."""
+    # Normalize separators
+    path = path.replace("\\", "/")
+    # Remove dangerous components
+    parts = [p for p in path.split("/") if p and p != ".." and not p.startswith(".")]
+    # Rejoin
+    return "/".join(parts)
+
+
+@app.post("/api/documents/upload-batch")
+async def upload_batch(
+    files: Annotated[list[UploadFile], File()],
+    relative_paths: Annotated[list[str] | None, Form()] = None,
+    user_id: str = "default",
+) -> dict[str, Any]:
+    """
+    Upload multiple documents with preserved folder structure.
+
+    Args:
+        files: List of files to upload
+        relative_paths: Corresponding relative paths (from webkitRelativePath)
+        user_id: User ID for library storage
+
+    Returns:
+        Batch upload results with per-file status.
+    """
+    from compymac.ingestion.parsers import extract_navigation
+
+    results = []
+
+    # Handle None relative_paths
+    paths = relative_paths or []
+
+    # Ensure paths matches files length
+    if len(paths) < len(files):
+        # Pad with filenames if not enough paths provided
+        paths = list(paths) + [
+            f.filename or f"file_{i}" for i, f in enumerate(files[len(paths):])
+        ]
+
+    for file, rel_path in zip(files, paths, strict=False):
+        if not file.filename:
+            results.append({
+                "filename": "unknown",
+                "id": None,
+                "status": "failed",
+                "error": "No filename provided",
+            })
+            continue
+
+        # Validate file type
+        ext = Path(file.filename).suffix.lower()
+        if ext not in (".pdf", ".epub"):
+            results.append({
+                "filename": file.filename,
+                "id": None,
+                "status": "failed",
+                "error": "Only PDF and EPUB files are supported",
+            })
+            continue
+
+        doc_format = "epub" if ext == ".epub" else "pdf"
+        safe_path = _sanitize_library_path(rel_path)
+
+        try:
+            # Create document entry
+            doc = library_store.create_document(
+                user_id=user_id,
+                filename=file.filename,
+                file_size_bytes=file.size or 0,
+                library_path=safe_path,
+                doc_format=doc_format,
+            )
+
+            # Save uploaded file
+            file_path = UPLOAD_DIR / f"{doc.id}{ext}"
+            content = await file.read()
+            file_path.write_bytes(content)
+
+            # Update document with file path
+            library_store.update_document(doc.id, metadata={"file_path": str(file_path)})
+
+            # Process the document
+            library_store.update_document(doc.id, status=DocumentStatus.PROCESSING)
+
+            # Parse document
+            parser = DocumentParser()
+            parse_result = parser.parse(file_path)
+
+            # Extract navigation
+            navigation = extract_navigation(file_path, doc_format)
+
+            # Chunk the text
+            chunker = DocumentChunker(chunk_size=512, chunk_overlap=50)
+            chunks = chunker.chunk(
+                text=parse_result.text,
+                doc_id=doc.id,
+                metadata=parse_result.metadata,
+            )
+
+            # Convert chunks to dicts
+            chunk_dicts = [
+                {
+                    "id": chunk.id,
+                    "content": chunk.content,
+                    "start_char": chunk.start_char,
+                    "end_char": chunk.end_char,
+                    "metadata": chunk.metadata,
+                }
+                for chunk in chunks
+            ]
+
+            # Update document with results
+            page_count = parse_result.metadata.get("page_count", 0)
+            if doc_format == "epub":
+                page_count = parse_result.metadata.get("chapter_count", 0)
+
+            library_store.update_document(
+                doc.id,
+                status=DocumentStatus.READY,
+                page_count=page_count,
+                chunks=chunk_dicts,
+                metadata=parse_result.metadata,
+                navigation=navigation,
+            )
+
+            results.append({
+                "filename": file.filename,
+                "id": doc.id,
+                "status": "ready",
+                "library_path": safe_path,
+                "navigation_count": len(navigation),
+            })
+
+        except Exception as e:
+            logger.error(f"Error processing {file.filename}: {e}")
+            results.append({
+                "filename": file.filename,
+                "id": None,
+                "status": "failed",
+                "error": str(e),
+            })
+
+    return {
+        "total_files": len(files),
+        "results": results,
+        "success_count": sum(1 for r in results if r["status"] == "ready"),
+        "failure_count": sum(1 for r in results if r["status"] == "failed"),
+    }
 
 
 @app.get("/api/documents/{document_id}")

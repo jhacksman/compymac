@@ -4,7 +4,7 @@ Document Parsers for extracting text from various file formats.
 Supports:
 - Plain text files (.txt)
 - PDF files (via PyMuPDF, docling, or fallback)
-- EPUB files (via docling if available)
+- EPUB files (via EbookLib or docling)
 
 Phase 2 additions:
 - Document classification (digital vs scanned)
@@ -19,6 +19,11 @@ Phase 3.1 additions:
 - Pluggable OCR provider abstraction (Venice, vLLM, OpenAI-compatible)
 - OCR-first approach using Gemma 3 27B (default) or custom models
 - Support for SOTA OCR models via vLLM (olmOCR-2, DeepSeek-OCR, Qwen2.5-VL)
+
+Phase 4 additions (Folder Library):
+- PDF bookmark/outline extraction via get_toc()
+- EPUB chapter navigation extraction via EbookLib
+- Navigation tree structure for document internal navigation
 """
 
 from pathlib import Path
@@ -61,6 +66,24 @@ except ImportError:
     OCR_AVAILABLE = False
     OCRClient = None  # type: ignore[misc, assignment]
     OCRResult = None  # type: ignore[misc, assignment]
+
+# Try to import EbookLib for EPUB parsing
+try:
+    import ebooklib
+    from ebooklib import epub
+    EBOOKLIB_AVAILABLE = True
+except ImportError:
+    EBOOKLIB_AVAILABLE = False
+    epub = None  # type: ignore[misc, assignment]
+    ebooklib = None  # type: ignore[misc, assignment]
+
+# Try to import BeautifulSoup for HTML parsing (EPUB content)
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+    BeautifulSoup = None  # type: ignore[misc, assignment]
 
 
 class PDFClassification:
@@ -518,12 +541,65 @@ class DocumentParser:
         return tables
 
     def _parse_epub(self, file_path: Path, metadata: dict[str, Any]) -> ParseResult:
-        """Parse EPUB file."""
+        """Parse EPUB file using EbookLib (preferred) or docling."""
+        # Try EbookLib first (better for navigation extraction)
+        if EBOOKLIB_AVAILABLE and BS4_AVAILABLE:
+            return self._parse_with_ebooklib(file_path, metadata)
+
+        # Fall back to docling if available
         if self.use_docling and self._converter:
             return self._parse_with_docling(file_path, metadata, "epub")
 
         raise ValueError(
-            "EPUB parsing requires docling. Install with: pip install docling"
+            "EPUB parsing requires ebooklib+beautifulsoup4 or docling. "
+            "Install with: pip install ebooklib beautifulsoup4"
+        )
+
+    def _parse_with_ebooklib(
+        self, file_path: Path, metadata: dict[str, Any]
+    ) -> ParseResult:
+        """Parse EPUB using EbookLib with chapter extraction."""
+        if epub is None or ebooklib is None or BeautifulSoup is None:
+            raise ValueError("EbookLib or BeautifulSoup not available")
+
+        book = epub.read_epub(str(file_path))
+
+        # Extract text from each spine item (chapter)
+        chapters_text = []
+        chapter_count = 0
+
+        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            text = soup.get_text(separator="\n", strip=True)
+            if text:
+                chapter_count += 1
+                chapters_text.append(f"--- Chapter {chapter_count} ---\n{text}")
+
+        full_text = "\n\n".join(chapters_text)
+
+        # Extract metadata
+        title = None
+        author = None
+        try:
+            title_meta = book.get_metadata("DC", "title")
+            if title_meta:
+                title = title_meta[0][0]
+            author_meta = book.get_metadata("DC", "creator")
+            if author_meta:
+                author = author_meta[0][0]
+        except (IndexError, KeyError):
+            pass
+
+        return ParseResult(
+            text=full_text,
+            metadata={
+                **metadata,
+                "parser": "ebooklib",
+                "chapter_count": chapter_count,
+                "epub_title": title,
+                "epub_author": author,
+            },
+            format="epub",
         )
 
     def _parse_with_docling(
@@ -551,6 +627,147 @@ class DocumentParser:
         formats = [".txt", ".md", ".markdown"]
         if PYMUPDF_AVAILABLE or DOCLING_AVAILABLE:
             formats.append(".pdf")
-        if DOCLING_AVAILABLE:
+        if EBOOKLIB_AVAILABLE or DOCLING_AVAILABLE:
             formats.append(".epub")
         return formats
+
+
+def extract_pdf_navigation(file_path: Path | str) -> list[dict[str, Any]]:
+    """
+    Extract PDF bookmarks/outline as navigation entries.
+
+    Uses PyMuPDF's get_toc() to extract the table of contents.
+
+    Args:
+        file_path: Path to the PDF file
+
+    Returns:
+        List of navigation entries with format:
+        [{"id": "nav_0", "title": "Chapter 1", "level": 1, "target": {"type": "pdf_page", "page": 1}}]
+    """
+    if not PYMUPDF_AVAILABLE:
+        return []
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        return []
+
+    try:
+        doc = fitz.open(str(file_path))
+        toc = doc.get_toc()  # Returns [[level, title, page], ...]
+        doc.close()
+
+        if not toc:
+            return []  # Many PDFs don't have bookmarks
+
+        navigation = []
+        for i, entry in enumerate(toc):
+            if len(entry) >= 3:
+                level, title, page = entry[0], entry[1], entry[2]
+                navigation.append({
+                    "id": f"nav_{i}",
+                    "title": str(title),
+                    "level": int(level),
+                    "target": {"type": "pdf_page", "page": int(page)},
+                })
+
+        return navigation
+
+    except Exception:
+        return []
+
+
+def extract_epub_navigation(file_path: Path | str) -> list[dict[str, Any]]:
+    """
+    Extract EPUB table of contents as navigation entries.
+
+    Uses EbookLib to parse the EPUB navigation structure.
+
+    Args:
+        file_path: Path to the EPUB file
+
+    Returns:
+        List of navigation entries with format:
+        [{"id": "nav_0", "title": "Chapter 1", "level": 1, "target": {"type": "epub_href", "href": "..."}}]
+    """
+    if not EBOOKLIB_AVAILABLE or epub is None:
+        return []
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        return []
+
+    try:
+        book = epub.read_epub(str(file_path))
+        navigation: list[dict[str, Any]] = []
+        nav_counter = [0]  # Use list to allow mutation in nested function
+
+        def process_toc_item(
+            item: Any, level: int = 1
+        ) -> dict[str, Any] | None:
+            """Process a single TOC item recursively."""
+            nav_id = f"nav_{nav_counter[0]}"
+            nav_counter[0] += 1
+
+            if hasattr(item, "title") and hasattr(item, "href"):
+                # It's a Link object
+                return {
+                    "id": nav_id,
+                    "title": str(item.title),
+                    "level": level,
+                    "target": {"type": "epub_href", "href": str(item.href)},
+                }
+            elif isinstance(item, tuple) and len(item) >= 2:
+                # It's a Section with children: (Section, [children])
+                section, children = item[0], item[1]
+                title = getattr(section, "title", str(section)) if hasattr(section, "title") else str(section)
+                href = getattr(section, "href", "") if hasattr(section, "href") else ""
+
+                entry: dict[str, Any] = {
+                    "id": nav_id,
+                    "title": str(title),
+                    "level": level,
+                    "target": {"type": "epub_href", "href": str(href)},
+                }
+
+                # Process children
+                if children:
+                    child_entries = []
+                    for child in children:
+                        child_entry = process_toc_item(child, level + 1)
+                        if child_entry:
+                            child_entries.append(child_entry)
+                    if child_entries:
+                        entry["children"] = child_entries
+
+                return entry
+
+            return None
+
+        for item in book.toc:
+            entry = process_toc_item(item)
+            if entry:
+                navigation.append(entry)
+
+        return navigation
+
+    except Exception:
+        return []
+
+
+def extract_navigation(file_path: Path | str, doc_format: str) -> list[dict[str, Any]]:
+    """
+    Extract navigation from a document based on its format.
+
+    Args:
+        file_path: Path to the document
+        doc_format: Document format ("pdf" or "epub")
+
+    Returns:
+        List of navigation entries
+    """
+    if doc_format == "pdf":
+        return extract_pdf_navigation(file_path)
+    elif doc_format == "epub":
+        return extract_epub_navigation(file_path)
+    return []

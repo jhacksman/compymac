@@ -48,6 +48,11 @@ class LibraryDocument:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     chunks: list[dict[str, Any]] = field(default_factory=list)
+    # Folder structure support
+    library_path: str = ""  # e.g., "Humble Bundle 2025/Programming/Clean Code.pdf"
+    doc_format: str = "pdf"  # "pdf" | "epub"
+    # Document navigation (TOC/bookmarks)
+    navigation: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -63,6 +68,9 @@ class LibraryDocument:
             "file_size_bytes": self.file_size_bytes,
             "error": self.error,
             "chunk_count": len(self.chunks),
+            "library_path": self.library_path,
+            "doc_format": self.doc_format,
+            "navigation": self.navigation,
         }
 
 
@@ -110,10 +118,16 @@ class LibraryStore:
         title: str | None = None,
         file_path: str | None = None,
         file_size_bytes: int = 0,
+        library_path: str = "",
+        doc_format: str = "pdf",
     ) -> LibraryDocument:
         """Create a new document entry in the library."""
         doc_id = str(uuid.uuid4())
         now = time.time()
+
+        # Default library_path to filename if not provided
+        if not library_path:
+            library_path = filename
 
         doc = LibraryDocument(
             id=doc_id,
@@ -126,6 +140,8 @@ class LibraryStore:
             updated_at=now,
             file_path=file_path,
             file_size_bytes=file_size_bytes,
+            library_path=library_path,
+            doc_format=doc_format,
         )
 
         self._documents[doc_id] = doc
@@ -153,6 +169,7 @@ class LibraryStore:
         error: str | None = None,
         chunks: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
+        navigation: list[dict[str, Any]] | None = None,
         generate_embeddings: bool = True,
     ) -> LibraryDocument | None:
         """
@@ -165,6 +182,7 @@ class LibraryStore:
             error: Error message
             chunks: New chunks (will generate embeddings if enabled)
             metadata: Additional metadata
+            navigation: Document navigation (TOC/bookmarks)
             generate_embeddings: Whether to generate embeddings for new chunks
         """
         doc = self._documents.get(doc_id)
@@ -184,6 +202,8 @@ class LibraryStore:
                 self._generate_chunk_embeddings(doc_id, chunks)
         if metadata is not None:
             doc.metadata.update(metadata)
+        if navigation is not None:
+            doc.navigation = navigation
 
         doc.updated_at = time.time()
         return doc
