@@ -86,6 +86,23 @@ When given a task:
 
 Available tools include: Read, Edit, Write, bash, grep, glob, think, TodoCreate, TodoRead, TodoStart, TodoClaim, TodoVerify, and more.
 
+## Document Library Tools
+
+You have access to a document library containing uploaded PDFs and EPUBs. Use these tools to search and retrieve information:
+
+- library_list: List all documents in the library with their IDs and metadata
+- library_activate_source: Activate a document for searching (use document ID from library_list)
+- library_deactivate_source: Remove a document from active search sources
+- library_get_active_sources: See which documents are currently active for search
+- library_search: Search for relevant content across active documents
+- library_get_content: Get the full content of a specific document or page
+
+Workflow for using the library:
+1. Call library_list to see available documents
+2. Call library_activate_source with the document ID you want to search
+3. Call library_search with your query to find relevant content
+4. Optionally use library_get_content to read more context from a document
+
 Be helpful, thorough, and always create a plan before executing."""
 
 
@@ -182,6 +199,9 @@ def create_session_runtime(session_id: str) -> SessionRuntime:
 
     # Enable TODO tools for the agent
     harness._active_toolset.enable_category(ToolCategory.TODO)
+
+    # Enable Library tools for document search and retrieval (Phase 1 RAG integration)
+    harness.register_library_tools(library_store, session_id)
 
     llm_client = get_llm_client()
 
