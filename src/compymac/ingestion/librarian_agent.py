@@ -122,7 +122,7 @@ class LibrarianResult:
 class LibrarianAgent:
     """
     A specialist sub-agent for document library operations.
-    
+
     This agent has its own system prompt and access to private library tools.
     It's called by the main agent through a single "librarian" tool, reducing
     tool overload while maintaining full library functionality.
@@ -136,7 +136,7 @@ class LibrarianAgent:
     ):
         """
         Initialize the librarian agent.
-        
+
         Args:
             library_store: The LibraryStore instance for document access
             session_id: Session ID for source activation tracking
@@ -155,28 +155,28 @@ class LibrarianAgent:
     def _search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """Search for relevant content across documents."""
         self._log_action(f"library_search(query='{query}', top_k={top_k})")
-        
+
         # Get active sources for this session
         active_docs = self.library_store.get_active_sources(self.session_id)
         doc_ids = [doc.id for doc in active_docs] if active_docs else None
-        
+
         results = self.library_store.search_chunks(
             query=query,
             doc_ids=doc_ids,
             top_k=top_k,
         )
-        
+
         return results or []
 
     def _list_documents(self, user_id: str = "default") -> list[dict[str, Any]]:
         """List all documents in the library."""
         self._log_action(f"library_list(user_id='{user_id}')")
-        
+
         docs = self.library_store.get_user_documents(user_id)
-        
+
         if not docs:
             return []
-        
+
         return [
             {
                 "id": doc.id,
@@ -197,14 +197,14 @@ class LibrarianAgent:
     ) -> dict[str, Any]:
         """Get the content of a specific document or page."""
         self._log_action(f"library_get_content(document_id='{document_id}', page={page})")
-        
+
         doc = self.library_store.get_document(document_id)
         if not doc:
             return {"error": f"Document not found: {document_id}"}
-        
+
         if not doc.chunks:
             return {"error": f"Document has no content: {doc.title}"}
-        
+
         # Filter by page if specified
         if page is not None:
             chunks = [
@@ -215,10 +215,10 @@ class LibrarianAgent:
                 return {"error": f"No content found for page {page}"}
         else:
             chunks = doc.chunks
-        
+
         # Combine chunk content
         content = "\n\n".join(c.get("content", "") for c in chunks)
-        
+
         return {
             "document_id": document_id,
             "title": doc.title,
@@ -231,11 +231,11 @@ class LibrarianAgent:
     def _activate_source(self, document_id: str) -> dict[str, Any]:
         """Activate a document as a source for search."""
         self._log_action(f"library_activate_source(document_id='{document_id}')")
-        
+
         doc = self.library_store.get_document(document_id)
         if not doc:
             return {"error": f"Document not found: {document_id}"}
-        
+
         success = self.library_store.add_active_source(self.session_id, document_id)
         if success:
             return {"success": True, "message": f"Activated source: {doc.title}"}
@@ -245,11 +245,11 @@ class LibrarianAgent:
     def _deactivate_source(self, document_id: str) -> dict[str, Any]:
         """Deactivate a document as a source for search."""
         self._log_action(f"library_deactivate_source(document_id='{document_id}')")
-        
+
         doc = self.library_store.get_document(document_id)
         if not doc:
             return {"error": f"Document not found: {document_id}"}
-        
+
         success = self.library_store.remove_active_source(self.session_id, document_id)
         if success:
             return {"success": True, "message": f"Deactivated source: {doc.title}"}
@@ -259,12 +259,12 @@ class LibrarianAgent:
     def _get_active_sources(self) -> list[dict[str, Any]]:
         """Get list of currently active source documents."""
         self._log_action("library_get_active_sources()")
-        
+
         active_docs = self.library_store.get_active_sources(self.session_id)
-        
+
         if not active_docs:
             return []
-        
+
         return [
             {
                 "id": doc.id,
@@ -281,7 +281,7 @@ class LibrarianAgent:
         """Build citations and excerpts from search results."""
         citations = []
         excerpts = []
-        
+
         for result in search_results[:10]:  # Limit to 10 citations
             citation = {
                 "doc_id": result.get("doc_id", ""),
@@ -291,7 +291,7 @@ class LibrarianAgent:
                 "score": result.get("score", 0.0),
             }
             citations.append(citation)
-            
+
             # Extract excerpt (first 200 chars of content)
             content = result.get("content", result.get("text", ""))
             if content:
@@ -299,7 +299,7 @@ class LibrarianAgent:
                 if len(content) > 200:
                     excerpt += "..."
                 excerpts.append(excerpt)
-        
+
         return citations, excerpts
 
     def _synthesize_answer(
@@ -312,16 +312,16 @@ class LibrarianAgent:
             # Without LLM, just return a summary of results
             if not search_results:
                 return f"I couldn't find information about '{query}' in the library."
-            
+
             result_summary = []
             for i, result in enumerate(search_results[:5], 1):
                 doc_title = result.get("doc_title", "Unknown")
                 page = result.get("page", result.get("metadata", {}).get("page", "?"))
                 content = result.get("content", result.get("text", ""))[:150]
                 result_summary.append(f"{i}. From '{doc_title}' (page {page}): {content}...")
-            
+
             return f"Found {len(search_results)} relevant results for '{query}':\n\n" + "\n\n".join(result_summary)
-        
+
         # Build context from search results
         context_parts = []
         for result in search_results[:5]:
@@ -329,9 +329,9 @@ class LibrarianAgent:
             page = result.get("page", result.get("metadata", {}).get("page", "?"))
             content = result.get("content", result.get("text", ""))
             context_parts.append(f"[From '{doc_title}', page {page}]\n{content}")
-        
+
         context = "\n\n---\n\n".join(context_parts)
-        
+
         # Use LLM to synthesize answer
         synthesis_prompt = f"""Based on the following excerpts from the document library, answer the user's question.
 Include citations to the source documents.
@@ -345,7 +345,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
 
         try:
             from compymac.types import Message
-            
+
             response = self.llm_client.chat(
                 messages=[
                     Message(role="system", content=LIBRARIAN_SYSTEM_PROMPT),
@@ -353,7 +353,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                 ],
                 temperature=0.0,
             )
-            
+
             if response.content:
                 return response.content
             else:
@@ -373,7 +373,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
     ) -> LibrarianResult:
         """
         Execute a librarian action.
-        
+
         Args:
             action: The action to perform (search, list, get_content, activate, deactivate, status, answer)
             query: Search query (required for search/answer actions)
@@ -381,19 +381,19 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
             page: Page number (optional for get_content)
             top_k: Number of results to return (for search/answer)
             user_id: User ID for listing documents
-            
+
         Returns:
             LibrarianResult with answer, citations, excerpts, and actions_taken
         """
         self._actions_taken = []  # Reset actions for this execution
         result = LibrarianResult()
-        
+
         try:
             action_enum = LibrarianAction(action.lower())
         except ValueError:
             result.error = f"Unknown action: {action}. Valid actions: {[a.value for a in LibrarianAction]}"
             return result
-        
+
         try:
             if action_enum == LibrarianAction.LIST:
                 docs = self._list_documents(user_id)
@@ -404,7 +404,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                     )
                 else:
                     result.answer = "No documents in library. Upload documents via the Library tab in the UI."
-            
+
             elif action_enum == LibrarianAction.STATUS:
                 active = self._get_active_sources()
                 if active:
@@ -414,7 +414,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                     )
                 else:
                     result.answer = "No active sources. Use 'activate' action with a document_id to enable documents for search."
-            
+
             elif action_enum == LibrarianAction.ACTIVATE:
                 if not document_id:
                     result.error = "document_id is required for activate action"
@@ -424,7 +424,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                         result.error = activate_result["error"]
                     else:
                         result.answer = activate_result["message"]
-            
+
             elif action_enum == LibrarianAction.DEACTIVATE:
                 if not document_id:
                     result.error = "document_id is required for deactivate action"
@@ -434,7 +434,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                         result.error = deactivate_result["error"]
                     else:
                         result.answer = deactivate_result["message"]
-            
+
             elif action_enum == LibrarianAction.GET_CONTENT:
                 if not document_id:
                     result.error = "document_id is required for get_content action"
@@ -450,7 +450,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                             "page_num": page,
                             "chunk_id": None,
                         }]
-            
+
             elif action_enum == LibrarianAction.SEARCH:
                 if not query:
                     result.error = "query is required for search action"
@@ -470,7 +470,7 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                             result.clarifying_question = "Would you like me to list available documents?"
                         else:
                             result.answer = f"No results found for '{query}' in {len(active)} active documents."
-            
+
             elif action_enum == LibrarianAction.ANSWER:
                 if not query:
                     result.error = "query is required for answer action"
@@ -489,11 +489,11 @@ Provide a clear, grounded answer based only on the provided excerpts. If the exc
                             result.clarifying_question = "Would you like me to list available documents?"
                         else:
                             result.answer = f"I couldn't find information about '{query}' in the {len(active)} active documents."
-        
+
         except Exception as e:
             logger.exception(f"Librarian action failed: {e}")
             result.error = str(e)
-        
+
         result.actions_taken = self._actions_taken
         return result
 
@@ -505,20 +505,20 @@ def create_librarian_tool_handler(
 ):
     """
     Create a handler function for the librarian tool.
-    
+
     This returns a function that can be registered as a tool handler
     in the LocalHarness.
-    
+
     Args:
         library_store: The LibraryStore instance
         session_id: Session ID for source tracking
         llm_client: Optional LLM client for answer synthesis
-        
+
     Returns:
         A handler function for the librarian tool
     """
     agent = LibrarianAgent(library_store, session_id, llm_client)
-    
+
     def librarian_handler(
         action: str,
         query: str | None = None,
@@ -529,14 +529,14 @@ def create_librarian_tool_handler(
     ) -> str:
         """
         Librarian tool handler.
-        
+
         A specialist agent for document library operations. Use this tool to:
         - Search for content in uploaded documents
         - List available documents
         - Get full content of documents
         - Activate/deactivate documents for search
         - Get grounded answers with citations
-        
+
         Args:
             action: The action to perform. One of:
                 - "search": Search for content matching a query
@@ -551,7 +551,7 @@ def create_librarian_tool_handler(
             page: Page number (optional for get_content)
             top_k: Number of results to return (default: 5)
             user_id: User ID for listing documents (default: "default")
-            
+
         Returns:
             JSON string with answer, citations, excerpts, and actions_taken
         """
@@ -564,5 +564,5 @@ def create_librarian_tool_handler(
             user_id=user_id,
         )
         return result.to_json()
-    
+
     return librarian_handler

@@ -1099,7 +1099,333 @@ Per project guidelines, CompyMac uses Venice.ai API for LLM hosting. The RAG int
 
 ---
 
-## 16. References
+## 16. Librarian Sub-Agent: Research-Backed Prompt Architecture
+
+This section documents the complete prompt architecture for the Librarian sub-agent, with research backing for each design decision. The Librarian consolidates 6 individual library tools into a single specialist agent, reducing cognitive load on the main agent while maintaining full library functionality.
+
+### 16.1 Research Foundation
+
+The Librarian sub-agent design is informed by the following research:
+
+**Multi-Agent RAG Patterns:**
+- **MALADE (arXiv:2408.01869)** - Multi-agent system for RAG with specialized agents. Key insight: domain-specific agents with constrained toolsets outperform general-purpose agents with many tools.
+- **Tool-to-Agent Retrieval (arXiv:2511.01854)** - Proposes treating agents and tools in a shared retrieval space. Supports consolidating tools into specialist agents to reduce tool selection complexity.
+- **Dynamic Multi-Agent Orchestration (arXiv:2412.17964)** - Demonstrates that specialized agents with focused prompts achieve higher task completion rates than monolithic agents.
+
+**Anti-Hallucination Techniques:**
+- **REAR (arXiv:2402.17497)** - Relevance-aware RAG that assesses document relevance before generation. Informs our "evidence-first" approach.
+- **Self-RAG (arXiv:2310.11511)** - Self-reflective retrieval that teaches models to critique their own outputs. Informs our "claim-evidence binding" rules.
+
+**Retrieval Discipline:**
+- **RQ-RAG (arXiv:2404.00610)** - Query refinement for ambiguous queries. Informs our query decomposition guidance.
+- **GeAR (arXiv:2412.18431)** - Graph-enhanced agent for multi-step retrieval. Informs our iterative search with stop conditions.
+
+### 16.2 Prompt Layers Overview
+
+The Librarian operates through three distinct prompt layers, each serving a specific purpose:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 1: Main Agent System Prompt                               │
+│ Purpose: Teach main agent WHEN and HOW to call librarian        │
+│ Location: server.py SYSTEM_PROMPT                               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 2: Tool Schema Description                                │
+│ Purpose: What model sees at tool selection time                 │
+│ Location: local_harness.py register_library_tools()             │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 3: Librarian System Prompt                                │
+│ Purpose: Retrieval discipline, anti-hallucination, output       │
+│ Location: librarian_agent.py LIBRARIAN_SYSTEM_PROMPT            │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 4: Synthesis Prompt (Optional)                            │
+│ Purpose: Answer generation from retrieved excerpts              │
+│ Location: librarian_agent.py _synthesize_answer()               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 16.3 Layer 1: Main Agent System Prompt
+
+**Purpose:** Teach the main agent when to delegate to the librarian and how to interpret results.
+
+**Location:** `src/compymac/api/server.py` - SYSTEM_PROMPT
+
+```
+## Document Library Tools
+
+You have access to a document library containing uploaded PDFs and EPUBs. 
+Use the `librarian` tool to search and retrieve information. The librarian 
+is a specialist agent that handles all library operations.
+
+**Librarian Actions:**
+- `list`: List all documents in the library with their IDs and metadata
+- `activate`: Activate a document for searching (requires document_id)
+- `deactivate`: Remove a document from active search sources (requires document_id)
+- `status`: See which documents are currently active for search
+- `search`: Search for relevant content across active documents (requires query)
+- `get_content`: Get the full content of a specific document or page (requires document_id)
+- `answer`: Search and synthesize an answer with citations (requires query)
+
+**Example workflow:**
+1. `librarian(action="list")` - see available documents
+2. `librarian(action="activate", document_id="...")` - enable a document for search
+3. `librarian(action="answer", query="What does the document say about X?")` - get grounded answer with citations
+
+The librarian returns structured JSON with answer, citations, excerpts, and actions_taken.
+```
+
+**Research Rationale:**
+- Explicit action enumeration reduces tool selection errors (Tool-to-Agent Retrieval)
+- Example workflow provides concrete usage pattern (few-shot prompting)
+- Structured output description sets expectations for result parsing
+
+### 16.4 Layer 2: Tool Schema Description
+
+**Purpose:** The description field in the tool schema acts as a mini-prompt that the model sees when deciding which tool to call.
+
+**Location:** `src/compymac/local_harness.py` - register_library_tools()
+
+```python
+ToolSchema(
+    name="librarian",
+    description=(
+        "A specialist agent for document library operations. "
+        "Use this tool to search, list, and retrieve content from uploaded documents (PDFs, EPUBs). "
+        "Actions: 'search' (find content), 'list' (show documents), 'get_content' (read document), "
+        "'activate'/'deactivate' (control search scope), 'status' (show active sources), "
+        "'answer' (search and synthesize answer with citations). "
+        "Returns structured JSON with answer, citations, excerpts, and actions_taken."
+    ),
+    required_params=["action"],
+    optional_params=["query", "document_id", "page", "top_k", "user_id"],
+    ...
+)
+```
+
+**Research Rationale:**
+- Concise description fits in tool selection context window
+- Action list provides quick reference without needing to read full docs
+- Output format description helps model anticipate result structure
+
+### 16.5 Layer 3: Librarian System Prompt (Critical)
+
+**Purpose:** This is the core prompt that governs the Librarian's behavior. It establishes retrieval discipline, anti-hallucination rules, and output contract.
+
+**Location:** `src/compymac/ingestion/librarian_agent.py` - LIBRARIAN_SYSTEM_PROMPT
+
+```python
+LIBRARIAN_SYSTEM_PROMPT = """You are Librarian, a specialist agent for document retrieval and grounded answers.
+
+Your job is to retrieve and ground answers from the user's document library. You have access to uploaded PDFs and EPUBs that the user has added to their library.
+
+## Your Capabilities
+
+You can:
+1. **Search** - Find relevant content across documents using semantic search
+2. **List** - Show all available documents in the library
+3. **Get Content** - Retrieve full text of specific documents or pages
+4. **Activate/Deactivate** - Control which documents are included in searches
+5. **Answer** - Search and synthesize answers with citations
+
+## Retrieval Discipline
+
+- Use search first to find relevant content
+- Prefer minimal tool calls - retrieve top 5-8 chunks
+- Deduplicate overlapping content
+- Don't dump full documents unless explicitly asked
+- Prefer summaries + pointers over raw text
+
+## Relevance Validation
+
+- Treat retrieved text as evidence
+- If evidence is weak or absent, say so clearly
+- Propose follow-up queries if initial search is insufficient
+- Ask clarifying questions when the query is ambiguous
+
+## Output Contract
+
+Always return structured JSON with:
+- `answer`: Your response to the query (or null if just performing an action)
+- `citations`: List of {doc_id, doc_title, page_num, chunk_id} for sources used
+- `excerpts`: Short quotes from the documents (max 200 chars each)
+- `actions_taken`: List of internal tool calls made
+- `needs_clarification`: Boolean if query is ambiguous
+- `clarifying_question`: Question to ask if clarification needed
+
+## Anti-Hallucination Rules
+
+- NEVER invent citations
+- NEVER claim something is in the library unless you have an excerpt
+- If you can't find relevant content, say "I couldn't find information about X in the library"
+- Always include the source document and page number for claims
+
+## Size Limits
+
+- Keep excerpts under 200 characters each
+- Limit answer to 500 words unless more detail is requested
+- Return at most 10 citations per response
+"""
+```
+
+**Research Rationale:**
+
+1. **Role Definition** ("You are Librarian..."):
+   - Clear role identity improves task focus (MALADE)
+   - Specialist framing reduces scope creep
+
+2. **Retrieval Discipline** (top 5-8 chunks, minimal calls):
+   - Based on GeAR finding that focused retrieval outperforms exhaustive retrieval
+   - Prevents context pollution and token waste
+
+3. **Relevance Validation** (treat as evidence, propose follow-ups):
+   - Inspired by REAR's relevance assessment before generation
+   - Reduces hallucination by forcing explicit evidence evaluation
+
+4. **Output Contract** (structured JSON):
+   - Machine-parseable output enables verification
+   - `actions_taken` field provides audit trail
+   - `needs_clarification` enables graceful degradation
+
+5. **Anti-Hallucination Rules**:
+   - "Never invent citations" - explicit prohibition (Self-RAG)
+   - "Must have excerpt" - claim-evidence binding requirement
+   - Abstention template ("I couldn't find...") - reduces gap-filling hallucinations
+
+6. **Size Limits**:
+   - Prevents context overflow
+   - Forces summarization over raw dumps
+
+### 16.6 Layer 4: Synthesis Prompt
+
+**Purpose:** When the librarian needs to synthesize an answer from retrieved chunks, this prompt governs the generation step.
+
+**Location:** `src/compymac/ingestion/librarian_agent.py` - _synthesize_answer()
+
+```python
+synthesis_prompt = f"""Based on the following excerpts from the document library, answer the user's question.
+Include citations to the source documents.
+
+User Question: {query}
+
+Document Excerpts:
+{context}
+
+Provide a clear, grounded answer based only on the provided excerpts. If the excerpts don't contain enough information, say so."""
+```
+
+**Research Rationale:**
+- Explicit grounding instruction ("based only on the provided excerpts")
+- Citation requirement in prompt
+- Abstention instruction ("If excerpts don't contain enough information, say so")
+- Separates retrieval from generation (2-pass pattern from RAG literature)
+
+### 16.7 Advanced Prompting Patterns (Future Enhancements)
+
+Based on research, the following patterns could further improve reliability:
+
+**1. Query Decomposition (RQ-RAG inspired):**
+```
+Before searching, decompose complex queries into 1-3 focused sub-queries.
+For each sub-query, search separately, then merge results.
+Stop when you have at least 3 independent chunks that agree.
+```
+
+**2. Claim-Evidence Binding (Self-RAG inspired):**
+```
+Every non-trivial claim in your answer must be supported by:
+- At least one citation (doc_id, page_num)
+- At least one short quote excerpt
+
+If you cannot bind a claim to evidence, you must either:
+(a) Omit the claim
+(b) Mark it as uncertain
+(c) Ask a clarifying question
+```
+
+**3. Counterfactual Check:**
+```
+If excerpts conflict, do not reconcile or average.
+Report the disagreement with citations to both sources.
+```
+
+**4. Evidence Strength Assessment:**
+```
+After retrieval, assess evidence strength:
+- "strong": Multiple independent sources agree
+- "mixed": Sources partially agree or conflict
+- "weak": Only tangential mentions found
+- "none": No relevant content found
+
+Include this assessment in your response.
+```
+
+**5. Structured Retrieval Plan (instead of free-form CoT):**
+```json
+{
+  "subqueries": ["query1", "query2"],
+  "filters": {"doc_ids": [...], "min_score": 0.5},
+  "stop_criteria": "3+ agreeing chunks or 2 search iterations"
+}
+```
+
+### 16.8 Output Contract Schema (Detailed)
+
+For maximum reliability, the Librarian returns this structured output:
+
+```python
+@dataclass
+class LibrarianResult:
+    """Structured result from the librarian agent."""
+    
+    # The synthesized answer (null for action-only requests)
+    answer: str | None = None
+    
+    # Citations with stable identifiers
+    citations: list[dict] = field(default_factory=list)
+    # Each citation: {doc_id, doc_title, page_num, chunk_id, score}
+    
+    # Short quotes from source documents (max 200 chars each)
+    excerpts: list[str] = field(default_factory=list)
+    
+    # Audit trail of internal tool calls
+    actions_taken: list[str] = field(default_factory=list)
+    # Format: ["library_search(query='X', top_k=5)", ...]
+    
+    # Graceful degradation flags
+    needs_clarification: bool = False
+    clarifying_question: str | None = None
+    
+    # Error handling
+    error: str | None = None
+```
+
+**Research Rationale:**
+- `citations` with stable IDs enables verification
+- `actions_taken` provides audit trail for debugging
+- `needs_clarification` enables graceful degradation
+- Separate `error` field for clean error handling
+
+### 16.9 Implementation Status
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Layer 1: Main Agent Prompt | Implemented | server.py |
+| Layer 2: Tool Schema | Implemented | local_harness.py |
+| Layer 3: Librarian System Prompt | Implemented | librarian_agent.py |
+| Layer 4: Synthesis Prompt | Implemented | librarian_agent.py |
+| Query Decomposition | Future | - |
+| Claim-Evidence Binding | Partial (in prompt) | librarian_agent.py |
+| Evidence Strength Assessment | Future | - |
+
+---
+
+## 17. References
 
 - GAP1_INTERACTIVE_UI_DESIGN.md - Overall UI architecture
 - PDF_INGESTION_IMPLEMENTATION_PLAN.md - PDF processing pipeline
@@ -1118,3 +1444,7 @@ Per project guidelines, CompyMac uses Venice.ai API for LLM hosting. The RAG int
 - GeAR: https://arxiv.org/abs/2412.18431
 - RAG Survey: https://arxiv.org/abs/2409.14924
 - RAG Text Generation Survey: https://arxiv.org/abs/2404.10981
+- Self-RAG: https://arxiv.org/abs/2310.11511
+- MALADE: https://arxiv.org/abs/2408.01869
+- Tool-to-Agent Retrieval: https://arxiv.org/abs/2511.01854
+- Dynamic Multi-Agent Orchestration: https://arxiv.org/abs/2412.17964
