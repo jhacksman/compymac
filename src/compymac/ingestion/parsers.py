@@ -5,6 +5,10 @@ Supports:
 - Plain text files (.txt)
 - PDF files (via PyMuPDF, docling, or fallback)
 - EPUB files (via docling if available)
+
+Phase 3 additions:
+- Venice.ai vision API integration for complex pages
+- Image/diagram description extraction
 """
 
 from pathlib import Path
@@ -23,6 +27,15 @@ try:
     DOCLING_AVAILABLE = True
 except ImportError:
     DOCLING_AVAILABLE = False
+
+# Try to import PDF vision client for complex page analysis
+try:
+    from compymac.ingestion.pdf_vision import PDFVisionClient, VisionAnalysisResult
+    VISION_AVAILABLE = True
+except ImportError:
+    VISION_AVAILABLE = False
+    PDFVisionClient = None  # type: ignore[misc, assignment]
+    VisionAnalysisResult = None  # type: ignore[misc, assignment]
 
 
 class ParseResult:
@@ -44,20 +57,34 @@ class DocumentParser:
     Parses documents into plain text.
 
     Supports multiple formats with graceful fallbacks.
+    Phase 3: Includes vision analysis for complex PDF pages.
     """
 
-    def __init__(self, use_docling: bool = True):
+    def __init__(
+        self,
+        use_docling: bool = True,
+        use_vision: bool = True,
+        vision_api_key: str | None = None,
+    ):
         """
         Initialize document parser.
 
         Args:
             use_docling: Whether to use docling for PDF/EPUB parsing
+            use_vision: Whether to use Venice.ai vision for complex pages
+            vision_api_key: API key for vision analysis (uses env var if None)
         """
         self.use_docling = use_docling and DOCLING_AVAILABLE
+        self.use_vision = use_vision and VISION_AVAILABLE
+        self.vision_api_key = vision_api_key
         self._converter = None
+        self._vision_client: PDFVisionClient | None = None
 
         if self.use_docling:
             self._converter = DocumentConverter()
+
+        if self.use_vision and PDFVisionClient is not None:
+            self._vision_client = PDFVisionClient(api_key=vision_api_key)
 
     def parse(self, file_path: Path | str) -> ParseResult:
         """
@@ -124,7 +151,7 @@ class DocumentParser:
     def _parse_with_pymupdf(
         self, file_path: Path, metadata: dict[str, Any]
     ) -> ParseResult:
-        """Parse PDF using PyMuPDF (fitz)."""
+        """Parse PDF using PyMuPDF (fitz) with vision fallback for complex pages."""
         doc = fitz.open(str(file_path))
 
         # Check for encryption
@@ -134,12 +161,42 @@ class DocumentParser:
 
         pages_text = []
         page_count = len(doc)
+        vision_analyses: list[dict[str, Any]] = []
+        min_chars_threshold = 50  # Pages with less text may need vision analysis
 
         for page_num in range(page_count):
             page = doc[page_num]
             text = page.get_text()
-            if text.strip():
+
+            # Check if page has sufficient text
+            if text.strip() and len(text.strip()) >= min_chars_threshold:
                 pages_text.append(f"--- Page {page_num + 1} ---\n{text}")
+            else:
+                # Page has little/no text - try vision analysis if available
+                vision_text = ""
+                if self._vision_client is not None:
+                    vision_result = self._analyze_page_with_vision(
+                        doc, page_num, file_path.name
+                    )
+                    if vision_result:
+                        vision_analyses.append(vision_result.to_dict())
+                        vision_text = (
+                            f"\n[Vision Analysis]\n{vision_result.description}"
+                        )
+                        if vision_result.detected_elements:
+                            vision_text += (
+                                f"\n[Detected Elements: "
+                                f"{', '.join(vision_result.detected_elements)}]"
+                            )
+
+                # Include whatever text we have plus vision analysis
+                page_content = f"--- Page {page_num + 1} ---\n"
+                if text.strip():
+                    page_content += text
+                if vision_text:
+                    page_content += vision_text
+                if page_content.strip() != f"--- Page {page_num + 1} ---":
+                    pages_text.append(page_content)
 
         doc.close()
 
@@ -151,9 +208,48 @@ class DocumentParser:
                 **metadata,
                 "parser": "pymupdf",
                 "page_count": page_count,
+                "vision_analyses": vision_analyses,
+                "vision_pages_analyzed": len(vision_analyses),
             },
             format="pdf",
         )
+
+    def _analyze_page_with_vision(
+        self,
+        doc: "fitz.Document",
+        page_idx: int,
+        doc_name: str,
+    ) -> "VisionAnalysisResult | None":
+        """
+        Analyze a PDF page using Venice.ai vision API.
+
+        Args:
+            doc: Open PyMuPDF document.
+            page_idx: Page index (0-based).
+            doc_name: Document name for context.
+
+        Returns:
+            VisionAnalysisResult or None if analysis fails.
+        """
+        if self._vision_client is None:
+            return None
+
+        try:
+            # Render page to image at 150 DPI
+            page = doc[page_idx]
+            mat = fitz.Matrix(150 / 72, 150 / 72)
+            pix = page.get_pixmap(matrix=mat)
+            page_image = pix.tobytes("png")
+
+            # Analyze with vision client
+            return self._vision_client.analyze_page(
+                page_image=page_image,
+                page_num=page_idx + 1,
+                context=f"Document: {doc_name}",
+            )
+        except Exception:
+            # Vision analysis failed, return None
+            return None
 
     def _parse_epub(self, file_path: Path, metadata: dict[str, Any]) -> ParseResult:
         """Parse EPUB file."""
