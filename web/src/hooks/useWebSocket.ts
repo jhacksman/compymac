@@ -79,12 +79,21 @@ export function useWebSocket(sessionId: string | null) {
   } = useSessionStore()
 
   const connect = useCallback(() => {
-    if (!sessionId || wsRef.current?.readyState === WebSocket.OPEN) return
+    // Prevent double-connect in React Strict Mode or rapid re-renders
+    // Check for both OPEN and CONNECTING states
+    if (!sessionId) return
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) return
 
     setIsConnecting(true)
     const ws = new WebSocket(`${API_URL}/ws/${sessionId}`)
+    
+    // Store ref immediately to prevent race conditions
+    wsRef.current = ws
 
     ws.onopen = () => {
+      // Only update state if this is still the current socket
+      if (wsRef.current !== ws) return
       setIsConnected(true)
       setIsConnecting(false)
       ws.send(JSON.stringify({ type: 'subscribe' }))
@@ -165,17 +174,19 @@ export function useWebSocket(sessionId: string | null) {
     }
 
     ws.onclose = () => {
+      // Only update state if this is still the current socket
+      if (wsRef.current !== ws) return
       setIsConnected(false)
       setIsConnecting(false)
     }
 
     ws.onerror = (error) => {
+      // Only update state if this is still the current socket
+      if (wsRef.current !== ws) return
       console.error('WebSocket error:', error)
       setIsConnected(false)
       setIsConnecting(false)
     }
-
-    wsRef.current = ws
   }, [sessionId, addMessage, setIsStreaming, setTodos, setBrowserState, setBrowserControl, setTerminalOutput, setAgentStatus])
 
   const disconnect = useCallback(() => {
