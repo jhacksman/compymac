@@ -391,8 +391,8 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
                                     {((selectedDoc.metadata.classification as Record<string, unknown>).text_pages as number[])?.length || 0}
                                   </p>
                                   <p className="text-slate-300">
-                                    <span className="text-slate-500">Scanned Pages:</span>{' '}
-                                    {((selectedDoc.metadata.classification as Record<string, unknown>).scanned_pages as number[])?.length || 0}
+                                    <span className="text-slate-500">OCR Required Pages:</span>{' '}
+                                    {((selectedDoc.metadata.classification as Record<string, unknown>).ocr_required_pages as number[])?.length || 0}
                                   </p>
                                 </>
                               )}

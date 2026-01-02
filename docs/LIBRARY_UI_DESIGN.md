@@ -187,16 +187,16 @@ GET /api/documents/{document_id}/pages/{page_num}/text
 
 ### 4.1 Current Problem
 
-The current classifier uses a 50-character threshold to determine if a page is "digital" or "scanned":
+The current classifier uses a 50-character threshold to determine if a page is "digital" or needs OCR:
 
 ```python
 if len(text) >= 50:  # min_chars_per_page
     text_pages.append(page_num + 1)
 else:
-    scanned_pages.append(page_num + 1)
+    ocr_required_pages.append(page_num + 1)
 ```
 
-This fails for scanned PDFs with text overlays (stamps, headers) that have 50+ characters of embedded text but the main content is in scanned images.
+This fails for image-based PDFs with text overlays (stamps, headers) that have 50+ characters of embedded text but the main content is in images requiring OCR.
 
 ### 4.2 Improved Classification
 
@@ -205,7 +205,7 @@ Use text density relative to page area, not just character count:
 ```python
 def _classify_pdf(self, doc: "fitz.Document") -> PDFClassification:
     text_pages = []
-    scanned_pages = []
+    ocr_required_pages = []
     
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -227,18 +227,18 @@ def _classify_pdf(self, doc: "fitz.Document") -> PDFClassification:
         
         # Classification logic:
         # - High text density (>5 chars/1000 sq pts) AND no large images = digital
-        # - Low text density OR large images = likely scanned
+        # - Low text density OR large images = likely image-based, needs OCR
         if text_density > 5 and not has_large_images:
             text_pages.append(page_num + 1)
         elif has_large_images or text_density < 1:
-            scanned_pages.append(page_num + 1)
+            ocr_required_pages.append(page_num + 1)
         else:
             # Ambiguous - check if text is just headers/footers
             # by looking at text block positions
             blocks = page.get_text("blocks")
             content_blocks = [b for b in blocks if b[1] > rect.height * 0.1 and b[3] < rect.height * 0.9]
             if len(content_blocks) < 2:
-                scanned_pages.append(page_num + 1)
+                ocr_required_pages.append(page_num + 1)
             else:
                 text_pages.append(page_num + 1)
     
@@ -251,7 +251,7 @@ Add parameter to force OCR regardless of classification:
 
 ```python
 def parse(self, file_path: Path, force_ocr: bool = False) -> ParseResult:
-    # If force_ocr, treat all pages as scanned
+    # If force_ocr, treat all pages as needing OCR
 ```
 
 ---
