@@ -6,6 +6,11 @@ Supports:
 - PDF files (via PyMuPDF, docling, or fallback)
 - EPUB files (via docling if available)
 
+Phase 2 additions:
+- Document classification (digital vs scanned)
+- Table detection with Camelot
+- OCR fallback for scanned PDFs
+
 Phase 3 additions:
 - Venice.ai vision API integration for complex pages
 - Image/diagram description extraction
@@ -28,6 +33,21 @@ try:
 except ImportError:
     DOCLING_AVAILABLE = False
 
+# Try to import Camelot for table detection
+try:
+    import camelot
+    CAMELOT_AVAILABLE = True
+except ImportError:
+    CAMELOT_AVAILABLE = False
+
+# Try to import pytesseract for OCR
+try:
+    import pytesseract
+    from PIL import Image
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
 # Try to import PDF vision client for complex page analysis
 try:
     from compymac.ingestion.pdf_vision import PDFVisionClient, VisionAnalysisResult
@@ -38,6 +58,60 @@ except ImportError:
     VisionAnalysisResult = None  # type: ignore[misc, assignment]
 
 
+class PDFClassification:
+    """Classification of a PDF document type."""
+
+    DIGITAL = "digital"  # Text-based, extractable text
+    SCANNED = "scanned"  # Image-based, needs OCR
+    MIXED = "mixed"  # Some pages digital, some scanned
+
+    def __init__(
+        self,
+        doc_type: str,
+        text_pages: list[int],
+        scanned_pages: list[int],
+        confidence: float,
+    ):
+        self.doc_type = doc_type
+        self.text_pages = text_pages
+        self.scanned_pages = scanned_pages
+        self.confidence = confidence
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "doc_type": self.doc_type,
+            "text_pages": self.text_pages,
+            "scanned_pages": self.scanned_pages,
+            "confidence": self.confidence,
+        }
+
+
+class TableResult:
+    """Result from table extraction."""
+
+    def __init__(
+        self,
+        page_num: int,
+        table_index: int,
+        markdown: str,
+        accuracy: float,
+    ):
+        self.page_num = page_num
+        self.table_index = table_index
+        self.markdown = markdown
+        self.accuracy = accuracy
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "page_num": self.page_num,
+            "table_index": self.table_index,
+            "markdown": self.markdown,
+            "accuracy": self.accuracy,
+        }
+
+
 class ParseResult:
     """Result from parsing a document."""
 
@@ -46,10 +120,14 @@ class ParseResult:
         text: str,
         metadata: dict[str, Any],
         format: str,
+        classification: PDFClassification | None = None,
+        tables: list[TableResult] | None = None,
     ):
         self.text = text
         self.metadata = metadata
         self.format = format
+        self.classification = classification
+        self.tables = tables or []
 
 
 class DocumentParser:
@@ -57,6 +135,7 @@ class DocumentParser:
     Parses documents into plain text.
 
     Supports multiple formats with graceful fallbacks.
+    Phase 2: Includes classification, table detection, and OCR.
     Phase 3: Includes vision analysis for complex PDF pages.
     """
 
@@ -151,7 +230,7 @@ class DocumentParser:
     def _parse_with_pymupdf(
         self, file_path: Path, metadata: dict[str, Any]
     ) -> ParseResult:
-        """Parse PDF using PyMuPDF (fitz) with vision fallback for complex pages."""
+        """Parse PDF using PyMuPDF (fitz) with classification, OCR, and vision fallback."""
         doc = fitz.open(str(file_path))
 
         # Check for encryption
@@ -159,20 +238,33 @@ class DocumentParser:
             doc.close()
             raise ValueError("PDF is password-protected. Please provide password.")
 
-        pages_text = []
         page_count = len(doc)
         vision_analyses: list[dict[str, Any]] = []
-        min_chars_threshold = 50  # Pages with less text may need vision analysis
+        min_chars_threshold = 50  # Pages with less text may need OCR/vision analysis
 
+        # Phase 2: Classify document (digital vs scanned)
+        classification = self._classify_pdf(doc)
+
+        # Extract text based on classification
+        pages_text = []
         for page_num in range(page_count):
             page = doc[page_num]
             text = page.get_text()
 
-            # Check if page has sufficient text
+            # Phase 2: If page is scanned and OCR is available, try OCR first
+            if (
+                page_num + 1 in classification.scanned_pages
+                and TESSERACT_AVAILABLE
+            ):
+                ocr_text = self._ocr_page(doc, page_num)
+                if ocr_text.strip():
+                    text = ocr_text
+
+            # Check if page has sufficient text after OCR attempt
             if text.strip() and len(text.strip()) >= min_chars_threshold:
                 pages_text.append(f"--- Page {page_num + 1} ---\n{text}")
             else:
-                # Page has little/no text - try vision analysis if available
+                # Page still has little/no text - try vision analysis if available
                 vision_text = ""
                 if self._vision_client is not None:
                     vision_result = self._analyze_page_with_vision(
@@ -198,9 +290,21 @@ class DocumentParser:
                 if page_content.strip() != f"--- Page {page_num + 1} ---":
                     pages_text.append(page_content)
 
+        # Phase 2: Extract tables if Camelot is available
+        tables = []
+        if CAMELOT_AVAILABLE:
+            tables = self._extract_tables(file_path)
+
         doc.close()
 
         full_text = "\n\n".join(pages_text)
+
+        # Append table content to text
+        if tables:
+            table_text = "\n\n--- Tables ---\n"
+            for table in tables:
+                table_text += f"\n[Table on Page {table.page_num}]\n{table.markdown}\n"
+            full_text += table_text
 
         return ParseResult(
             text=full_text,
@@ -208,10 +312,61 @@ class DocumentParser:
                 **metadata,
                 "parser": "pymupdf",
                 "page_count": page_count,
+                "classification": classification.to_dict(),
+                "table_count": len(tables),
+                "ocr_used": len(classification.scanned_pages) > 0 and TESSERACT_AVAILABLE,
                 "vision_analyses": vision_analyses,
                 "vision_pages_analyzed": len(vision_analyses),
             },
             format="pdf",
+            classification=classification,
+            tables=tables,
+        )
+
+    def _classify_pdf(self, doc: "fitz.Document") -> PDFClassification:
+        """
+        Classify PDF as digital, scanned, or mixed.
+
+        A page is considered "scanned" if it has very little extractable text
+        relative to its image content.
+        """
+        text_pages = []
+        scanned_pages = []
+        min_chars_per_page = 50  # Threshold for considering a page as having text
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text = page.get_text().strip()
+
+            if len(text) >= min_chars_per_page:
+                text_pages.append(page_num + 1)
+            else:
+                # Check if page has images (likely scanned)
+                image_list = page.get_images()
+                if image_list or len(text) < 10:
+                    scanned_pages.append(page_num + 1)
+                else:
+                    # Very little text but no images - still count as text page
+                    text_pages.append(page_num + 1)
+
+        # Determine document type
+        total_pages = len(doc)
+        if not scanned_pages:
+            doc_type = PDFClassification.DIGITAL
+            confidence = 1.0
+        elif not text_pages:
+            doc_type = PDFClassification.SCANNED
+            confidence = 1.0
+        else:
+            doc_type = PDFClassification.MIXED
+            # Confidence based on ratio of text pages
+            confidence = len(text_pages) / total_pages
+
+        return PDFClassification(
+            doc_type=doc_type,
+            text_pages=text_pages,
+            scanned_pages=scanned_pages,
+            confidence=confidence,
         )
 
     def _analyze_page_with_vision(
@@ -250,6 +405,88 @@ class DocumentParser:
         except Exception:
             # Vision analysis failed, return None
             return None
+
+    def _ocr_page(self, doc: "fitz.Document", page_num: int) -> str:
+        """
+        Perform OCR on a PDF page using pytesseract.
+
+        Converts the page to an image and runs OCR.
+        """
+        if not TESSERACT_AVAILABLE:
+            return ""
+
+        try:
+            page = doc[page_num]
+            # Render page to image at 300 DPI for better OCR
+            mat = fitz.Matrix(300 / 72, 300 / 72)
+            pix = page.get_pixmap(matrix=mat)
+
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            # Run OCR
+            text = pytesseract.image_to_string(img)
+            return text
+        except Exception:
+            # OCR failed, return empty string
+            return ""
+
+    def _extract_tables(self, file_path: Path) -> list[TableResult]:
+        """
+        Extract tables from PDF using Camelot.
+
+        Returns list of TableResult objects with markdown representation.
+        """
+        if not CAMELOT_AVAILABLE:
+            return []
+
+        tables = []
+        try:
+            # Try lattice method first (for bordered tables)
+            extracted = camelot.read_pdf(
+                str(file_path),
+                pages="all",
+                flavor="lattice",
+            )
+
+            for i, table in enumerate(extracted):
+                if table.accuracy > 50:  # Only include reasonably accurate tables
+                    # Convert to markdown
+                    df = table.df
+                    markdown = df.to_markdown(index=False)
+                    tables.append(
+                        TableResult(
+                            page_num=table.page,
+                            table_index=i,
+                            markdown=markdown,
+                            accuracy=table.accuracy,
+                        )
+                    )
+
+            # If no tables found with lattice, try stream method
+            if not tables:
+                extracted = camelot.read_pdf(
+                    str(file_path),
+                    pages="all",
+                    flavor="stream",
+                )
+                for i, table in enumerate(extracted):
+                    if table.accuracy > 50:
+                        df = table.df
+                        markdown = df.to_markdown(index=False)
+                        tables.append(
+                            TableResult(
+                                page_num=table.page,
+                                table_index=i,
+                                markdown=markdown,
+                                accuracy=table.accuracy,
+                            )
+                        )
+        except Exception:
+            # Table extraction failed, return empty list
+            pass
+
+        return tables
 
     def _parse_epub(self, file_path: Path, metadata: dict[str, Any]) -> ParseResult:
         """Parse EPUB file."""
