@@ -16,9 +16,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -26,9 +26,12 @@ from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.browser import BrowserConfig, BrowserMode, BrowserService
 from compymac.config import LLMConfig
 from compymac.harness import HarnessConfig
+from compymac.ingestion.chunker import DocumentChunker
+from compymac.ingestion.parsers import DocumentParser
 from compymac.llm import LLMClient
 from compymac.local_harness import LocalHarness, ToolCategory
 from compymac.session import Session
+from compymac.storage.library_store import DocumentStatus, LibraryStore
 from compymac.storage.run_store import RunStatus, RunStore
 from compymac.types import ToolCall
 
@@ -36,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 # Global RunStore for session persistence
 run_store = RunStore()
+
+# Global LibraryStore for document management
+library_store = LibraryStore()
+
+# Upload directory for PDF files
+UPLOAD_DIR = Path("/tmp/compymac_uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="CompyMac API", version="0.2.0")
 
@@ -1486,6 +1496,194 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     return {
         "id": session_id,
         "deleted": success,
+    }
+
+
+# =============================================================================
+# Library / PDF Upload Endpoints (Phase 1)
+# =============================================================================
+
+
+@app.post("/api/documents/upload")
+async def upload_document(
+    file: Annotated[UploadFile, File()],
+    user_id: str = "default",
+    add_to_library: bool = True,
+) -> dict[str, Any]:
+    """
+    Upload a PDF document for processing.
+
+    Args:
+        file: The PDF file to upload
+        user_id: User ID for library storage (default: "default")
+        add_to_library: Whether to add to persistent library (default: True)
+
+    Returns:
+        Document metadata including ID and processing status.
+    """
+    if not file.filename:
+        return {"error": "No filename provided"}
+
+    # Validate file type
+    if not file.filename.lower().endswith(".pdf"):
+        return {"error": "Only PDF files are supported"}
+
+    # Create document entry
+    doc = library_store.create_document(
+        user_id=user_id,
+        filename=file.filename,
+        file_size_bytes=file.size or 0,
+    )
+
+    try:
+        # Save uploaded file
+        file_path = UPLOAD_DIR / f"{doc.id}.pdf"
+        content = await file.read()
+        file_path.write_bytes(content)
+
+        # Update document with file path
+        library_store.update_document(doc.id, metadata={"file_path": str(file_path)})
+
+        # Process the PDF
+        library_store.update_document(doc.id, status=DocumentStatus.PROCESSING)
+
+        # Parse PDF
+        parser = DocumentParser()
+        parse_result = parser.parse(file_path)
+
+        # Chunk the text
+        chunker = DocumentChunker(chunk_size=512, chunk_overlap=50)
+        chunks = chunker.chunk(
+            text=parse_result.text,
+            doc_id=doc.id,
+            metadata=parse_result.metadata,
+        )
+
+        # Convert chunks to dicts for storage
+        chunk_dicts = [
+            {
+                "id": chunk.id,
+                "content": chunk.content,
+                "start_char": chunk.start_char,
+                "end_char": chunk.end_char,
+                "metadata": chunk.metadata,
+            }
+            for chunk in chunks
+        ]
+
+        # Update document with results
+        library_store.update_document(
+            doc.id,
+            status=DocumentStatus.READY,
+            page_count=parse_result.metadata.get("page_count", 0),
+            chunks=chunk_dicts,
+            metadata=parse_result.metadata,
+        )
+
+        doc = library_store.get_document(doc.id)
+        return doc.to_dict() if doc else {"error": "Document not found after processing"}
+
+    except Exception as e:
+        logger.error(f"Error processing document {doc.id}: {e}")
+        library_store.update_document(
+            doc.id,
+            status=DocumentStatus.FAILED,
+            error=str(e),
+        )
+        doc = library_store.get_document(doc.id)
+        return doc.to_dict() if doc else {"error": str(e)}
+
+
+@app.get("/api/documents/{document_id}")
+async def get_document(document_id: str) -> dict[str, Any]:
+    """Get document details by ID."""
+    doc = library_store.get_document(document_id)
+    if not doc:
+        return {"error": "Document not found"}
+    return doc.to_dict()
+
+
+@app.get("/api/library")
+async def list_library(user_id: str = "default") -> dict[str, Any]:
+    """List all documents in a user's library."""
+    docs = library_store.get_user_documents(user_id)
+    return {
+        "user_id": user_id,
+        "documents": [doc.to_dict() for doc in docs],
+        "count": len(docs),
+    }
+
+
+@app.delete("/api/library/{document_id}")
+async def delete_library_document(document_id: str) -> dict[str, Any]:
+    """Delete a document from the library."""
+    doc = library_store.get_document(document_id)
+    if not doc:
+        return {"error": "Document not found"}
+
+    # Delete the uploaded file if it exists
+    if doc.metadata.get("file_path"):
+        file_path = Path(doc.metadata["file_path"])
+        if file_path.exists():
+            file_path.unlink()
+
+    success = library_store.delete_document(document_id)
+    return {"id": document_id, "deleted": success}
+
+
+@app.post("/api/library/search")
+async def search_library(
+    query: str,
+    document_ids: list[str] | None = None,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """
+    Search for relevant chunks in library documents.
+
+    Args:
+        query: Search query
+        document_ids: Optional list of document IDs to search (default: all)
+        top_k: Number of results to return (default: 5)
+
+    Returns:
+        List of relevant chunks with citations.
+    """
+    results = library_store.search_chunks(
+        query=query,
+        doc_ids=document_ids,
+        top_k=top_k,
+    )
+    return {
+        "query": query,
+        "results": results,
+        "count": len(results),
+    }
+
+
+@app.post("/api/library/{document_id}/activate")
+async def activate_document(document_id: str, session_id: str) -> dict[str, Any]:
+    """Add a document to active sources for a session."""
+    success = library_store.add_active_source(session_id, document_id)
+    if not success:
+        return {"error": "Document not found"}
+    return {"document_id": document_id, "session_id": session_id, "activated": True}
+
+
+@app.post("/api/library/{document_id}/deactivate")
+async def deactivate_document(document_id: str, session_id: str) -> dict[str, Any]:
+    """Remove a document from active sources for a session."""
+    success = library_store.remove_active_source(session_id, document_id)
+    return {"document_id": document_id, "session_id": session_id, "deactivated": success}
+
+
+@app.get("/api/library/active")
+async def get_active_sources(session_id: str) -> dict[str, Any]:
+    """Get all active source documents for a session."""
+    docs = library_store.get_active_sources(session_id)
+    return {
+        "session_id": session_id,
+        "documents": [doc.to_dict() for doc in docs],
+        "count": len(docs),
     }
 
 

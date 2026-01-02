@@ -3,12 +3,19 @@ Document Parsers for extracting text from various file formats.
 
 Supports:
 - Plain text files (.txt)
-- PDF files (via docling if available, fallback to basic extraction)
+- PDF files (via PyMuPDF, docling, or fallback)
 - EPUB files (via docling if available)
 """
 
 from pathlib import Path
 from typing import Any
+
+# Try to import PyMuPDF for PDF parsing
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
 
 # Try to import docling for advanced parsing
 try:
@@ -100,23 +107,53 @@ class DocumentParser:
         )
 
     def _parse_pdf(self, file_path: Path, metadata: dict[str, Any]) -> ParseResult:
-        """Parse PDF file."""
+        """Parse PDF file using PyMuPDF (preferred) or docling."""
+        # Try PyMuPDF first (fast and reliable)
+        if PYMUPDF_AVAILABLE:
+            return self._parse_with_pymupdf(file_path, metadata)
+
+        # Fall back to docling if available
         if self.use_docling and self._converter:
             return self._parse_with_docling(file_path, metadata, "pdf")
 
-        # Fallback: try to read as text (won't work for most PDFs)
-        # In production, you'd want to use PyPDF2 or similar
-        try:
-            text = file_path.read_text(encoding="utf-8", errors="ignore")
-            return ParseResult(
-                text=text,
-                metadata={**metadata, "parser": "fallback"},
-                format="pdf",
-            )
-        except Exception as err:
-            raise ValueError(
-                "PDF parsing requires docling. Install with: pip install docling"
-            ) from err
+        raise ValueError(
+            "PDF parsing requires PyMuPDF or docling. "
+            "Install with: pip install pymupdf"
+        )
+
+    def _parse_with_pymupdf(
+        self, file_path: Path, metadata: dict[str, Any]
+    ) -> ParseResult:
+        """Parse PDF using PyMuPDF (fitz)."""
+        doc = fitz.open(str(file_path))
+
+        # Check for encryption
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError("PDF is password-protected. Please provide password.")
+
+        pages_text = []
+        page_count = len(doc)
+
+        for page_num in range(page_count):
+            page = doc[page_num]
+            text = page.get_text()
+            if text.strip():
+                pages_text.append(f"--- Page {page_num + 1} ---\n{text}")
+
+        doc.close()
+
+        full_text = "\n\n".join(pages_text)
+
+        return ParseResult(
+            text=full_text,
+            metadata={
+                **metadata,
+                "parser": "pymupdf",
+                "page_count": page_count,
+            },
+            format="pdf",
+        )
 
     def _parse_epub(self, file_path: Path, metadata: dict[str, Any]) -> ParseResult:
         """Parse EPUB file."""
@@ -150,6 +187,8 @@ class DocumentParser:
     def supported_formats() -> list[str]:
         """Get list of supported file formats."""
         formats = [".txt", ".md", ".markdown"]
+        if PYMUPDF_AVAILABLE or DOCLING_AVAILABLE:
+            formats.append(".pdf")
         if DOCLING_AVAILABLE:
-            formats.extend([".pdf", ".epub"])
+            formats.append(".epub")
         return formats
