@@ -326,25 +326,60 @@ class DocumentParser:
         Classify PDF as digital, scanned, or mixed.
 
         A page is considered "scanned" if it has very little extractable text
-        relative to its image content.
+        relative to its image content, or if it has large images covering most
+        of the page (common for scanned documents with text overlays like stamps).
         """
         text_pages = []
         scanned_pages = []
-        min_chars_per_page = 50  # Threshold for considering a page as having text
 
         for page_num in range(len(doc)):
             page = doc[page_num]
             text = page.get_text().strip()
+            rect = page.rect
+            page_area = rect.width * rect.height
 
-            if len(text) >= min_chars_per_page:
+            # Calculate text density (chars per 1000 sq points)
+            text_density = (len(text) / page_area) * 1000 if page_area > 0 else 0
+
+            # Check for large images that cover significant portion of page
+            image_list = page.get_images()
+            has_large_images = False
+            for img in image_list:
+                # img format: (xref, smask, width, height, bpc, colorspace, alt, name, filter, referencer)
+                img_width = img[2] if len(img) > 2 else 0
+                img_height = img[3] if len(img) > 3 else 0
+                img_area = img_width * img_height
+                # Consider "large" if image covers >30% of page area (scaled by typical DPI ratio)
+                # Images are often stored at higher resolution than page dimensions
+                if img_area > 0 and (img_area / 4) > page_area * 0.3:
+                    has_large_images = True
+                    break
+
+            # Classification logic:
+            # - High text density (>5 chars/1000 sq pts) AND no large images = digital
+            # - Has large images = likely scanned (even with some text overlay)
+            # - Very low text density (<1) = scanned
+            if has_large_images:
+                # Large image covering page = scanned, even if there's some text overlay
+                scanned_pages.append(page_num + 1)
+            elif text_density > 5:
+                # Good amount of text relative to page size = digital
                 text_pages.append(page_num + 1)
+            elif text_density < 1:
+                # Almost no text = scanned
+                scanned_pages.append(page_num + 1)
             else:
-                # Check if page has images (likely scanned)
-                image_list = page.get_images()
-                if image_list or len(text) < 10:
+                # Ambiguous - check if text is just headers/footers
+                blocks = page.get_text("blocks")
+                # Filter to content area (not top/bottom 10%)
+                content_blocks = [
+                    b for b in blocks
+                    if b[1] > rect.height * 0.1 and b[3] < rect.height * 0.9
+                ]
+                if len(content_blocks) < 2:
+                    # Only header/footer text, no real content = scanned
                     scanned_pages.append(page_num + 1)
                 else:
-                    # Very little text but no images - still count as text page
                     text_pages.append(page_num + 1)
 
         # Determine document type
