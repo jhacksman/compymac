@@ -1,10 +1,22 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { BookOpen, Upload, FileText, Search, Trash2, ChevronLeft, ChevronRight, Image, FileType, Info, Loader2, Copy, Check } from 'lucide-react'
+import { BookOpen, Upload, FileText, Trash2, ChevronLeft, ChevronRight, Image, FileType, Info, Loader2, Copy, Check, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, BookMarked, FolderUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+
+interface NavigationEntry {
+  id: string
+  title: string
+  level: number
+  target: {
+    type: 'pdf_page' | 'epub_href'
+    page?: number
+    href?: string
+  }
+  children?: NavigationEntry[]
+}
 
 interface Document {
   id: string
@@ -18,6 +30,9 @@ interface Document {
   error: string | null
   chunks?: DocumentChunk[]
   metadata?: Record<string, unknown>
+  library_path: string
+  doc_format: 'pdf' | 'epub'
+  navigation: NavigationEntry[]
 }
 
 interface DocumentChunk {
@@ -30,10 +45,183 @@ interface DocumentChunk {
   }
 }
 
+// Tree node types for the library tree
+interface TreeNode {
+  id: string
+  name: string
+  type: 'folder' | 'document' | 'chapter'
+  children?: TreeNode[]
+  document?: Document
+  navEntry?: NavigationEntry
+}
+
 type ViewTab = 'original' | 'ocr' | 'metadata'
 
 interface LibraryPanelProps {
   isMaximized?: boolean
+}
+
+// Build tree structure from flat document list
+function buildLibraryTree(documents: Document[]): TreeNode[] {
+  const root: TreeNode[] = []
+  const folderMap = new Map<string, TreeNode>()
+
+  for (const doc of documents) {
+    const pathParts = doc.library_path.split('/').filter(p => p)
+    let currentLevel = root
+    let currentPath = ''
+
+    // Create folder nodes for each path segment except the last (filename)
+    for (let i = 0; i < pathParts.length - 1; i++) {
+      const part = pathParts[i]
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+
+      let folderNode = folderMap.get(currentPath)
+      if (!folderNode) {
+        folderNode = {
+          id: `folder_${currentPath}`,
+          name: part,
+          type: 'folder',
+          children: [],
+        }
+        folderMap.set(currentPath, folderNode)
+        currentLevel.push(folderNode)
+      }
+      currentLevel = folderNode.children!
+    }
+
+    // Create document node
+    const docNode: TreeNode = {
+      id: doc.id,
+      name: doc.filename,
+      type: 'document',
+      document: doc,
+      children: doc.navigation?.length > 0 ? buildNavigationTree(doc.navigation) : undefined,
+    }
+    currentLevel.push(docNode)
+  }
+
+  return root
+}
+
+// Build navigation tree from navigation entries
+function buildNavigationTree(navigation: NavigationEntry[]): TreeNode[] {
+  return navigation.map(nav => ({
+    id: nav.id,
+    name: nav.title,
+    type: 'chapter' as const,
+    navEntry: nav,
+    children: nav.children ? buildNavigationTree(nav.children) : undefined,
+  }))
+}
+
+// TreeNodeComponent for recursive rendering
+function TreeNodeComponent({
+  node,
+  depth,
+  expandedNodes,
+  toggleExpanded,
+  selectedDocId,
+  onSelectDocument,
+  onSelectNavigation,
+  onDeleteDocument,
+}: {
+  node: TreeNode
+  depth: number
+  expandedNodes: Set<string>
+  toggleExpanded: (id: string) => void
+  selectedDocId: string | null
+  onSelectDocument: (doc: Document) => void
+  onSelectNavigation: (doc: Document, nav: NavigationEntry) => void
+  onDeleteDocument: (docId: string) => void
+}) {
+  const isExpanded = expandedNodes.has(node.id)
+  const hasChildren = node.children && node.children.length > 0
+
+  const handleClick = () => {
+    if (node.type === 'folder') {
+      toggleExpanded(node.id)
+    } else if (node.type === 'document' && node.document) {
+      onSelectDocument(node.document)
+      if (hasChildren) {
+        toggleExpanded(node.id)
+      }
+    } else if (node.type === 'chapter' && node.navEntry) {
+      // Find parent document and navigate
+      // This is handled by the parent component
+    }
+  }
+
+  const Icon = node.type === 'folder' 
+    ? (isExpanded ? FolderOpen : Folder)
+    : node.type === 'document'
+    ? (node.document?.doc_format === 'epub' ? BookMarked : FileText)
+    : BookMarked
+
+  return (
+    <div>
+      <div
+        onClick={handleClick}
+        className={cn(
+          "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-slate-800/50 rounded text-xs",
+          node.type === 'document' && node.document?.id === selectedDocId && "bg-slate-800",
+        )}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      >
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleExpanded(node.id)
+            }}
+            className="p-0.5 text-slate-500 hover:text-white"
+          >
+            {isExpanded ? (
+              <ChevronDown className="w-3 h-3" />
+            ) : (
+              <ChevronRightIcon className="w-3 h-3" />
+            )}
+          </button>
+        ) : (
+          <span className="w-4" />
+        )}
+        <Icon className={cn(
+          "w-3.5 h-3.5 flex-shrink-0",
+          node.type === 'folder' ? "text-yellow-500" : 
+          node.type === 'document' ? "text-purple-400" : "text-slate-400"
+        )} />
+        <span className="truncate text-slate-300">{node.name}</span>
+        {node.type === 'document' && node.document && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDeleteDocument(node.document!.id)
+            }}
+            className="ml-auto p-1 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      {isExpanded && hasChildren && (
+        <div>
+          {node.children!.map(child => (
+            <TreeNodeComponent
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              expandedNodes={expandedNodes}
+              toggleExpanded={toggleExpanded}
+              selectedDocId={selectedDocId}
+              onSelectDocument={onSelectDocument}
+              onSelectNavigation={onSelectNavigation}
+              onDeleteDocument={onDeleteDocument}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
@@ -45,11 +233,27 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [copied, setCopied] = useState(false)
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchDocuments()
   }, [])
+
+  const toggleExpanded = (id: string) => {
+    setExpandedNodes(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const libraryTree = buildLibraryTree(documents)
 
   const fetchDocuments = async () => {
     try {
@@ -87,6 +291,66 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
         fileInputRef.current.value = ''
       }
     }
+  }
+
+  const handleFolderUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files || files.length === 0) return
+
+    setIsUploading(true)
+    const formData = new FormData()
+
+    // Filter for PDF and EPUB files only
+    const validFiles = Array.from(files).filter(f => 
+      f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.epub')
+    )
+
+    if (validFiles.length === 0) {
+      console.error('No PDF or EPUB files found in folder')
+      setIsUploading(false)
+      return
+    }
+
+    // Add files and their relative paths
+    for (const file of validFiles) {
+      formData.append('files', file)
+      // webkitRelativePath contains the folder structure
+      formData.append('relative_paths', (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name)
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/documents/upload-batch`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await response.json()
+      console.log('Batch upload result:', data)
+      await fetchDocuments()
+      // Select the first successfully uploaded document
+      const firstSuccess = data.results?.find((r: { status: string; id: string }) => r.status === 'ready')
+      if (firstSuccess?.id) {
+        await selectDocument(firstSuccess.id)
+      }
+    } catch (error) {
+      console.error('Failed to upload folder:', error)
+    } finally {
+      setIsUploading(false)
+      if (folderInputRef.current) {
+        folderInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleSelectDocument = async (doc: Document) => {
+    await selectDocument(doc.id)
+  }
+
+  const handleSelectNavigation = (doc: Document, nav: NavigationEntry) => {
+    // Navigate to the specific page/chapter
+    if (nav.target.type === 'pdf_page' && nav.target.page) {
+      setCurrentPage(nav.target.page)
+    }
+    // For EPUB, we could implement chapter navigation later
   }
 
   const selectDocument = async (docId: string) => {
@@ -170,21 +434,44 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.epub"
             onChange={handleUpload}
             className="hidden"
           />
+          <input
+            ref={folderInputRef}
+            type="file"
+            // @ts-expect-error webkitdirectory is not in the type definition
+            webkitdirectory=""
+            multiple
+            onChange={handleFolderUpload}
+            className="hidden"
+          />
+          <button
+            onClick={() => folderInputRef.current?.click()}
+            disabled={isUploading}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-colors disabled:opacity-50"
+            title="Upload folder with PDFs and EPUBs"
+          >
+            {isUploading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <FolderUp className="w-3 h-3" />
+            )}
+            Folder
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+            title="Upload single PDF or EPUB"
           >
             {isUploading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <Upload className="w-3 h-3" />
             )}
-            Upload PDF
+            File
           </button>
         </div>
       </div>
@@ -205,39 +492,59 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
             {documents.length === 0 ? (
               <div className="p-4 text-center text-slate-500 text-xs">
                 No documents yet.
+                <p className="mt-1">Upload a PDF/EPUB or folder</p>
               </div>
             ) : (
-              documents
-                .filter(doc => !searchQuery || doc.filename.toLowerCase().includes(searchQuery.toLowerCase()))
-                .map((doc) => (
-                  <div
-                    key={doc.id}
-                    onClick={() => selectDocument(doc.id)}
-                    className={cn(
-                      "p-2 border-b border-slate-700/50 cursor-pointer hover:bg-slate-800/50 transition-colors",
-                      selectedDoc?.id === doc.id && "bg-slate-800"
-                    )}
-                  >
-                    <div className="flex items-start gap-2">
-                      <FileText className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-white truncate">{doc.filename}</p>
-                        <p className="text-xs text-slate-500">
-                          {doc.page_count} pages | {formatFileSize(doc.file_size_bytes)}
-                        </p>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(doc.id)
-                        }}
-                        className="p-1 text-slate-500 hover:text-red-400"
+              <div className="py-1">
+                {/* Filter documents if search query exists */}
+                {searchQuery ? (
+                  // Flat list for search results
+                  documents
+                    .filter(doc => doc.filename.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                                   doc.library_path.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .map((doc) => (
+                      <div
+                        key={doc.id}
+                        onClick={() => selectDocument(doc.id)}
+                        className={cn(
+                          "flex items-center gap-1 py-1 px-2 cursor-pointer hover:bg-slate-800/50 rounded text-xs",
+                          selectedDoc?.id === doc.id && "bg-slate-800"
+                        )}
                       >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))
+                        {doc.doc_format === 'epub' ? (
+                          <BookMarked className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                        ) : (
+                          <FileText className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                        )}
+                        <span className="truncate text-slate-300">{doc.filename}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDelete(doc.id)
+                          }}
+                          className="ml-auto p-1 text-slate-500 hover:text-red-400"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                ) : (
+                  // Tree view for normal browsing
+                  libraryTree.map(node => (
+                    <TreeNodeComponent
+                      key={node.id}
+                      node={node}
+                      depth={0}
+                      expandedNodes={expandedNodes}
+                      toggleExpanded={toggleExpanded}
+                      selectedDocId={selectedDoc?.id || null}
+                      onSelectDocument={handleSelectDocument}
+                      onSelectNavigation={handleSelectNavigation}
+                      onDeleteDocument={handleDelete}
+                    />
+                  ))
+                )}
+              </div>
             )}
           </div>
         </div>
