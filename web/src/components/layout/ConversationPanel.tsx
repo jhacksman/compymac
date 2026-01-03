@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Send, Mic, ChevronRight, User, Bot, Loader2, Wifi, WifiOff } from 'lucide-react'
+import { useState } from 'react'
+import { Send, Mic, ChevronRight, User, Bot, Loader2, Wifi, WifiOff, BookOpen } from 'lucide-react'
 import { useSessionStore, type Message, type ToolCall } from '@/store/session'
 import { cn } from '@/lib/utils'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import type { Citation } from '@/types/citation'
 
 function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
   return (
@@ -21,8 +22,30 @@ function ToolCallItem({ toolCall }: { toolCall: ToolCall }) {
   )
 }
 
+interface CitationChipProps {
+  citation: Citation
+  index: number
+  onClick: (citation: Citation) => void
+}
+
+function CitationChip({ citation, index, onClick }: CitationChipProps) {
+  return (
+    <button
+      onClick={() => onClick(citation)}
+      className="inline-flex items-center gap-1 px-2 py-0.5 
+                 bg-purple-500/20 text-purple-300 rounded text-xs
+                 hover:bg-purple-500/30 transition-colors"
+      title={citation.excerpt}
+    >
+      <BookOpen className="w-3 h-3" />
+      [{index + 1}] {citation.doc_title}
+    </button>
+  )
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user'
+  const { openCitation } = useSessionStore()
 
   return (
     <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
@@ -51,6 +74,18 @@ function MessageBubble({ message }: { message: Message }) {
         )}>
           <p className="text-sm leading-relaxed">{message.content}</p>
         </div>
+        {message.citations && message.citations.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1 text-left">
+            {message.citations.map((citation, i) => (
+              <CitationChip
+                key={citation.chunk_id}
+                citation={citation}
+                index={i}
+                onClick={openCitation}
+              />
+            ))}
+          </div>
+        )}
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mt-2 space-y-1 text-left">
             {message.toolCalls.map((tc) => (

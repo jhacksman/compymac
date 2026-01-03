@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Citation, LibraryJumpRequest } from '@/types/citation'
 
 export interface Message {
   id: string
@@ -6,6 +7,7 @@ export interface Message {
   content: string
   timestamp: Date
   toolCalls?: ToolCall[]
+  citations?: Citation[]
 }
 
 export interface ToolCall {
@@ -57,6 +59,9 @@ interface SessionState {
   
   todos: Todo[]
   
+  // Phase 5: Citation Linking
+  pendingCitationJump: LibraryJumpRequest | null
+  
   maximizedPanel: WorkspacePanel | null
   historySidebarCollapsed: boolean
   autonomyLevel: AutonomyLevel
@@ -86,6 +91,10 @@ interface SessionState {
   saveSession: (sessionId: string, taskDescription?: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<boolean>
   setSessions: (sessions: Session[]) => void
+  
+  // Phase 5: Citation Linking
+  openCitation: (citation: Citation) => void
+  clearPendingCitationJump: () => void
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -105,6 +114,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   terminalControl: 'agent',
   
   todos: [],
+  
+  // Phase 5: Citation Linking
+  pendingCitationJump: null,
   
   maximizedPanel: null,
   historySidebarCollapsed: false,
@@ -261,4 +273,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return false
     }
   },
+  
+  // Phase 5: Citation Linking - Open a citation in the library panel
+  openCitation: (citation: Citation) => {
+    const jumpRequest: LibraryJumpRequest = {
+      docId: citation.doc_id,
+      locator: citation.locator,
+      citation,
+    }
+    set({ pendingCitationJump: jumpRequest })
+  },
+  
+  clearPendingCitationJump: () => set({ pendingCitationJump: null }),
 }))
