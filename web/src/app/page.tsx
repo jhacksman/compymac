@@ -11,7 +11,7 @@ import { useSessionStore } from '@/store/session'
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const { setTodos, setTerminalOutput, setBrowserState, setBrowserControl } = useSessionStore()
+  const { setTodos, setTerminalOutput, setBrowserState, setBrowserControl, setCurrentSession } = useSessionStore()
   
   // Create session on mount
   useEffect(() => {
@@ -22,6 +22,8 @@ export default function Home() {
         })
         const data = await response.json()
         setSessionId(data.id)
+        // Also set in Zustand store so ConversationPanel's WebSocket connects
+        setCurrentSession(data.id)
         // Clear initial mock data
         setTodos([])
         setTerminalOutput([])
@@ -30,11 +32,13 @@ export default function Home() {
       } catch (error) {
         console.error('Failed to create session:', error)
         // Use a fallback session ID for development
-        setSessionId('dev-session-' + Date.now())
+        const fallbackId = 'dev-session-' + Date.now()
+        setSessionId(fallbackId)
+        setCurrentSession(fallbackId)
       }
     }
     createSession()
-  }, [setTodos, setTerminalOutput, setBrowserState, setBrowserControl])
+  }, [setTodos, setTerminalOutput, setBrowserState, setBrowserControl, setCurrentSession])
 
   const {
     runCommand,

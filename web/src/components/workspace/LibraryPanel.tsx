@@ -367,6 +367,15 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
     fetchDocuments()
   }, [])
 
+  // Phase 7: Cleanup highlight on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (highlightCleanup) {
+        highlightCleanup()
+      }
+    }
+  }, [highlightCleanup])
+
   // Phase 7: Clear highlight when changing documents or chapters
   const clearHighlight = useCallback(() => {
     if (highlightCleanup) {
@@ -393,22 +402,20 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
       const cleanup = highlightRange(result.range)
       setHighlightCleanup(() => cleanup)
 
-      // Show match navigator if multiple matches
-      if (result.matchCount > 1) {
+      // Show match navigator for fuzzy matches (to show confidence)
+      // Note: We only show navigation UI when we have multiple matches stored
+      // Currently we only store one match, so prev/next won't work
+      if (result.fallbackUsed === 'fuzzy') {
         setMatchNavigation({
           matches: [{ range: result.range, position: 0 }],
           currentIndex: 0,
           isOpen: true,
           confidence: result.confidence,
         })
-      } else if (result.fallbackUsed === 'fuzzy') {
-        // Show confidence for fuzzy matches
-        setMatchNavigation({
-          matches: [{ range: result.range, position: 0 }],
-          currentIndex: 0,
-          isOpen: true,
-          confidence: result.confidence,
-        })
+      } else if (result.matchCount > 1) {
+        // Multiple matches found but we only have the best one
+        // Show info toast instead of broken navigation
+        setToast({ message: `Found ${result.matchCount} matches. Showing best match.`, type: 'info' })
       }
     } else {
       setToast({ message: "Couldn't locate exact quote. Showing chapter.", type: 'warning' })
@@ -511,15 +518,9 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
     handleCitationJump()
   }, [pendingCitationJump, documents, clearPendingCitationJump, anchorAndHighlightInEpub])
 
-  // Phase 7: Re-anchor when EPUB chapter content changes
-  useEffect(() => {
-    // If we have a pending citation and the chapter just loaded, try to anchor
-    if (epubChapter && pendingCitationJump && isEpubLocator(pendingCitationJump.locator)) {
-      setTimeout(() => {
-        anchorAndHighlightInEpub(pendingCitationJump.locator.selector)
-      }, 100)
-    }
-  }, [epubChapter, pendingCitationJump, anchorAndHighlightInEpub])
+  // Note: Removed duplicate useEffect that was causing double-anchoring.
+  // The first useEffect (handleCitationJump) already handles anchoring after
+  // setting the chapter, so a second effect watching epubChapter was redundant.
 
   const toggleExpanded = (id: string) => {
     setExpandedNodes(prev => {
