@@ -1893,17 +1893,122 @@ async def get_epub_chapter(
     if not str(file_path_resolved).startswith(str(upload_dir)):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Render chapter
+    # Render chapter with document_id for resource URL rewriting
     chapter_data = render_epub_chapter(
         epub_path=file_path,
         href=href,
         chapter_index=chapter_index,
+        document_id=document_id,
     )
 
     if not chapter_data:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
     return chapter_data
+
+
+@app.get("/api/documents/{document_id}/epub/resource")
+async def get_epub_resource(
+    document_id: str,
+    path: str,
+) -> Response:
+    """
+    Serve a resource (image, font, etc.) from an EPUB file.
+
+    Args:
+        document_id: UUID of the document
+        path: Path to the resource within the EPUB (e.g., "Images/cover.jpg")
+
+    Returns:
+        The resource file with appropriate content type
+    """
+    import mimetypes
+    import zipfile
+
+    doc = library_store.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Verify it's an EPUB
+    if doc.doc_format != "epub":
+        raise HTTPException(status_code=400, detail="Document is not an EPUB")
+
+    # Get file path from metadata
+    file_path = doc.metadata.get("file_path")
+    if not file_path:
+        if doc.chunks and doc.chunks[0].get("metadata", {}).get("filepath"):
+            file_path = doc.chunks[0]["metadata"]["filepath"]
+
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    # Security: validate file is in upload directory
+    upload_dir = Path("/tmp/compymac_uploads").resolve()
+    file_path_resolved = Path(file_path).resolve()
+    if not str(file_path_resolved).startswith(str(upload_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Security: prevent path traversal in resource path
+    # Normalize the path and ensure it doesn't escape
+    normalized_path = path.lstrip("/")
+    if ".." in normalized_path or normalized_path.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid resource path")
+
+    # Read resource from EPUB (which is a ZIP file)
+    try:
+        with zipfile.ZipFile(file_path, "r") as epub_zip:
+            # Try to find the resource - EPUBs often have OEBPS or similar prefix
+            resource_data = None
+            tried_paths = []
+
+            # Try exact path first
+            tried_paths.append(normalized_path)
+            try:
+                resource_data = epub_zip.read(normalized_path)
+            except KeyError:
+                pass
+
+            # Try with common EPUB prefixes
+            if resource_data is None:
+                for prefix in ["OEBPS/", "OPS/", "EPUB/", ""]:
+                    try_path = prefix + normalized_path
+                    tried_paths.append(try_path)
+                    try:
+                        resource_data = epub_zip.read(try_path)
+                        break
+                    except KeyError:
+                        continue
+
+            # Try case-insensitive match
+            if resource_data is None:
+                normalized_lower = normalized_path.lower()
+                for name in epub_zip.namelist():
+                    if name.lower().endswith(normalized_lower) or normalized_lower in name.lower():
+                        tried_paths.append(f"case-insensitive: {name}")
+                        resource_data = epub_zip.read(name)
+                        break
+
+            if resource_data is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Resource not found. Tried: {tried_paths}"
+                )
+
+            # Determine content type
+            content_type, _ = mimetypes.guess_type(normalized_path)
+            if content_type is None:
+                content_type = "application/octet-stream"
+
+            return Response(
+                content=resource_data,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},  # Cache for 1 day
+            )
+
+    except zipfile.BadZipFile as e:
+        raise HTTPException(status_code=500, detail="Invalid EPUB file") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read resource: {e}") from e
 
 
 @app.get("/api/documents/{document_id}/epub/chapters")

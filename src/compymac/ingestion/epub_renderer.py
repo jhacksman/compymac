@@ -130,23 +130,32 @@ class EpubRenderer:
     - Sanitizes HTML to remove dangerous elements
     - Scopes CSS to container class to prevent style leakage
     - Handles malformed HTML with lxml recovery mode
+    - Rewrites resource URLs to API endpoint for images/fonts
     """
 
-    def __init__(self, container_class: str = "epub-content"):
+    def __init__(
+        self,
+        container_class: str = "epub-content",
+        api_base_url: str = "http://localhost:8000",
+    ):
         """
         Initialize the renderer.
 
         Args:
             container_class: CSS class to scope styles to
+            api_base_url: Base URL for the API (for resource URL rewriting)
         """
         self.container_class = container_class
+        self.api_base_url = api_base_url
         self._epub_cache: dict[str, Any] = {}  # Cache opened EPUBs
+        self._current_doc_id: str | None = None  # Set during rendering
 
     def get_chapter(
         self,
         epub_path: Path | str,
         href: str | None = None,
         chapter_index: int | None = None,
+        document_id: str | None = None,
     ) -> EpubChapter | None:
         """
         Get a chapter from an EPUB file.
@@ -155,10 +164,13 @@ class EpubRenderer:
             epub_path: Path to the EPUB file
             href: Chapter href (e.g., "chapter1.xhtml")
             chapter_index: Chapter index (0-based), used if href is None
+            document_id: Document ID for resource URL rewriting
 
         Returns:
             EpubChapter with sanitized HTML and scoped CSS, or None if not found
         """
+        # Store document_id for URL rewriting
+        self._current_doc_id = document_id
         if not EBOOKLIB_AVAILABLE or epub is None:
             return None
 
@@ -415,12 +427,18 @@ class EpubRenderer:
             # Remove javascript: URLs
             clean = re.sub(r'href\s*=\s*["\']javascript:[^"\']*["\']', 'href="#"', clean, flags=re.IGNORECASE)
 
-        # Rewrite image URLs to safe endpoint
-        # For now, we'll use data URIs or strip images
-        # TODO: Add image proxy endpoint
+        # Rewrite image URLs to API endpoint
         clean = re.sub(
             r'src\s*=\s*["\']([^"\']+)["\']',
             lambda m: self._rewrite_image_src(m.group(1), epub_path, chapter_href),
+            clean,
+            flags=re.IGNORECASE,
+        )
+
+        # Also rewrite SVG xlink:href attributes (used for embedded images in SVG)
+        clean = re.sub(
+            r'xlink:href\s*=\s*["\']([^"\']+)["\']',
+            lambda m: self._rewrite_xlink_href(m.group(1), epub_path, chapter_href),
             clean,
             flags=re.IGNORECASE,
         )
@@ -434,22 +452,78 @@ class EpubRenderer:
         chapter_href: str,
     ) -> str:
         """
-        Rewrite image src to safe format.
+        Rewrite image src to API endpoint for serving EPUB resources.
 
-        For now, strips external images and keeps data URIs.
-        TODO: Add image proxy endpoint for EPUB internal images.
+        Converts relative paths to absolute API URLs.
         """
+        from urllib.parse import quote, urljoin
+
         # Keep data URIs
         if src.startswith('data:'):
             return f'src="{src}"'
 
-        # Strip external URLs
+        # Strip external URLs for security
         if src.startswith(('http://', 'https://', '//')):
             return 'src=""'
 
-        # For internal images, we'd need an image proxy endpoint
-        # For now, strip them (will be added in later phase)
+        # For internal images, rewrite to API endpoint
+        if self._current_doc_id:
+            # Resolve relative path against chapter href
+            # e.g., chapter_href="Text/chapter1.xhtml", src="../Images/fig1.jpg"
+            # -> resolved_path="Images/fig1.jpg"
+            chapter_dir = str(Path(chapter_href).parent)
+            if chapter_dir == ".":
+                resolved_path = src
+            else:
+                # Use urljoin for proper path resolution
+                resolved_path = urljoin(chapter_href, src)
+                # Remove any leading slashes
+                resolved_path = resolved_path.lstrip("/")
+
+            # Build API URL
+            api_url = f"{self.api_base_url}/api/documents/{self._current_doc_id}/epub/resource?path={quote(resolved_path)}"
+            return f'src="{api_url}"'
+
+        # Fallback: strip if no document ID
         return 'src=""'
+
+    def _rewrite_xlink_href(
+        self,
+        href: str,
+        epub_path: Path,
+        chapter_href: str,
+    ) -> str:
+        """
+        Rewrite SVG xlink:href to API endpoint for serving EPUB resources.
+
+        Used for embedded images in SVG elements.
+        """
+        from urllib.parse import quote, urljoin
+
+        # Keep data URIs
+        if href.startswith('data:'):
+            return f'xlink:href="{href}"'
+
+        # Strip external URLs for security
+        if href.startswith(('http://', 'https://', '//')):
+            return 'xlink:href=""'
+
+        # For internal resources, rewrite to API endpoint
+        if self._current_doc_id:
+            # Resolve relative path against chapter href
+            chapter_dir = str(Path(chapter_href).parent)
+            if chapter_dir == ".":
+                resolved_path = href
+            else:
+                resolved_path = urljoin(chapter_href, href)
+                resolved_path = resolved_path.lstrip("/")
+
+            # Build API URL
+            api_url = f"{self.api_base_url}/api/documents/{self._current_doc_id}/epub/resource?path={quote(resolved_path)}"
+            return f'xlink:href="{api_url}"'
+
+        # Fallback: strip if no document ID
+        return 'xlink:href=""'
 
     def _scope_css(self, css_content: str) -> str:
         """
@@ -524,6 +598,7 @@ def render_epub_chapter(
     epub_path: Path | str,
     href: str | None = None,
     chapter_index: int | None = None,
+    document_id: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Convenience function to render an EPUB chapter.
@@ -532,12 +607,13 @@ def render_epub_chapter(
         epub_path: Path to the EPUB file
         href: Chapter href (e.g., "chapter1.xhtml")
         chapter_index: Chapter index (0-based), used if href is None
+        document_id: Document ID for resource URL rewriting
 
     Returns:
         Dict with chapter data, or None if not found
     """
     renderer = get_epub_renderer()
-    chapter = renderer.get_chapter(epub_path, href, chapter_index)
+    chapter = renderer.get_chapter(epub_path, href, chapter_index, document_id)
     if chapter:
         return chapter.to_dict()
     return None
