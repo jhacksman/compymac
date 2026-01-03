@@ -5,7 +5,7 @@ import { useSessionStore, type Todo } from '@/store/session'
 
 type AgentStatus = 'active' | 'paused' | 'idle' | 'planning' | 'executing' | 'working' | 'error'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8080'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'ws://localhost:8000'
 
 interface TerminalEntry {
   id: string

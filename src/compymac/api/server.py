@@ -227,7 +227,7 @@ def create_session_runtime(session_id: str) -> SessionRuntime:
     agent_config = AgentConfig(
         max_steps=50,
         system_prompt=AGENT_SYSTEM_PROMPT,
-        action_gated=True,  # Agent must call tools
+        action_gated=False,  # Disabled - qwen3 model ignores tool_choice='required'
         require_complete_tool=True,  # Agent must call complete() to finish
         use_menu_system=True,  # Hierarchical tool menu - reduces initial tools to prevent analysis paralysis (arxiv:2504.00914)
         use_guided_templates=False,  # Disabled by default - adds prompt bloat (arxiv:2510.05381)
