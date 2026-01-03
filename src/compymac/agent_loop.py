@@ -51,7 +51,7 @@ Review the available tools. Which tool(s) are relevant to this request?
 - List each potentially relevant tool
 - For each tool, explain why it matches or doesn't match the user's intent
 
-## Step 3: Parameter Extraction  
+## Step 3: Parameter Extraction
 For the selected tool(s), identify the required parameters:
 - What values should each parameter have?
 - Are there any implicit values that need to be inferred?
@@ -413,28 +413,28 @@ class AgentLoop:
         if not response.tool_calls:
             # Guided-Structured Templates: Retry with stronger template on tool_choice violation
             # This implements the curriculum-inspired retry mechanism from arxiv:2509.18076
-            if (self.config.use_guided_templates and 
-                self.config.guided_template_retry and 
-                self.config.action_gated and 
+            if (self.config.use_guided_templates and
+                self.config.guided_template_retry and
+                self.config.action_gated and
                 tools and
                 not getattr(self, '_guided_retry_attempted', False)):
-                
+
                 logger.warning("[GUIDED_TEMPLATES] Tool choice violation detected, retrying with stronger template")
                 self._guided_retry_attempted = True
-                
+
                 # Add the stronger retry template
                 retry_message = Message(
                     role="user",
                     content=f"[TOOL_GUIDANCE_RETRY]: {GUIDED_TOOL_SELECTION_RETRY_TEMPLATE}"
                 )
                 self.state.messages.append(retry_message)
-                
+
                 # Recursive retry - will return from the retry attempt
                 return self.run_step()
-            
+
             # Reset retry flag for next step
             self._guided_retry_attempted = False
-            
+
             self._event_log.log_event(
                 EventType.AGENT_TURN_END,
                 tool_call_id=f"step_{self.state.step_count}",
@@ -449,7 +449,7 @@ class AgentLoop:
                 )
 
             return response.content, []
-        
+
         # Reset retry flag on successful tool call
         self._guided_retry_attempted = False
 
