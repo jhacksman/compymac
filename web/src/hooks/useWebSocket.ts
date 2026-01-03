@@ -35,6 +35,18 @@ interface WebSocketMessage {
       role: 'user' | 'assistant'
       content: string
       timestamp: string
+      citations?: Array<{
+        chunk_id: string
+        doc_id: string
+        doc_title: string
+        excerpt: string
+        locator: {
+          type: string
+          exact: string
+          prefix?: string
+          suffix?: string
+        }
+      }>
     }
     todos?: Array<{
       id: string
@@ -57,6 +69,18 @@ interface WebSocketMessage {
       role: 'user' | 'assistant'
       content: string
       timestamp: string
+      citations?: Array<{
+        chunk_id: string
+        doc_id: string
+        doc_title: string
+        excerpt: string
+        locator: {
+          type: string
+          exact: string
+          prefix?: string
+          suffix?: string
+        }
+      }>
     }
   }>
   error?: string
@@ -112,6 +136,7 @@ export function useWebSocket(sessionId: string | null) {
               role: evt.message.role,
               content: evt.message.content,
               timestamp: new Date(evt.message.timestamp),
+              citations: evt.message.citations,
             })
             setIsStreaming(false)
           } else if (evt.type === 'todos_updated' && evt.todos) {
@@ -161,6 +186,7 @@ export function useWebSocket(sessionId: string | null) {
                 role: evt.message.role,
                 content: evt.message.content,
                 timestamp: new Date(evt.message.timestamp),
+                citations: evt.message.citations,
               })
             }
           })
