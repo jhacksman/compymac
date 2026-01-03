@@ -18,9 +18,17 @@ The librarian tool reduces cognitive load on the main agent by consolidating
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from compymac.citation_types import (
+    Citation,
+    EpubCitationLocator,
+    PdfCitationLocator,
+    TextQuoteSelector,
+)
 
 if TYPE_CHECKING:
     from compymac.llm import LLMClient
@@ -274,26 +282,111 @@ class LibrarianAgent:
             for doc in active_docs
         ]
 
+    def _extract_text_quote_selector(
+        self,
+        content: str,
+        target_len: int = 100,
+    ) -> TextQuoteSelector:
+        """
+        Extract a TextQuoteSelector from content.
+
+        Phase 4 Citation Linking: Creates a text anchor for highlighting
+        the cited text in the source document.
+
+        Args:
+            content: The chunk content to extract selector from
+            target_len: Target length for the exact match text
+
+        Returns:
+            TextQuoteSelector with exact text and optional prefix/suffix
+        """
+        normalized = re.sub(r"\s+", " ", content.strip())
+
+        if len(normalized) <= target_len:
+            return TextQuoteSelector(exact=normalized)
+
+        start = (len(normalized) - target_len) // 2
+        exact = normalized[start : start + target_len]
+
+        prefix_start = max(0, start - 30)
+        prefix = normalized[prefix_start:start].strip() if prefix_start < start else None
+
+        suffix_end = min(len(normalized), start + target_len + 30)
+        suffix = (
+            normalized[start + target_len : suffix_end].strip()
+            if start + target_len < suffix_end
+            else None
+        )
+
+        return TextQuoteSelector(
+            exact=exact.strip(),
+            prefix=prefix if prefix else None,
+            suffix=suffix if suffix else None,
+        )
+
+    def _build_citation_locator(
+        self,
+        chunk: dict[str, Any],
+        doc_format: str,
+    ) -> EpubCitationLocator | PdfCitationLocator:
+        """
+        Build a citation locator from a chunk.
+
+        Phase 4 Citation Linking: Creates a locator that can be used
+        to navigate to and highlight the cited text in the source document.
+
+        Args:
+            chunk: The search result chunk with content and metadata
+            doc_format: Document format ("epub" or "pdf")
+
+        Returns:
+            EpubCitationLocator or PdfCitationLocator
+        """
+        content = chunk.get("content", chunk.get("text", ""))
+        metadata = chunk.get("metadata", {})
+        selector = self._extract_text_quote_selector(content)
+
+        if doc_format == "epub":
+            return EpubCitationLocator(
+                href=metadata.get("href", ""),
+                selector=selector,
+            )
+        else:
+            return PdfCitationLocator(
+                page=metadata.get("page", 1),
+                selector=selector,
+            )
+
     def _build_citations(
         self,
         search_results: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[str]]:
-        """Build citations and excerpts from search results."""
+        """
+        Build citations and excerpts from search results.
+
+        Phase 4 Citation Linking: Now includes locators for each citation
+        to enable navigation and highlighting in source documents.
+        """
         citations = []
         excerpts = []
 
-        for result in search_results[:10]:  # Limit to 10 citations
-            citation = {
-                "doc_id": result.get("doc_id", ""),
-                "doc_title": result.get("doc_title", ""),
-                "page_num": result.get("page", result.get("metadata", {}).get("page")),
-                "chunk_id": result.get("chunk_id", result.get("id", "")),
-                "score": result.get("score", 0.0),
-            }
-            citations.append(citation)
-
-            # Extract excerpt (first 200 chars of content)
+        for result in search_results[:10]:
+            metadata = result.get("metadata", {})
             content = result.get("content", result.get("text", ""))
+            doc_format = metadata.get("format", "pdf")
+
+            locator = self._build_citation_locator(result, doc_format)
+
+            citation = Citation(
+                doc_id=result.get("doc_id", ""),
+                doc_title=result.get("doc_title", ""),
+                chunk_id=result.get("chunk_id", result.get("id", "")),
+                score=result.get("score", 0.0),
+                excerpt=content[:200].strip() + ("..." if len(content) > 200 else ""),
+                locator=locator,
+            )
+            citations.append(citation.to_dict())
+
             if content:
                 excerpt = content[:200].strip()
                 if len(content) > 200:
