@@ -27,7 +27,7 @@ class TextQuoteSelector:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
-        result = {"type": self.type, "exact": self.exact}
+        result: dict = {"type": self.type, "exact": self.exact}
         if self.prefix:
             result["prefix"] = self.prefix
         if self.suffix:
@@ -106,7 +106,6 @@ class PdfCitationLocator:
         )
 
 
-# Type alias for union of locator types
 CitationLocator = EpubCitationLocator | PdfCitationLocator
 
 
@@ -137,7 +136,7 @@ class Citation:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
-        result = {
+        result: dict = {
             "doc_id": self.doc_id,
             "doc_title": self.doc_title,
             "chunk_id": self.chunk_id,
