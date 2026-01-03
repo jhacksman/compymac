@@ -466,12 +466,29 @@ async def handle_send_message(
         planning_phase = True  # Start in planning phase
         planning_reminder_sent = False
 
+        # Collect citations from librarian tool results
+        collected_citations: list[dict[str, Any]] = []
+
         while runtime.agent_loop.state.step_count < max_steps:
             # Run one step in executor (blocking LLM call)
             def run_step() -> tuple[str | None, list]:
                 return runtime.agent_loop.run_step()
 
             text_response, tool_results = await loop.run_in_executor(None, run_step)
+
+            # Extract citations from librarian tool results
+            for result in tool_results:
+                if result.success and result.content:
+                    try:
+                        # Try to parse as JSON (librarian returns JSON)
+                        result_data = json.loads(result.content)
+                        if isinstance(result_data, dict) and "citations" in result_data:
+                            citations = result_data.get("citations", [])
+                            if isinstance(citations, list):
+                                collected_citations.extend(citations)
+                    except (json.JSONDecodeError, TypeError):
+                        # Not JSON or not a librarian result, skip
+                        pass
 
             # Check for todo changes and broadcast
             if runtime.todos_changed():
@@ -526,13 +543,15 @@ async def handle_send_message(
                     final_response = msg.content
                     break
 
-        # Add assistant message
-        assistant_msg = {
+        # Add assistant message with citations if any were collected
+        assistant_msg: dict[str, Any] = {
             "id": str(uuid.uuid4()),
             "role": "assistant",
             "content": final_response or "Task completed.",
             "timestamp": datetime.utcnow().isoformat(),
         }
+        if collected_citations:
+            assistant_msg["citations"] = collected_citations
         runtime.messages.append(assistant_msg)
         await send_event(websocket, "message_complete", {"message": assistant_msg})
 
