@@ -109,11 +109,12 @@ export function ConversationPanel() {
     setInputValue('')
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
     }
+    // Shift+Enter allows default behavior (newline in textarea)
   }
 
   return (
@@ -177,14 +178,20 @@ export function ConversationPanel() {
       </div>
 
       <div className="px-6 py-4 border-t border-slate-800">
-        <div className="flex items-center gap-3 bg-slate-800 rounded-2xl px-4 py-3">
-          <input
-            type="text"
+        <div className="flex items-start gap-3 bg-slate-800 rounded-2xl px-4 py-3">
+          <textarea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type your message..."
-            className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm"
+            rows={1}
+            className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm resize-none min-h-[20px] max-h-[120px] overflow-y-auto"
+            style={{ height: 'auto' }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement
+              target.style.height = 'auto'
+              target.style.height = Math.min(target.scrollHeight, 120) + 'px'
+            }}
           />
           <div className="flex items-center gap-2">
             <button className="p-2 text-slate-400 hover:text-white transition-colors">
