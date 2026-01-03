@@ -13,16 +13,14 @@ Security features:
 
 import html
 import re
-import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 # Try to import lxml for robust HTML parsing
 try:
-    from lxml import etree
-    from lxml.html import HtmlElement, fromstring as lxml_fromstring, tostring as lxml_tostring
     from lxml.html import HTMLParser
+    from lxml.html import fromstring as lxml_fromstring
+    from lxml.html import tostring as lxml_tostring
     LXML_AVAILABLE = True
 except ImportError:
     LXML_AVAILABLE = False
@@ -92,7 +90,7 @@ DANGEROUS_CSS_PROPERTIES = [
 
 class EpubChapter:
     """Represents a rendered EPUB chapter."""
-    
+
     def __init__(
         self,
         href: str,
@@ -108,7 +106,7 @@ class EpubChapter:
         self.css_content = css_content
         self.chapter_index = chapter_index
         self.total_chapters = total_chapters
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -126,24 +124,24 @@ class EpubChapter:
 class EpubRenderer:
     """
     Renders EPUB chapters as sanitized HTML with scoped CSS.
-    
+
     Features:
     - Extracts chapter HTML from EPUB files
     - Sanitizes HTML to remove dangerous elements
     - Scopes CSS to container class to prevent style leakage
     - Handles malformed HTML with lxml recovery mode
     """
-    
+
     def __init__(self, container_class: str = "epub-content"):
         """
         Initialize the renderer.
-        
+
         Args:
             container_class: CSS class to scope styles to
         """
         self.container_class = container_class
         self._epub_cache: dict[str, Any] = {}  # Cache opened EPUBs
-    
+
     def get_chapter(
         self,
         epub_path: Path | str,
@@ -152,36 +150,36 @@ class EpubRenderer:
     ) -> EpubChapter | None:
         """
         Get a chapter from an EPUB file.
-        
+
         Args:
             epub_path: Path to the EPUB file
             href: Chapter href (e.g., "chapter1.xhtml")
             chapter_index: Chapter index (0-based), used if href is None
-        
+
         Returns:
             EpubChapter with sanitized HTML and scoped CSS, or None if not found
         """
         if not EBOOKLIB_AVAILABLE or epub is None:
             return None
-        
+
         epub_path = Path(epub_path)
         if not epub_path.exists():
             return None
-        
+
         try:
             book = epub.read_epub(str(epub_path))
-            
+
             # Get spine items (ordered chapters)
             spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
             if not spine_items:
                 return None
-            
+
             total_chapters = len(spine_items)
-            
+
             # Find the requested chapter
             target_item = None
             target_index = 0
-            
+
             if href is not None:
                 # Find by href
                 for i, item in enumerate(spine_items):
@@ -200,22 +198,22 @@ class EpubRenderer:
                 # Default to first chapter
                 target_item = spine_items[0]
                 target_index = 0
-            
+
             if target_item is None:
                 return None
-            
+
             # Extract and sanitize content
             raw_html = target_item.get_content()
             sanitized_html, extracted_css = self._process_chapter_html(
                 raw_html, epub_path, target_item.get_name()
             )
-            
+
             # Scope CSS
             scoped_css = self._scope_css(extracted_css)
-            
+
             # Get chapter title
             title = self._extract_title(raw_html) or f"Chapter {target_index + 1}"
-            
+
             return EpubChapter(
                 href=target_item.get_name(),
                 title=title,
@@ -224,33 +222,33 @@ class EpubRenderer:
                 chapter_index=target_index,
                 total_chapters=total_chapters,
             )
-            
+
         except Exception as e:
             # Log error but don't crash
             print(f"Error reading EPUB chapter: {e}")
             return None
-    
+
     def get_chapter_list(self, epub_path: Path | str) -> list[dict[str, Any]]:
         """
         Get list of chapters in an EPUB.
-        
+
         Args:
             epub_path: Path to the EPUB file
-        
+
         Returns:
             List of chapter info dicts with href, title, and index
         """
         if not EBOOKLIB_AVAILABLE or epub is None:
             return []
-        
+
         epub_path = Path(epub_path)
         if not epub_path.exists():
             return []
-        
+
         try:
             book = epub.read_epub(str(epub_path))
             spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-            
+
             chapters = []
             for i, item in enumerate(spine_items):
                 raw_html = item.get_content()
@@ -260,12 +258,12 @@ class EpubRenderer:
                     "href": item.get_name(),
                     "title": title,
                 })
-            
+
             return chapters
-            
+
         except Exception:
             return []
-    
+
     def _process_chapter_html(
         self,
         raw_html: bytes,
@@ -274,33 +272,33 @@ class EpubRenderer:
     ) -> tuple[str, str]:
         """
         Process chapter HTML: parse, extract CSS, sanitize.
-        
+
         Args:
             raw_html: Raw HTML bytes from EPUB
             epub_path: Path to EPUB for resource resolution
             chapter_href: Chapter href for relative path resolution
-        
+
         Returns:
             Tuple of (sanitized_html, extracted_css)
         """
         # Parse HTML with tolerance for malformed content
         html_str = self._parse_with_recovery(raw_html)
-        
+
         # Extract inline and embedded CSS
         extracted_css = self._extract_css(html_str)
-        
+
         # Remove style tags from HTML (we'll inject scoped CSS separately)
         html_str = re.sub(r'<style[^>]*>.*?</style>', '', html_str, flags=re.DOTALL | re.IGNORECASE)
-        
+
         # Sanitize HTML
         sanitized = self._sanitize_html(html_str, epub_path, chapter_href)
-        
+
         return sanitized, extracted_css
-    
+
     def _parse_with_recovery(self, raw_html: bytes) -> str:
         """
         Parse HTML with tolerance for malformed content.
-        
+
         Uses lxml recovery mode, falls back to BeautifulSoup, then plain text.
         """
         # Decode bytes
@@ -311,7 +309,7 @@ class EpubRenderer:
                 html_str = raw_html.decode('latin-1')
             except Exception:
                 html_str = raw_html.decode('utf-8', errors='replace')
-        
+
         # Try lxml with recovery mode
         if LXML_AVAILABLE and HTMLParser is not None:
             try:
@@ -321,7 +319,7 @@ class EpubRenderer:
                     remove_pis=True,
                 )
                 doc = lxml_fromstring(html_str, parser=parser)
-                
+
                 # Extract body content if present
                 body = doc.find('.//body')
                 if body is not None:
@@ -329,7 +327,7 @@ class EpubRenderer:
                 return lxml_tostring(doc, encoding='unicode', method='html')
             except Exception:
                 pass
-        
+
         # Fall back to BeautifulSoup
         if BS4_AVAILABLE and BeautifulSoup is not None:
             try:
@@ -347,26 +345,26 @@ class EpubRenderer:
                     return str(soup)
                 except Exception:
                     pass
-        
+
         # Last resort: escape and wrap
         return f"<div>{html.escape(html_str)}</div>"
-    
+
     def _extract_css(self, html_str: str) -> str:
         """Extract CSS from style tags and inline styles."""
         css_parts = []
-        
+
         # Extract from <style> tags
         style_pattern = re.compile(r'<style[^>]*>(.*?)</style>', re.DOTALL | re.IGNORECASE)
         for match in style_pattern.finditer(html_str):
             css_parts.append(match.group(1))
-        
+
         return '\n'.join(css_parts)
-    
+
     def _extract_title(self, raw_html: bytes) -> str | None:
         """Extract title from chapter HTML."""
         try:
             html_str = raw_html.decode('utf-8', errors='replace')
-            
+
             # Try <title> tag
             title_match = re.search(r'<title[^>]*>(.*?)</title>', html_str, re.IGNORECASE | re.DOTALL)
             if title_match:
@@ -375,7 +373,7 @@ class EpubRenderer:
                 title = re.sub(r'<[^>]+>', '', title)
                 if title:
                     return title
-            
+
             # Try first <h1>
             h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', html_str, re.IGNORECASE | re.DOTALL)
             if h1_match:
@@ -383,11 +381,11 @@ class EpubRenderer:
                 title = re.sub(r'<[^>]+>', '', title)
                 if title:
                     return title[:100]  # Limit length
-            
+
             return None
         except Exception:
             return None
-    
+
     def _sanitize_html(
         self,
         html_str: str,
@@ -396,7 +394,7 @@ class EpubRenderer:
     ) -> str:
         """
         Sanitize HTML for safe rendering.
-        
+
         Removes dangerous elements, rewrites resource URLs.
         """
         if BLEACH_AVAILABLE and bleach is not None:
@@ -416,7 +414,7 @@ class EpubRenderer:
             clean = re.sub(r'\s+on\w+\s*=\s*["\'][^"\']*["\']', '', clean, flags=re.IGNORECASE)
             # Remove javascript: URLs
             clean = re.sub(r'href\s*=\s*["\']javascript:[^"\']*["\']', 'href="#"', clean, flags=re.IGNORECASE)
-        
+
         # Rewrite image URLs to safe endpoint
         # For now, we'll use data URIs or strip images
         # TODO: Add image proxy endpoint
@@ -426,9 +424,9 @@ class EpubRenderer:
             clean,
             flags=re.IGNORECASE,
         )
-        
+
         return clean
-    
+
     def _rewrite_image_src(
         self,
         src: str,
@@ -437,76 +435,76 @@ class EpubRenderer:
     ) -> str:
         """
         Rewrite image src to safe format.
-        
+
         For now, strips external images and keeps data URIs.
         TODO: Add image proxy endpoint for EPUB internal images.
         """
         # Keep data URIs
         if src.startswith('data:'):
             return f'src="{src}"'
-        
+
         # Strip external URLs
         if src.startswith(('http://', 'https://', '//')):
             return 'src=""'
-        
+
         # For internal images, we'd need an image proxy endpoint
         # For now, strip them (will be added in later phase)
         return 'src=""'
-    
+
     def _scope_css(self, css_content: str) -> str:
         """
         Scope CSS to container class to prevent style leakage.
-        
+
         Example:
             Input:  "p { margin: 1em; }"
             Output: ".epub-content p { margin: 1em; }"
         """
         if not css_content.strip():
             return ""
-        
+
         # First, sanitize CSS
         sanitized = self._sanitize_css(css_content)
-        
+
         # Parse and scope each rule
         scoped_rules = []
-        
+
         # Simple regex-based CSS parsing
         # Matches: selector { properties }
         rule_pattern = re.compile(r'([^{}]+)\{([^{}]+)\}', re.DOTALL)
-        
+
         for match in rule_pattern.finditer(sanitized):
             selector = match.group(1).strip()
             properties = match.group(2).strip()
-            
+
             # Skip @rules (media queries, font-face, etc.)
             if selector.startswith('@'):
                 continue
-            
+
             # Skip empty rules
             if not properties:
                 continue
-            
+
             # Handle multiple selectors (comma-separated)
             selectors = [s.strip() for s in selector.split(',')]
             scoped_selectors = []
-            
+
             for sel in selectors:
                 if sel:
                     # Scope to container
                     scoped_selectors.append(f".{self.container_class} {sel}")
-            
+
             if scoped_selectors:
                 scoped_rules.append(f"{', '.join(scoped_selectors)} {{ {properties} }}")
-        
+
         return '\n'.join(scoped_rules)
-    
+
     def _sanitize_css(self, css_content: str) -> str:
         """Remove dangerous CSS properties."""
         sanitized = css_content
-        
+
         for pattern in DANGEROUS_CSS_PROPERTIES:
             sanitized = re.sub(pattern + r'[^;]*;?', '', sanitized, flags=re.IGNORECASE)
-        
+
         return sanitized
 
 
@@ -529,12 +527,12 @@ def render_epub_chapter(
 ) -> dict[str, Any] | None:
     """
     Convenience function to render an EPUB chapter.
-    
+
     Args:
         epub_path: Path to the EPUB file
         href: Chapter href (e.g., "chapter1.xhtml")
         chapter_index: Chapter index (0-based), used if href is None
-    
+
     Returns:
         Dict with chapter data, or None if not found
     """
