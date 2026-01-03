@@ -229,8 +229,9 @@ def create_session_runtime(session_id: str) -> SessionRuntime:
         system_prompt=AGENT_SYSTEM_PROMPT,
         action_gated=True,  # Agent must call tools
         require_complete_tool=True,  # Agent must call complete() to finish
-        use_guided_templates=True,  # Guided-Structured Templates (arxiv:2509.18076) for better tool calling
-        guided_template_retry=True,  # Retry with stronger template on tool_choice violation
+        use_menu_system=True,  # Hierarchical tool menu - reduces initial tools to prevent analysis paralysis (arxiv:2504.00914)
+        use_guided_templates=False,  # Disabled by default - adds prompt bloat (arxiv:2510.05381)
+        guided_template_retry=False,  # Disabled with guided templates
     )
 
     # Create agent loop
