@@ -157,6 +157,7 @@ class LLMClient:
             payload["tools"] = tools
             if tool_choice:
                 payload["tool_choice"] = tool_choice
+                logger.info(f"[TOOL_CHOICE] Setting tool_choice={tool_choice} with {len(tools)} tools available")
 
         last_error: Exception | None = None
 
@@ -166,12 +167,23 @@ class LLMClient:
                 time.sleep(self.retry_delay)
 
             logger.debug(f"Sending chat request with {len(messages)} messages (attempt {attempt + 1})")
+            if tools:
+                logger.debug(f"  - Tools: {len(tools)}, tool_choice: {tool_choice}")
 
             try:
                 response = self._client.post("/chat/completions", json=payload)
                 response.raise_for_status()
                 data = response.json()
-                return ChatResponse.from_api_response(data)
+                chat_response = ChatResponse.from_api_response(data)
+
+                # Log warning if tool_choice was "required" but no tool calls were made
+                if tool_choice == "required" and not chat_response.has_tool_calls:
+                    logger.warning(f"[TOOL_CHOICE_VIOLATION] Model ignored tool_choice='required' - "
+                                 f"returned text-only response: {chat_response.content[:100]}")
+                elif tool_choice == "required" and chat_response.has_tool_calls:
+                    logger.debug(f"[TOOL_CHOICE_SUCCESS] Model correctly made {len(chat_response.tool_calls)} tool call(s)")
+
+                return chat_response
 
             except httpx.TimeoutException as e:
                 # Timeout errors are retryable
