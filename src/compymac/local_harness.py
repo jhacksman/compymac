@@ -1278,10 +1278,11 @@ class LocalHarness(Harness):
                 name="menu_enter",
                 description=(
                     "Enter a specific tool mode to access its tools. "
-                    "Available modes: swe (code editing), browser (web automation), "
-                    "git (version control), deploy (deployment), search (web search), "
-                    "ai (AI assistance), data (filesystem). "
-                    "Once in a mode, you can use that mode's tools plus meta-tools."
+                    "Use menu_list to see all available modes and their descriptions. "
+                    "Common modes: swe (coding), library (documents), browser (web UI), "
+                    "search (research), git (version control), ai (AI assistance). "
+                    "Once in a mode, you can use that mode's tools plus meta-tools. "
+                    "Cross-cutting tools like librarian and web_search appear in multiple modes."
                 ),
                 required_params=["mode"],
                 optional_params=[],
