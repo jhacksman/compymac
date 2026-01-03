@@ -1831,6 +1831,108 @@ async def get_document(document_id: str) -> dict[str, Any]:
     return result
 
 
+@app.get("/api/documents/{document_id}/epub/chapter")
+async def get_epub_chapter(
+    document_id: str,
+    href: str | None = None,
+    chapter_index: int | None = None,
+) -> dict[str, Any]:
+    """
+    Get a sanitized EPUB chapter for rendering.
+
+    Args:
+        document_id: UUID of the document
+        href: Chapter href (e.g., "chapter1.xhtml")
+        chapter_index: Chapter index (0-based), used if href is None
+
+    Returns:
+        Sanitized chapter HTML with scoped CSS
+    """
+    from compymac.ingestion.epub_renderer import render_epub_chapter
+
+    doc = library_store.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Verify it's an EPUB
+    if doc.doc_format != "epub":
+        raise HTTPException(status_code=400, detail="Document is not an EPUB")
+
+    # Get file path from metadata
+    file_path = doc.metadata.get("file_path")
+    if not file_path:
+        # Try chunks metadata
+        if doc.chunks and doc.chunks[0].get("metadata", {}).get("filepath"):
+            file_path = doc.chunks[0]["metadata"]["filepath"]
+
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    # Security: validate file is in upload directory
+    upload_dir = Path("/tmp/compymac_uploads").resolve()
+    file_path_resolved = Path(file_path).resolve()
+    if not str(file_path_resolved).startswith(str(upload_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Render chapter
+    chapter_data = render_epub_chapter(
+        epub_path=file_path,
+        href=href,
+        chapter_index=chapter_index,
+    )
+
+    if not chapter_data:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    return chapter_data
+
+
+@app.get("/api/documents/{document_id}/epub/chapters")
+async def list_epub_chapters(document_id: str) -> dict[str, Any]:
+    """
+    List all chapters in an EPUB document.
+
+    Args:
+        document_id: UUID of the document
+
+    Returns:
+        List of chapters with href, title, and index
+    """
+    from compymac.ingestion.epub_renderer import get_epub_renderer
+
+    doc = library_store.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Verify it's an EPUB
+    if doc.doc_format != "epub":
+        raise HTTPException(status_code=400, detail="Document is not an EPUB")
+
+    # Get file path from metadata
+    file_path = doc.metadata.get("file_path")
+    if not file_path:
+        if doc.chunks and doc.chunks[0].get("metadata", {}).get("filepath"):
+            file_path = doc.chunks[0]["metadata"]["filepath"]
+
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    # Security: validate file is in upload directory
+    upload_dir = Path("/tmp/compymac_uploads").resolve()
+    file_path_resolved = Path(file_path).resolve()
+    if not str(file_path_resolved).startswith(str(upload_dir)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    renderer = get_epub_renderer()
+    chapters = renderer.get_chapter_list(file_path)
+
+    return {
+        "document_id": document_id,
+        "chapters": chapters,
+        "count": len(chapters),
+    }
+
+
 @app.get("/api/documents/{document_id}/pages/{page_num}.png")
 async def get_document_page_image(
     document_id: str,

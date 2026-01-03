@@ -57,6 +57,17 @@ interface TreeNode {
 
 type ViewTab = 'original' | 'ocr' | 'metadata'
 
+interface EpubChapter {
+  href: string
+  title: string
+  html: string
+  css: string
+  chapter_index: number
+  total_chapters: number
+  has_prev: boolean
+  has_next: boolean
+}
+
 interface LibraryPanelProps {
   isMaximized?: boolean
 }
@@ -234,6 +245,8 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [copied, setCopied] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
+  const [epubChapter, setEpubChapter] = useState<EpubChapter | null>(null)
+  const [isLoadingChapter, setIsLoadingChapter] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
 
@@ -353,19 +366,58 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
     // For EPUB, we could implement chapter navigation later
   }
 
-  const selectDocument = async (docId: string) => {
-    setIsLoading(true)
-    setCurrentPage(1)
-    try {
-      const response = await fetch(`${API_BASE}/api/documents/${docId}`)
-      const data = await response.json()
-      setSelectedDoc(data)
-    } catch (error) {
-      console.error('Failed to fetch document:', error)
-    } finally {
-      setIsLoading(false)
+    const selectDocument = async (docId: string) => {
+      setIsLoading(true)
+      setCurrentPage(1)
+      setEpubChapter(null)
+      try {
+        const response = await fetch(`${API_BASE}/api/documents/${docId}`)
+        const data = await response.json()
+        setSelectedDoc(data)
+      
+        // If it's an EPUB, load the first chapter
+        if (data.doc_format === 'epub') {
+          await fetchEpubChapter(docId, 0)
+        }
+      } catch (error) {
+        console.error('Failed to fetch document:', error)
+      } finally {
+        setIsLoading(false)
+      }
     }
-  }
+
+    const fetchEpubChapter = async (docId: string, chapterIndex: number) => {
+      setIsLoadingChapter(true)
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/documents/${docId}/epub/chapter?chapter_index=${chapterIndex}`
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setEpubChapter(data)
+        } else {
+          console.error('Failed to fetch EPUB chapter:', response.statusText)
+          setEpubChapter(null)
+        }
+      } catch (error) {
+        console.error('Failed to fetch EPUB chapter:', error)
+        setEpubChapter(null)
+      } finally {
+        setIsLoadingChapter(false)
+      }
+    }
+
+    const handlePrevChapter = () => {
+      if (selectedDoc && epubChapter && epubChapter.has_prev) {
+        fetchEpubChapter(selectedDoc.id, epubChapter.chapter_index - 1)
+      }
+    }
+
+    const handleNextChapter = () => {
+      if (selectedDoc && epubChapter && epubChapter.has_next) {
+        fetchEpubChapter(selectedDoc.id, epubChapter.chapter_index + 1)
+      }
+    }
 
   const handleDelete = async (docId: string) => {
     try {
@@ -629,21 +681,73 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
                   <>
                     {/* Original Page View */}
                     {activeTab === 'original' && (
-                      <div className="flex items-center justify-center p-4 h-full bg-slate-950">
-                        <img
-                          src={`${API_BASE}/api/documents/${selectedDoc.id}/pages/${currentPage}.png`}
-                          alt={`Page ${currentPage}`}
-                          className="max-w-full max-h-full object-contain shadow-lg rounded"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement
-                            target.style.display = 'none'
-                            const parent = target.parentElement
-                            if (parent) {
-                              parent.innerHTML = '<div class="text-slate-500 text-sm">Failed to load page image</div>'
-                            }
-                          }}
-                        />
-                      </div>
+                      selectedDoc.doc_format === 'epub' ? (
+                        <div className="flex flex-col h-full bg-slate-950">
+                          {/* EPUB Chapter Navigation */}
+                          {epubChapter && (
+                            <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700">
+                              <button
+                                onClick={handlePrevChapter}
+                                disabled={!epubChapter.has_prev || isLoadingChapter}
+                                className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <ChevronLeft className="w-4 h-4" />
+                                Prev
+                              </button>
+                              <span className="text-xs text-slate-400">
+                                Chapter {epubChapter.chapter_index + 1} of {epubChapter.total_chapters}
+                                {epubChapter.title && `: ${epubChapter.title}`}
+                              </span>
+                              <button
+                                onClick={handleNextChapter}
+                                disabled={!epubChapter.has_next || isLoadingChapter}
+                                className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Next
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                          {/* EPUB Chapter Content */}
+                          <div className="flex-1 overflow-auto p-4">
+                            {isLoadingChapter ? (
+                              <div className="flex items-center justify-center h-full">
+                                <Loader2 className="w-6 h-6 text-purple-400 animate-spin" />
+                              </div>
+                            ) : epubChapter ? (
+                              <>
+                                {/* Inject scoped CSS */}
+                                <style dangerouslySetInnerHTML={{ __html: epubChapter.css }} />
+                                {/* Render sanitized HTML in scoped container */}
+                                <div 
+                                  className="epub-content prose prose-invert max-w-none"
+                                  dangerouslySetInnerHTML={{ __html: epubChapter.html }}
+                                />
+                              </>
+                            ) : (
+                              <div className="text-slate-500 text-sm text-center">
+                                Failed to load EPUB chapter
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center p-4 h-full bg-slate-950">
+                          <img
+                            src={`${API_BASE}/api/documents/${selectedDoc.id}/pages/${currentPage}.png`}
+                            alt={`Page ${currentPage}`}
+                            className="max-w-full max-h-full object-contain shadow-lg rounded"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement
+                              target.style.display = 'none'
+                              const parent = target.parentElement
+                              if (parent) {
+                                parent.innerHTML = '<div class="text-slate-500 text-sm">Failed to load page image</div>'
+                              }
+                            }}
+                          />
+                        </div>
+                      )
                     )}
 
                     {/* OCR Text View */}
