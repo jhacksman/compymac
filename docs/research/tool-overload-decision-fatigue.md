@@ -124,26 +124,52 @@ Instead of including all tool descriptions in every prompt:
 
 ## Implications for CompyMac
 
-### Current Implementation
+### Current Implementation: Hierarchical Menu System
 
-CompyMac already implements Phase 1 of dynamic tool discovery:
+CompyMac implements a **2-level hierarchical menu system** based on the Manus "Mask, Don't Remove" pattern. Instead of exposing 60+ tools at once (causing decision fatigue), the agent starts with 6 meta-tools at ROOT and drills into specific modes.
 
 ```python
-# Core tools always available
-CORE_TOOLS = ["Read", "Edit", "bash", "message_user", "request_tools"]
+# At ROOT level: only 6 meta-tools visible
+META_TOOLS = ["menu_list", "menu_enter", "menu_exit", "complete", "think", "message_user"]
 
-# Agent requests additional tools as needed
-request_tools(categories=["browser", "git"])
+# Agent enters a mode to access domain-specific tools
+menu_enter("swe")  # Now has 30 SWE tools + 6 meta-tools = 36 tools
 ```
 
-### Recommended Enhancements
+**9 Tool Modes** (see `MENU_SYSTEM_DESIGN.md` for full details):
+
+| Mode | Tools | Purpose |
+|------|-------|---------|
+| swe | 30 | Software engineering (file ops, git, LSP, cross-cutting research) |
+| library | 4 | Document library (librarian, web search) |
+| browser | 16 | Browser automation (all browser_* tools, recording, visual_checker) |
+| search | 7 | Web research (web_search, browser subset, librarian) |
+| git | 19 | Full version control (local + remote git operations) |
+| data | 10 | File management (fs_* tools, grep, glob) |
+| deploy | 5 | Deployment (deploy, CI tools, bash) |
+| ai | 9 | AI assistance (ask_smart_friend, visual_checker, todos) |
+| integrations | 3 | External integrations (mcp_tool, list_secrets, request_tools) |
+
+**Cross-cutting Tools**: General-purpose tools appear in multiple modes where semantically appropriate:
+- `librarian`/`librarian_search`: swe, library, search
+- `web_search`/`web_get_contents`: swe, library, search, ai
+- `ask_smart_friend`: swe, search, ai
+- `bash`/`grep`/`glob`: swe, data, deploy
+
+**Key Design Principles**:
+1. **"Mask, Don't Remove"**: All tools are always registered; visibility is controlled by mode
+2. **Cross-cutting placement**: General tools appear in multiple modes where users expect them
+3. **Mechanical validation**: `validate_tool_coverage()` ensures every registered tool is in at least one mode
+4. **Mode ordering**: Most common modes first (swe, library, browser, search)
+
+### Recommended Future Enhancements
 
 Based on the research, we should consider:
 
 1. **Semantic Tool Retrieval** (from RAG-MCP)
-   - Index tool descriptions
-   - Auto-suggest relevant tools based on task context
-   - Reduce explicit `request_tools` calls
+   - Index tool descriptions in a vector store
+   - Auto-suggest relevant modes based on task context
+   - Could replace explicit `menu_enter` with automatic mode selection
 
 2. **Tool Use Justification** (from SMART)
    - Require agents to justify why a tool is needed
@@ -152,8 +178,8 @@ Based on the research, we should consider:
 
 3. **Cognitive Load Monitoring** (from CoThinker)
    - Track active tool count per agent
-   - Warn when tool set becomes too large
-   - Suggest tool set reduction
+   - Warn when tool set becomes too large (SWE mode has 36 tools - near the threshold)
+   - Suggest mode switching when appropriate
 
 4. **Tool Specialization** (from MSARL)
    - Consider tool-specific sub-agents for complex tools
@@ -163,10 +189,11 @@ Based on the research, we should consider:
 
 | Metric | Description | Target |
 |--------|-------------|--------|
-| Tools per task | Average tools used per completed task | Minimize |
+| Tools per mode | Tools visible in each mode | 7-15 ideal, <20 acceptable |
+| Mode switches per task | How often agents change modes | Minimize |
 | Tool selection accuracy | Correct tool chosen on first try | Maximize |
 | Prompt token overhead | Tokens used for tool schemas | Minimize |
-| Tool request frequency | How often agents request new tools | Monitor |
+| Cross-cutting tool usage | How often cross-cutting tools are used | Monitor |
 
 ---
 
