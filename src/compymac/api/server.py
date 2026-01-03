@@ -2005,10 +2005,10 @@ async def get_epub_resource(
                 headers={"Cache-Control": "public, max-age=86400"},  # Cache for 1 day
             )
 
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=500, detail="Invalid EPUB file")
+    except zipfile.BadZipFile as e:
+        raise HTTPException(status_code=500, detail="Invalid EPUB file") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read resource: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read resource: {e}") from e
 
 
 @app.get("/api/documents/{document_id}/epub/chapters")
