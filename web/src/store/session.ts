@@ -37,7 +37,7 @@ export interface Todo {
 export type WorkspacePanel = 'browser' | 'cli' | 'todos' | 'knowledge'
 export type AutonomyLevel = 'high' | 'medium' | 'low'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface SessionState {
   sessions: Session[]

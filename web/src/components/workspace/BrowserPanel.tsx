@@ -116,7 +116,7 @@ export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl
           <div className="flex-1 bg-white overflow-auto" style={{ height: 'calc(100% - 2rem)' }}>
             {browserScreenshotUrl ? (
               <img 
-                src={`http://localhost:8080${browserScreenshotUrl}`} 
+                src={`http://localhost:8000${browserScreenshotUrl}`} 
                 alt={browserTitle || 'Browser screenshot'} 
                 className="w-full h-auto"
               />

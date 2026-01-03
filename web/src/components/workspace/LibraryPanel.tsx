@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { BookOpen, Upload, FileText, Trash2, ChevronLeft, ChevronRight, Image, FileType, Info, Loader2, Copy, Check, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, BookMarked, FolderUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface NavigationEntry {
   id: string
