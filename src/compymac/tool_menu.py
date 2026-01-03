@@ -333,7 +333,7 @@ class MenuManager:
 
 def get_all_mode_tools() -> set[str]:
     """Get the union of all tools across all modes (excluding META_TOOLS).
-    
+
     This is useful for validation to ensure all registered tools are covered.
     """
     all_tools: set[str] = set()
@@ -344,33 +344,33 @@ def get_all_mode_tools() -> set[str]:
 
 def validate_tool_coverage(registered_tools: set[str]) -> tuple[bool, list[str]]:
     """Validate that all registered tools are in at least one mode.
-    
+
     Args:
         registered_tools: Set of all registered tool names from the harness
-        
+
     Returns:
         Tuple of (is_valid, list_of_unmapped_tools)
-        
+
     This implements the "everything accounted for" principle - every registered
     tool must be reachable through the menu system.
     """
     # Tools that are always visible (META_TOOLS) don't need to be in modes
     meta_tools_set = set(META_TOOLS)
-    
+
     # Get all tools covered by modes
     mode_tools = get_all_mode_tools()
-    
+
     # Tools that are covered = META_TOOLS + all mode tools
     covered_tools = meta_tools_set | mode_tools
-    
+
     # Find unmapped tools (registered but not in any mode or META_TOOLS)
     unmapped = registered_tools - covered_tools
-    
+
     # Filter out tools that are intentionally not in menus:
     # - These are internal/system tools that shouldn't be user-facing
     internal_tools = {
         # None currently - all tools should be accessible
     }
     unmapped = unmapped - internal_tools
-    
-    return len(unmapped) == 0, sorted(list(unmapped))
+
+    return len(unmapped) == 0, sorted(unmapped)
