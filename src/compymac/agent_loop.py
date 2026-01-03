@@ -37,6 +37,51 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Guided-Structured Templates (arxiv:2509.18076)
+# These templates guide the model through deliberate step-by-step reasoning before tool selection.
+# Key insight: Free-form Chain-of-Thought is "insufficient and sometimes counterproductive" for
+# structured function-calling tasks. Curriculum-inspired templates improve tool calling accuracy.
+GUIDED_TOOL_SELECTION_TEMPLATE = """Before responding, follow this structured reasoning process:
+
+## Step 1: Intent Analysis
+What is the user asking for? Identify the core request and any constraints.
+
+## Step 2: Tool Selection
+Review the available tools. Which tool(s) are relevant to this request?
+- List each potentially relevant tool
+- For each tool, explain why it matches or doesn't match the user's intent
+
+## Step 3: Parameter Extraction
+For the selected tool(s), identify the required parameters:
+- What values should each parameter have?
+- Are there any implicit values that need to be inferred?
+
+## Step 4: Execution Plan
+State your plan: "I will call [tool_name] with [parameters] to [achieve goal]"
+
+## Step 5: Execute
+Now make the tool call(s) as planned. You MUST call at least one tool.
+
+IMPORTANT: Do NOT respond with text only. You MUST make a tool call to complete this request."""
+
+# Stronger template for retry after tool_choice violation
+GUIDED_TOOL_SELECTION_RETRY_TEMPLATE = """CRITICAL: Your previous response did not include a tool call. This is REQUIRED.
+
+You MUST call a tool. Follow this exact process:
+
+1. TOOL SELECTION: The user's request requires using one of your available tools.
+   Look at the tools provided and select the most appropriate one.
+
+2. PARAMETER MAPPING: Map the user's request to the tool's parameters.
+
+3. EXECUTE NOW: Make the tool call immediately. Do not explain, do not apologize.
+   Just call the tool with the appropriate parameters.
+
+OUTPUT FORMAT: Your response MUST be a tool call, not text. Example:
+{"name": "tool_name", "arguments": {"param": "value"}}
+
+Make the tool call NOW."""
+
 
 @dataclass
 class AgentConfig:
@@ -69,6 +114,9 @@ class AgentConfig:
     swe_task_description: str = ""  # Task description for workflow
     swe_repo_path: str = ""  # Repository path for workflow
     swe_max_iterations: int = 5  # Max iterations before failing
+    # Guided-Structured Templates (arxiv:2509.18076) - improves tool calling compliance
+    use_guided_templates: bool = False  # If True, inject structured reasoning templates before tool calls
+    guided_template_retry: bool = True  # If True, retry with stronger template on tool_choice violation
 
 
 @dataclass
@@ -252,6 +300,17 @@ class AgentLoop:
         # Convert Message objects to dicts for API serialization
         messages_for_api = [msg.to_dict() for msg in messages_to_send]
 
+        # Guided-Structured Templates (arxiv:2509.18076): Inject structured reasoning template
+        # This guides the model through deliberate step-by-step reasoning before tool selection
+        if self.config.use_guided_templates and tools:
+            # Inject the guided template as a system message before the LLM call
+            guided_message = {
+                "role": "user",
+                "content": f"[TOOL_GUIDANCE]: {GUIDED_TOOL_SELECTION_TEMPLATE}"
+            }
+            messages_for_api.append(guided_message)
+            logger.debug("[GUIDED_TEMPLATES] Injected structured reasoning template")
+
         # Start LLM call span if tracing is enabled
         llm_span_id: str | None = None
         llm_input_artifact_hash: str | None = None
@@ -352,6 +411,30 @@ class AgentLoop:
 
         # If no tool calls, this is a reasoning step - end turn span and return
         if not response.tool_calls:
+            # Guided-Structured Templates: Retry with stronger template on tool_choice violation
+            # This implements the curriculum-inspired retry mechanism from arxiv:2509.18076
+            if (self.config.use_guided_templates and
+                self.config.guided_template_retry and
+                self.config.action_gated and
+                tools and
+                not getattr(self, '_guided_retry_attempted', False)):
+
+                logger.warning("[GUIDED_TEMPLATES] Tool choice violation detected, retrying with stronger template")
+                self._guided_retry_attempted = True
+
+                # Add the stronger retry template
+                retry_message = Message(
+                    role="user",
+                    content=f"[TOOL_GUIDANCE_RETRY]: {GUIDED_TOOL_SELECTION_RETRY_TEMPLATE}"
+                )
+                self.state.messages.append(retry_message)
+
+                # Recursive retry - will return from the retry attempt
+                return self.run_step()
+
+            # Reset retry flag for next step
+            self._guided_retry_attempted = False
+
             self._event_log.log_event(
                 EventType.AGENT_TURN_END,
                 tool_call_id=f"step_{self.state.step_count}",
@@ -366,6 +449,9 @@ class AgentLoop:
                 )
 
             return response.content, []
+
+        # Reset retry flag on successful tool call
+        self._guided_retry_attempted = False
 
         # Execute tool calls through harness (harness handles its own tracing)
         tool_results = []
