@@ -170,7 +170,7 @@ function bitapSearch(
   const patternMask: Record<string, number> = {}
   for (let i = 0; i < m; i++) {
     const char = pattern[i]
-    patternMask[char] = (patternMask[char] || ~0) & ~(1 << i)
+    patternMask[char] = (patternMask[char] ?? ~0) & ~(1 << i)
   }
   
   // Initialize state arrays for each error count
