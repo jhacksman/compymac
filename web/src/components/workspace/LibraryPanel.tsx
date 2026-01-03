@@ -1,8 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { BookOpen, Upload, FileText, Trash2, ChevronLeft, ChevronRight, Image, FileType, Info, Loader2, Copy, Check, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, BookMarked, FolderUp } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { BookOpen, Upload, FileText, Trash2, ChevronLeft, ChevronRight, Image, FileType, Info, Loader2, Copy, Check, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, BookMarked, FolderUp, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useSessionStore } from '@/store/session'
+import { anchorTextQuote, highlightRange } from '@/utils/textAnchoring'
+import type { CitationLocator, MatchNavigationState } from '@/types/citation'
+import { isEpubLocator, isPdfLocator } from '@/types/citation'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -56,6 +60,106 @@ interface TreeNode {
 }
 
 type ViewTab = 'original' | 'ocr' | 'metadata'
+
+// Toast notification component for citation feedback
+interface ToastProps {
+  message: string
+  type: 'info' | 'warning' | 'error'
+  onClose: () => void
+}
+
+function Toast({ message, type, onClose }: ToastProps) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 5000)
+    return () => clearTimeout(timer)
+  }, [onClose])
+
+  const bgColor = type === 'error' ? 'bg-red-500/90' : type === 'warning' ? 'bg-amber-500/90' : 'bg-slate-700/90'
+
+  return (
+    <div className={cn(
+      "fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg text-sm text-white flex items-center gap-2",
+      bgColor
+    )}>
+      <span>{message}</span>
+      <button onClick={onClose} className="p-0.5 hover:bg-white/20 rounded">
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  )
+}
+
+// Match Navigator component for navigating between multiple matches
+interface MatchNavigatorProps {
+  currentMatch: number
+  totalMatches: number
+  onPrevious: () => void
+  onNext: () => void
+  onClose: () => void
+  confidence?: number
+}
+
+function MatchNavigator({
+  currentMatch,
+  totalMatches,
+  onPrevious,
+  onNext,
+  onClose,
+  confidence,
+}: MatchNavigatorProps) {
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+      } else if (e.key === 'n' || e.key === 'ArrowRight') {
+        if (currentMatch < totalMatches) onNext()
+      } else if (e.key === 'p' || e.key === 'ArrowLeft') {
+        if (currentMatch > 1) onPrevious()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentMatch, totalMatches, onNext, onPrevious, onClose])
+
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 rounded-lg shadow-lg px-4 py-2 flex items-center gap-3 text-sm">
+      {confidence !== undefined && confidence < 1 && (
+        <span className="text-amber-400 text-xs">
+          ~{Math.round(confidence * 100)}% match
+        </span>
+      )}
+      <span className="text-slate-300">
+        Match {currentMatch} of {totalMatches}
+      </span>
+      <div className="flex gap-1">
+        <button
+          onClick={onPrevious}
+          disabled={currentMatch === 1}
+          className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"
+          title="Previous match (p)"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onNext}
+          disabled={currentMatch === totalMatches}
+          className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"
+          title="Next match (n)"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+      <button
+        onClick={onClose}
+        className="p-1 hover:bg-slate-700 rounded"
+        title="Close (Escape)"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  )
+}
 
 interface EpubChapter {
   href: string
@@ -249,10 +353,173 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
   const [isLoadingChapter, setIsLoadingChapter] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
+  
+  // Phase 7: Citation jump state
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'warning' | 'error' } | null>(null)
+  const [matchNavigation, setMatchNavigation] = useState<MatchNavigationState | null>(null)
+  const [highlightCleanup, setHighlightCleanup] = useState<(() => void) | null>(null)
+  const epubContentRef = useRef<HTMLDivElement>(null)
+  
+  // Get citation jump request from session store
+  const { pendingCitationJump, clearPendingCitationJump } = useSessionStore()
 
   useEffect(() => {
     fetchDocuments()
   }, [])
+
+  // Phase 7: Clear highlight when changing documents or chapters
+  const clearHighlight = useCallback(() => {
+    if (highlightCleanup) {
+      highlightCleanup()
+      setHighlightCleanup(null)
+    }
+    setMatchNavigation(null)
+  }, [highlightCleanup])
+
+  // Phase 7: Anchor and highlight text in EPUB content
+  const anchorAndHighlightInEpub = useCallback((selector: { type: string; exact: string; prefix?: string; suffix?: string }) => {
+    if (!epubContentRef.current) {
+      setToast({ message: "Couldn't locate exact quote. Showing chapter.", type: 'warning' })
+      return
+    }
+
+    // Clear any existing highlight
+    clearHighlight()
+
+    // Anchor the text
+    const result = anchorTextQuote(epubContentRef.current, selector)
+
+    if (result.found && result.range) {
+      const cleanup = highlightRange(result.range)
+      setHighlightCleanup(() => cleanup)
+
+      // Show match navigator if multiple matches
+      if (result.matchCount > 1) {
+        setMatchNavigation({
+          matches: [{ range: result.range, position: 0 }],
+          currentIndex: 0,
+          isOpen: true,
+          confidence: result.confidence,
+        })
+      } else if (result.fallbackUsed === 'fuzzy') {
+        // Show confidence for fuzzy matches
+        setMatchNavigation({
+          matches: [{ range: result.range, position: 0 }],
+          currentIndex: 0,
+          isOpen: true,
+          confidence: result.confidence,
+        })
+      }
+    } else {
+      setToast({ message: "Couldn't locate exact quote. Showing chapter.", type: 'warning' })
+    }
+  }, [clearHighlight])
+
+  // Phase 7: Handle citation jump request
+  useEffect(() => {
+    if (!pendingCitationJump) return
+
+    const handleCitationJump = async () => {
+      const { docId, locator, citation } = pendingCitationJump
+
+      // Check if document exists
+      const doc = documents.find(d => d.id === docId)
+      if (!doc) {
+        // Try to fetch the document
+        try {
+          const response = await fetch(`${API_BASE}/api/documents/${docId}`)
+          if (!response.ok) {
+            setToast({ message: 'Document no longer available', type: 'error' })
+            clearPendingCitationJump()
+            return
+          }
+        } catch {
+          setToast({ message: 'Document no longer available', type: 'error' })
+          clearPendingCitationJump()
+          return
+        }
+      }
+
+      // Switch to original tab for viewing
+      setActiveTab('original')
+
+      if (isEpubLocator(locator)) {
+        // EPUB: Navigate to chapter and highlight
+        setIsLoading(true)
+        try {
+          // First, select the document
+          const docResponse = await fetch(`${API_BASE}/api/documents/${docId}`)
+          const docData = await docResponse.json()
+          setSelectedDoc(docData)
+
+          // Find chapter by href
+          const response = await fetch(
+            `${API_BASE}/api/documents/${docId}/epub/chapter?href=${encodeURIComponent(locator.href)}`
+          )
+          if (response.ok) {
+            const chapterData = await response.json()
+            setEpubChapter(chapterData)
+
+            // Wait for content to render, then anchor
+            setTimeout(() => {
+              anchorAndHighlightInEpub(locator.selector)
+            }, 100)
+          } else {
+            // Fallback: try to load first chapter
+            const fallbackResponse = await fetch(
+              `${API_BASE}/api/documents/${docId}/epub/chapter?chapter_index=0`
+            )
+            if (fallbackResponse.ok) {
+              const chapterData = await fallbackResponse.json()
+              setEpubChapter(chapterData)
+              setToast({ message: "Couldn't find chapter. Showing first chapter.", type: 'warning' })
+            } else {
+              setToast({ message: 'Failed to load EPUB chapter', type: 'error' })
+            }
+          }
+        } catch (error) {
+          console.error('Failed to navigate to EPUB citation:', error)
+          setToast({ message: 'Failed to navigate to citation', type: 'error' })
+        } finally {
+          setIsLoading(false)
+        }
+      } else if (isPdfLocator(locator)) {
+        // PDF: Navigate to page
+        try {
+          const docResponse = await fetch(`${API_BASE}/api/documents/${docId}`)
+          const docData = await docResponse.json()
+          setSelectedDoc(docData)
+
+          // Navigate to page
+          const page = locator.page
+          if (page > 0 && page <= docData.page_count) {
+            setCurrentPage(page)
+            setToast({ message: `Showing page ${page}`, type: 'info' })
+          } else {
+            setCurrentPage(1)
+            setToast({ message: 'Page not found in document. Showing page 1.', type: 'warning' })
+          }
+        } catch (error) {
+          console.error('Failed to navigate to PDF citation:', error)
+          setToast({ message: 'Failed to navigate to citation', type: 'error' })
+        }
+      }
+
+      clearPendingCitationJump()
+    }
+
+    handleCitationJump()
+  }, [pendingCitationJump, documents, clearPendingCitationJump, anchorAndHighlightInEpub])
+
+  // Phase 7: Re-anchor when EPUB chapter content changes
+  useEffect(() => {
+    // If we have a pending citation and the chapter just loaded, try to anchor
+    if (epubChapter && pendingCitationJump && isEpubLocator(pendingCitationJump.locator)) {
+      setTimeout(() => {
+        anchorAndHighlightInEpub(pendingCitationJump.locator.selector)
+      }, 100)
+    }
+  }, [epubChapter, pendingCitationJump, anchorAndHighlightInEpub])
 
   const toggleExpanded = (id: string) => {
     setExpandedNodes(prev => {
@@ -720,6 +987,7 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
                                 <style dangerouslySetInnerHTML={{ __html: epubChapter.css }} />
                                 {/* Render sanitized HTML in scoped container */}
                                 <div 
+                                  ref={epubContentRef}
                                   className="epub-content prose prose-invert max-w-none"
                                   dangerouslySetInnerHTML={{ __html: epubChapter.html }}
                                 />
@@ -839,6 +1107,44 @@ export function LibraryPanel({ isMaximized }: LibraryPanelProps) {
           )}
         </div>
       </div>
+
+      {/* Phase 7: Toast notifications */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Phase 7: Match navigator for multiple matches */}
+      {matchNavigation && matchNavigation.isOpen && (
+        <MatchNavigator
+          currentMatch={matchNavigation.currentIndex + 1}
+          totalMatches={matchNavigation.matches.length}
+          onPrevious={() => {
+            if (matchNavigation.currentIndex > 0) {
+              setMatchNavigation({
+                ...matchNavigation,
+                currentIndex: matchNavigation.currentIndex - 1,
+              })
+            }
+          }}
+          onNext={() => {
+            if (matchNavigation.currentIndex < matchNavigation.matches.length - 1) {
+              setMatchNavigation({
+                ...matchNavigation,
+                currentIndex: matchNavigation.currentIndex + 1,
+              })
+            }
+          }}
+          onClose={() => {
+            clearHighlight()
+            setMatchNavigation(null)
+          }}
+          confidence={matchNavigation.confidence}
+        />
+      )}
     </div>
   )
 }
