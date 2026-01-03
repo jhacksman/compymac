@@ -8,23 +8,22 @@ This document specifies the design for citation linking in CompyMac's document l
 
 > As a user reviewing AI-generated responses with citations, I want to click on a citation and immediately see the exact passage being referenced, so I can verify the source and understand the context.
 
-**Success Metric:** Citation click lands user at the expected location in under 1 second, with unmistakable visual confirmation (yellow highlight for EPUB, page navigation for PDF).
+**Success Metric:** Citation click lands user at the expected location in under 1 second, with unmistakable visual confirmation (yellow highlight for both EPUB and PDF when text search succeeds, page navigation as fallback for PDF).
 
 ## Goals and Non-Goals
 
 ### Goals
 
 1. **EPUB highlighting**: Click citation → navigate to chapter → highlight exact quoted text
-2. **PDF page navigation**: Click citation → navigate to correct page (no text highlighting)
+2. **PDF highlighting with fallback**: Click citation → attempt text search and highlight → fall back to page navigation if search fails (e.g., scanned/image-only PDFs)
 3. **Graceful degradation**: Clear feedback when exact location cannot be found
 4. **Minimal latency**: Sub-second navigation from click to highlighted view
 
 ### Non-Goals
 
-1. PDF text highlighting (unreliable for scanned documents, requires OCR coordinate mapping)
-2. Cross-document citation linking (linking between documents)
-3. Annotation persistence (saving user highlights/notes)
-4. EPUB CFI generation at index time (complex, brittle without full reader integration)
+1. Cross-document citation linking (linking between documents)
+2. Annotation persistence (saving user highlights/notes)
+3. EPUB CFI generation at index time (complex, brittle without full reader integration)
 
 ## Current Architecture Analysis
 
@@ -57,8 +56,9 @@ EPUBs require a fundamentally different rendering approach than PDFs:
 |--------|-----|------|
 | Original view | PNG image (works) | PNG image (broken) |
 | Text layer | Embedded or OCR | Native HTML |
-| Highlighting | Requires coordinate overlay | DOM manipulation |
+| Highlighting | Text search on page (may fail for scanned PDFs) | DOM manipulation (reliable) |
 | Navigation unit | Page number | Spine item href |
+| Fallback behavior | Page-level navigation if text search fails | Chapter-level navigation if text not found |
 
 ## Proposed Solution
 
@@ -113,9 +113,10 @@ interface CitationLocator {
   href: string                    // Spine item href (e.g., "chapter3.xhtml")
   selector: TextQuoteSelector
   
-  // For PDF
-  type: 'pdf_page'
-  page: number
+  // For PDF (attempt highlighting, fallback to page navigation)
+  type: 'pdf_text'
+  page: number                    // Page number for navigation/fallback
+  selector: TextQuoteSelector     // For text search and highlighting
 }
 
 interface Citation {
@@ -179,18 +180,20 @@ def _build_citation_locator(self, chunk: dict, doc_format: str) -> dict:
     content = chunk.get("content", "")
     metadata = chunk.get("metadata", {})
     
+    # Extract TextQuoteSelector for both formats (used for highlighting)
+    selector = self._extract_text_quote_selector(content)
+    
     if doc_format == "epub":
-        # Extract TextQuoteSelector from middle of content
-        selector = self._extract_text_quote_selector(content)
         return {
             "type": "epub_text",
             "href": metadata.get("href", ""),
             "selector": selector,
         }
-    else:  # PDF
+    else:  # PDF - include selector for highlighting, page for fallback
         return {
-            "type": "pdf_page",
+            "type": "pdf_text",
             "page": metadata.get("page", 1),
+            "selector": selector,
         }
 
 def _extract_text_quote_selector(self, content: str, target_len: int = 100) -> dict:
@@ -409,11 +412,11 @@ interface SessionState {
 5. LibraryPanel:
    a. Opens document (if not already open)
    b. For EPUB: fetches chapter HTML, renders, anchors text, highlights
-   c. For PDF: navigates to page
+   c. For PDF: navigates to page, attempts text search and highlight, falls back to page-only if search fails
    ↓
 6. clearLibraryJumpRequest() called
    ↓
-7. User sees highlighted passage (EPUB) or page (PDF)
+7. User sees highlighted passage (EPUB or PDF with text layer) or page (PDF fallback)
 ```
 
 **Failure States:**
@@ -421,6 +424,8 @@ interface SessionState {
 | Scenario | User Feedback |
 |----------|---------------|
 | EPUB text not found | Toast: "Couldn't locate exact quote. Showing chapter." + scroll to chapter top |
+| PDF text search succeeds | Yellow highlight on matched text (same as EPUB) |
+| PDF text search fails (scanned/image PDF) | Toast: "Text highlighting unavailable for this PDF. Showing page." + navigate to page |
 | Multiple matches found | Highlight first match, show badge: "2 other matches" with navigation arrows |
 | PDF page out of range | Toast: "Page not found in document" + show page 1 |
 | Document not in library | Toast: "Document no longer available" |
@@ -551,12 +556,12 @@ def validate_epub_path(epub_path: Path, requested_href: str) -> Path | None:
 
 **Decision:** Not suitable for primary mechanism. Could be used as enhancement for "copy link to citation" feature.
 
-### PDF.js Text Layer Highlighting
+### PDF.js for Advanced PDF Rendering
 
-**Pros:** Would enable PDF text highlighting
-**Cons:** Requires PDF.js integration, text layer positioning is complex, doesn't work for scanned PDFs
+**Pros:** Full PDF rendering control, text layer access, annotation support
+**Cons:** Large dependency, complex integration, overkill for basic text search
 
-**Decision:** Out of scope for MVP. PDF page navigation is sufficient.
+**Decision:** Use existing PyMuPDF text extraction + frontend text search for MVP. The current approach (search extracted text on page, highlight if found, fallback to page navigation) is simpler and sufficient. Consider PDF.js only if we need advanced features like annotation persistence or precise coordinate-based highlighting.
 
 ## Rollout Plan
 
