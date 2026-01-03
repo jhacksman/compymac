@@ -479,16 +479,23 @@ async def handle_send_message(
             # Extract citations from librarian tool results
             for result in tool_results:
                 if result.success and result.content:
-                    try:
-                        # Try to parse as JSON (librarian returns JSON)
-                        result_data = json.loads(result.content)
-                        if isinstance(result_data, dict) and "citations" in result_data:
-                            citations = result_data.get("citations", [])
-                            if isinstance(citations, list):
-                                collected_citations.extend(citations)
-                    except (json.JSONDecodeError, TypeError):
-                        # Not JSON or not a librarian result, skip
-                        pass
+                    content = result.content
+                    # Tool results are wrapped in XML tags like <tool-result name="librarian">...</tool-result>
+                    # Extract the JSON content from inside the tags
+                    import re
+                    librarian_match = re.search(r'<tool-result name="librarian">\s*(.*?)\s*</tool-result>', content, re.DOTALL)
+                    if librarian_match:
+                        json_content = librarian_match.group(1).strip()
+                        try:
+                            result_data = json.loads(json_content)
+                            if isinstance(result_data, dict) and "citations" in result_data:
+                                citations = result_data.get("citations", [])
+                                if isinstance(citations, list) and citations:
+                                    print(f"[CITATION DEBUG] Found {len(citations)} citations from librarian", flush=True)
+                                    collected_citations.extend(citations)
+                        except (json.JSONDecodeError, TypeError) as e:
+                            print(f"[CITATION DEBUG] JSON parse failed for librarian: {e}", flush=True)
+                            pass
 
             # Check for todo changes and broadcast
             if runtime.todos_changed():
