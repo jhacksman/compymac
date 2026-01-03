@@ -2,6 +2,9 @@
 Document Chunker for splitting documents into memory units.
 
 Provides configurable chunking with overlap for context preservation.
+
+Phase 3 Citation Linking: Supports mapping chunks to source chapters
+via chapter_ranges metadata for EPUB citation linking.
 """
 
 import re
@@ -19,6 +22,31 @@ class Chunk:
     start_char: int
     end_char: int
     metadata: dict[str, Any]
+
+
+def find_chapter_for_position(
+    char_pos: int,
+    chapter_ranges: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """
+    Find the chapter that contains a given character position.
+
+    Used for mapping chunks back to their source EPUB spine items
+    for citation linking.
+
+    Args:
+        char_pos: Character position in the full text
+        chapter_ranges: List of chapter range dicts with start_char, end_char, href
+
+    Returns:
+        Chapter dict if found, None otherwise
+    """
+    for chapter in chapter_ranges:
+        start = chapter.get("start_char", 0)
+        end = chapter.get("end_char", 0)
+        if start <= char_pos < end:
+            return chapter
+    return None
 
 
 class DocumentChunker:
@@ -61,10 +89,14 @@ class DocumentChunker:
         """
         Split text into chunks.
 
+        Phase 3 Citation Linking: If metadata contains 'chapter_ranges' (from EPUB parsing),
+        each chunk will include 'href' and 'chapter_title' from its source chapter.
+
         Args:
             text: Text to chunk
             doc_id: Optional document ID for chunk IDs
             metadata: Optional metadata to include in each chunk
+                      May include 'chapter_ranges' for EPUB citation linking
 
         Returns:
             List of Chunk objects
@@ -74,6 +106,9 @@ class DocumentChunker:
 
         doc_id = doc_id or str(uuid.uuid4())
         metadata = metadata or {}
+
+        # Extract chapter_ranges for citation linking (Phase 3)
+        chapter_ranges = metadata.get("chapter_ranges", [])
 
         # Split into sentences first
         sentences = self._split_sentences(text)
@@ -89,17 +124,18 @@ class DocumentChunker:
 
             # If adding this sentence would exceed chunk size
             if len(current_chunk) + sentence_len > self.chunk_size and current_chunk:
+                # Build chunk metadata with chapter info if available
+                chunk_metadata = self._build_chunk_metadata(
+                    metadata, doc_id, len(chunks), current_start, chapter_ranges
+                )
+
                 # Save current chunk
                 chunks.append(Chunk(
                     id=f"{doc_id}-{len(chunks)}",
                     content=current_chunk.strip(),
                     start_char=current_start,
                     end_char=char_pos,
-                    metadata={
-                        **metadata,
-                        "chunk_index": len(chunks),
-                        "doc_id": doc_id,
-                    },
+                    metadata=chunk_metadata,
                 ))
 
                 # Start new chunk with overlap
@@ -114,16 +150,15 @@ class DocumentChunker:
         # Add final chunk if it meets minimum size
         if current_chunk.strip():
             if len(current_chunk.strip()) >= self.min_chunk_size or not chunks:
+                chunk_metadata = self._build_chunk_metadata(
+                    metadata, doc_id, len(chunks), current_start, chapter_ranges
+                )
                 chunks.append(Chunk(
                     id=f"{doc_id}-{len(chunks)}",
                     content=current_chunk.strip(),
                     start_char=current_start,
                     end_char=char_pos,
-                    metadata={
-                        **metadata,
-                        "chunk_index": len(chunks),
-                        "doc_id": doc_id,
-                    },
+                    metadata=chunk_metadata,
                 ))
             elif chunks:
                 # Merge with previous chunk if too small
@@ -137,6 +172,46 @@ class DocumentChunker:
                 )
 
         return chunks
+
+    def _build_chunk_metadata(
+        self,
+        base_metadata: dict[str, Any],
+        doc_id: str,
+        chunk_index: int,
+        start_char: int,
+        chapter_ranges: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Build metadata for a chunk, including chapter info for citation linking.
+
+        Args:
+            base_metadata: Base metadata from document
+            doc_id: Document ID
+            chunk_index: Index of this chunk
+            start_char: Starting character position of chunk
+            chapter_ranges: List of chapter ranges from EPUB parsing
+
+        Returns:
+            Chunk metadata dict with href/chapter_title if available
+        """
+        chunk_metadata: dict[str, Any] = {
+            **base_metadata,
+            "chunk_index": chunk_index,
+            "doc_id": doc_id,
+        }
+
+        # Remove chapter_ranges from chunk metadata (it's document-level, not chunk-level)
+        chunk_metadata.pop("chapter_ranges", None)
+
+        # Add chapter info if available (Phase 3 Citation Linking)
+        if chapter_ranges:
+            chapter = find_chapter_for_position(start_char, chapter_ranges)
+            if chapter:
+                chunk_metadata["href"] = chapter.get("href", "")
+                chunk_metadata["chapter_title"] = chapter.get("chapter_title")
+                chunk_metadata["chapter_index"] = chapter.get("chapter_index")
+
+        return chunk_metadata
 
     def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""

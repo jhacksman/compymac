@@ -558,22 +558,52 @@ class DocumentParser:
     def _parse_with_ebooklib(
         self, file_path: Path, metadata: dict[str, Any]
     ) -> ParseResult:
-        """Parse EPUB using EbookLib with chapter extraction."""
+        """Parse EPUB using EbookLib with chapter extraction and href tracking.
+
+        Phase 3 Citation Linking: Tracks href and character ranges for each chapter
+        to enable mapping chunks back to their source spine items for citation linking.
+        """
         if epub is None or ebooklib is None or BeautifulSoup is None:
             raise ValueError("EbookLib or BeautifulSoup not available")
 
         book = epub.read_epub(str(file_path))
 
-        # Extract text from each spine item (chapter)
+        # Extract text from each spine item (chapter) with href tracking
         chapters_text = []
+        chapter_ranges: list[dict[str, Any]] = []
         chapter_count = 0
+        current_pos = 0
 
         for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+            href = item.get_name()
             soup = BeautifulSoup(item.get_content(), "html.parser")
             text = soup.get_text(separator="\n", strip=True)
+
             if text:
                 chapter_count += 1
-                chapters_text.append(f"--- Chapter {chapter_count} ---\n{text}")
+                chapter_header = f"--- Chapter {chapter_count} ---\n"
+                chapter_content = chapter_header + text
+
+                # Track chapter range for citation linking
+                chapter_start = current_pos
+                chapter_end = current_pos + len(chapter_content)
+
+                # Try to extract chapter title from HTML
+                chapter_title = None
+                title_tag = soup.find(["h1", "h2", "title"])
+                if title_tag:
+                    chapter_title = title_tag.get_text(strip=True)
+
+                chapter_ranges.append({
+                    "href": href,
+                    "chapter_index": chapter_count,
+                    "chapter_title": chapter_title,
+                    "start_char": chapter_start,
+                    "end_char": chapter_end,
+                })
+
+                chapters_text.append(chapter_content)
+                current_pos = chapter_end + 2  # +2 for "\n\n" separator
 
         full_text = "\n\n".join(chapters_text)
 
@@ -598,6 +628,7 @@ class DocumentParser:
                 "chapter_count": chapter_count,
                 "epub_title": title,
                 "epub_author": author,
+                "chapter_ranges": chapter_ranges,
             },
             format="epub",
         )
