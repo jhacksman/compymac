@@ -110,7 +110,7 @@ class PdfCitationLocator:
 class WebCitationLocator:
     """
     Web Citation Locator - for opening external URLs in a new browser tab.
-    
+
     Used when the agent browses web pages and wants to cite them.
     """
 

@@ -498,7 +498,7 @@ async def handle_send_message(
                         except (json.JSONDecodeError, TypeError) as e:
                             print(f"[CITATION DEBUG] JSON parse failed for librarian: {e}", flush=True)
                             pass
-                    
+
                     # Extract web citations from browser tool results
                     # Browser tools append __WEB_CITATIONS__: {...} to their output
                     web_citations_match = re.search(r'__WEB_CITATIONS__:\s*(\[.*?\])', content, re.DOTALL)

@@ -1340,7 +1340,6 @@ class LocalHarness(Harness):
         from datetime import UTC, datetime
 
         from compymac.browser import SyncBrowserService
-        from compymac.citation_types import Citation, WebCitationLocator
 
         # Lazy initialization of browser service
         if not hasattr(self, "_browser_service"):
@@ -1384,7 +1383,7 @@ class LocalHarness(Harness):
             if page_state:
                 # Add citation for this page
                 citation_num = _add_web_citation(page_state.url, page_state.title)
-                
+
                 elements_info = "\n".join(
                     f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
@@ -1414,7 +1413,7 @@ class LocalHarness(Harness):
                     citation_num = existing["num"]
                 else:
                     citation_num = _add_web_citation(page_state.url, page_state.title)
-                
+
                 elements_info = "\n".join(
                     f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
