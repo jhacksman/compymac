@@ -221,6 +221,9 @@ def create_session_runtime(session_id: str) -> SessionRuntime:
     # Enable Library tools for document search and retrieval (Phase 1 RAG integration)
     harness.register_library_tools(library_store, session_id)
 
+    # Enable Browser tools for web automation and citation generation
+    harness.register_browser_tools()
+
     llm_client = get_llm_client()
 
     # Create agent config with system prompt
@@ -466,10 +469,9 @@ async def handle_send_message(
         planning_phase = True  # Start in planning phase
         planning_reminder_sent = False
 
-        # Collect citations from librarian tool results
+        # Collect citations from librarian and browser tool results
+        # Web citations are converted to Citation format with WebCitationLocator
         collected_citations: list[dict[str, Any]] = []
-        # Collect web citations from browser tool results
-        collected_web_citations: list[dict[str, Any]] = []
 
         while runtime.agent_loop.state.step_count < max_steps:
             # Run one step in executor (blocking LLM call)
@@ -501,18 +503,38 @@ async def handle_send_message(
 
                     # Extract web citations from browser tool results
                     # Browser tools append __WEB_CITATIONS__: {...} to their output
+                    # Convert to Citation format with WebCitationLocator for chip rendering
                     web_citations_match = re.search(r'__WEB_CITATIONS__:\s*(\[.*?\])', content, re.DOTALL)
                     if web_citations_match:
                         try:
-                            web_citations = json.loads(web_citations_match.group(1))
-                            if isinstance(web_citations, list) and web_citations:
-                                print(f"[WEB CITATION DEBUG] Found {len(web_citations)} web citations", flush=True)
-                                # Merge with existing, avoiding duplicates by URL
-                                existing_urls = {c.get("url") for c in collected_web_citations}
-                                for wc in web_citations:
-                                    if wc.get("url") not in existing_urls:
-                                        collected_web_citations.append(wc)
-                                        existing_urls.add(wc.get("url"))
+                            raw_web_citations = json.loads(web_citations_match.group(1))
+                            if isinstance(raw_web_citations, list) and raw_web_citations:
+                                print(f"[WEB CITATION DEBUG] Found {len(raw_web_citations)} web citations", flush=True)
+                                # Convert to Citation format with WebCitationLocator
+                                existing_urls = {
+                                    c.get("locator", {}).get("url")
+                                    for c in collected_citations
+                                    if c.get("locator", {}).get("type") == "web_url"
+                                }
+                                for wc in raw_web_citations:
+                                    url = wc.get("url", "")
+                                    if url and url not in existing_urls:
+                                        # Convert to Citation format matching librarian citations
+                                        citation = {
+                                            "doc_id": f"web:{url}",
+                                            "doc_title": wc.get("title", url),
+                                            "chunk_id": f"web:{wc.get('num', 1)}",
+                                            "score": 1.0,
+                                            "excerpt": wc.get("title", url),
+                                            "locator": {
+                                                "type": "web_url",
+                                                "url": url,
+                                                "title": wc.get("title", ""),
+                                                "retrieved_at": wc.get("retrieved_at", ""),
+                                            }
+                                        }
+                                        collected_citations.append(citation)
+                                        existing_urls.add(url)
                         except (json.JSONDecodeError, TypeError) as e:
                             print(f"[WEB CITATION DEBUG] JSON parse failed: {e}", flush=True)
                             pass
@@ -579,8 +601,6 @@ async def handle_send_message(
         }
         if collected_citations:
             assistant_msg["citations"] = collected_citations
-        if collected_web_citations:
-            assistant_msg["webCitations"] = collected_web_citations
         runtime.messages.append(assistant_msg)
         await send_event(websocket, "message_complete", {"message": assistant_msg})
 
