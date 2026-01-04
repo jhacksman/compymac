@@ -118,6 +118,8 @@ TOOL_MODES: dict[str, ToolMode] = {
             "recording_start", "recording_stop",
             # Cross-cutting: visual verification
             "visual_checker",
+            # Cross-cutting: task management (agents often want to plan before browsing)
+            "TodoCreate", "TodoRead",
         ],
         description="You are interacting with a live web application in a real browser to test, verify, or automate user interactions. Your goal is to navigate pages, interact with UI elements, and verify that the application behaves correctly from a user's perspective. This mode provides tools to navigate to URLs, view page content with screenshots, click elements, type text, scroll pages, execute JavaScript, and record screen for UI testing. Use this when you need to test a web UI, verify visual appearance, automate form submissions, or investigate how a web application behaves. Remember: Use browser_view after navigation to see what's on the page, prefer clicking elements by devinid over coordinates, and use recording_start/stop for UI testing evidence.",
     ),
@@ -133,6 +135,8 @@ TOOL_MODES: dict[str, ToolMode] = {
             "librarian", "librarian_search",
             # Cross-cutting: AI for research questions
             "ask_smart_friend",
+            # Cross-cutting: task management (research tasks often benefit from planning)
+            "TodoCreate", "TodoRead",
         ],
         description="You are researching information on the web or in the document library to find documentation, answers, or current information. Your goal is to find relevant, accurate information efficiently and extract what's needed for the task. This mode provides tools to search the web, fetch webpage content, navigate to documentation sites, and search the document library. Use this when you need to find error message solutions, read API documentation, research library usage, or search uploaded documents. Remember: Start with web_search for online content or librarian for uploaded documents, then use web_get_contents for simple pages or browser_navigate for complex sites.",
     ),

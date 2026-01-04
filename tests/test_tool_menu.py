@@ -73,8 +73,11 @@ class TestToolMode:
         assert "browser_click" in browser_mode.tool_list
         assert "recording_start" in browser_mode.tool_list
         assert "visual_checker" in browser_mode.tool_list
-        # Browser mode has 16 tools
-        assert len(browser_mode.tool_list) == 16
+        # Cross-cutting: task management tools
+        assert "TodoCreate" in browser_mode.tool_list
+        assert "TodoRead" in browser_mode.tool_list
+        # Browser mode has 18 tools (16 core + 2 cross-cutting todo tools)
+        assert len(browser_mode.tool_list) == 18
 
     def test_git_mode_tools(self):
         """Test that git mode has both local and remote tools."""
@@ -102,8 +105,11 @@ class TestToolMode:
         assert "web_get_contents" in search_mode.tool_list
         assert "browser_navigate" in search_mode.tool_list  # Cross-mode tool
         assert "librarian" in search_mode.tool_list  # Cross-mode tool
-        # Search mode has 7 tools
-        assert len(search_mode.tool_list) == 7
+        # Cross-cutting: task management tools
+        assert "TodoCreate" in search_mode.tool_list
+        assert "TodoRead" in search_mode.tool_list
+        # Search mode has 9 tools (7 core + 2 cross-cutting todo tools)
+        assert len(search_mode.tool_list) == 9
 
     def test_ai_mode_tools(self):
         """Test that AI mode has the expected tools."""
