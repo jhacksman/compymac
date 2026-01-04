@@ -319,7 +319,7 @@ class AgentLoop:
             current_mode = menu_manager.current_mode
             if current_mode is None:
                 # At ROOT - remind agent to select a mode
-                available_modes = list(menu_manager.modes.keys())
+                available_modes = menu_manager.get_available_modes()
                 menu_state_message = {
                     "role": "system",
                     "content": (
