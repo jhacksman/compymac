@@ -29,16 +29,44 @@ interface CitationChipProps {
 }
 
 function CitationChip({ citation, index, onClick }: CitationChipProps) {
+  // Check if this is a web citation (locator.type === 'web_url')
+  const isWebCitation = citation.locator?.type === 'web_url'
+  
+  const handleClick = () => {
+    if (isWebCitation && citation.locator && 'url' in citation.locator) {
+      // Open URL in new browser tab for web citations
+      window.open(citation.locator.url, '_blank', 'noopener,noreferrer')
+    }
+    onClick(citation)
+  }
+
+  // Extract domain for web citations
+  const displayTitle = (() => {
+    if (isWebCitation && citation.locator && 'url' in citation.locator) {
+      try {
+        return new URL(citation.locator.url).hostname.replace('www.', '')
+      } catch {
+        return citation.doc_title
+      }
+    }
+    return citation.doc_title
+  })()
+
   return (
     <button
-      onClick={() => onClick(citation)}
-      className="inline-flex items-center gap-1 px-2 py-0.5 
-                 bg-purple-500/20 text-purple-300 rounded text-xs
-                 hover:bg-purple-500/30 transition-colors"
-      title={citation.excerpt}
+      onClick={handleClick}
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors",
+        isWebCitation
+          ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
+          : "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30"
+      )}
+      title={isWebCitation && citation.locator && 'url' in citation.locator 
+        ? `${citation.doc_title}\n${citation.locator.url}` 
+        : citation.excerpt}
     >
-      <BookOpen className="w-3 h-3" />
-      [{index + 1}] {citation.doc_title}
+      {isWebCitation ? <Globe className="w-3 h-3" /> : <BookOpen className="w-3 h-3" />}
+      [{index + 1}] {displayTitle}
     </button>
   )
 }
