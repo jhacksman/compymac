@@ -428,6 +428,38 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
             del active_connections[session_id]
 
 
+def _detect_browser_intent(content: str) -> bool:
+    """Detect if user message indicates browser/navigation intent.
+    
+    This enables automatic mode selection so the agent sees browser tools
+    without needing to manually call menu_enter("browser").
+    """
+    import re
+    content_lower = content.lower()
+    
+    # Check for URLs (http/https)
+    if re.search(r'https?://', content):
+        return True
+    
+    # Check for navigation verbs
+    navigation_verbs = [
+        "navigate", "browse", "open", "visit", "go to", "load",
+        "check out", "look at", "view the page", "view the site",
+        "view the website", "open the url", "open url"
+    ]
+    for verb in navigation_verbs:
+        if verb in content_lower:
+            return True
+    
+    # Check for browser-related nouns
+    browser_nouns = ["website", "webpage", "web page", "browser", "url"]
+    for noun in browser_nouns:
+        if noun in content_lower:
+            return True
+    
+    return False
+
+
 async def handle_send_message(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
@@ -437,10 +469,19 @@ async def handle_send_message(
     1. Planning gate: Agent must create todos before executing other tools
     2. Proper termination: Check harness.is_completion_signaled() after each step
     3. Real-time streaming: Broadcast todo updates as agent works
+    4. Auto-mode selection: Detect intent and enter appropriate mode before LLM call
     """
     content = message.get("content", "")
     if not content:
         return
+
+    # Auto-mode selection: Enter browser mode if user wants navigation
+    # This ensures browser tools are visible to the LLM without manual menu_enter
+    if _detect_browser_intent(content):
+        menu_manager = runtime.harness.get_menu_manager()
+        if menu_manager.current_mode != "browser":
+            menu_manager.enter_mode("browser")
+            print(f"[AUTO-MODE] Detected browser intent, entered browser mode", flush=True)
 
     # Add user message
     user_msg = {
