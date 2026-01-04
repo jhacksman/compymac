@@ -586,7 +586,7 @@ async def handle_send_message(
         # Get final response - prioritize message_user content over LLM's internal response
         # The message_user tool stores the full message in an outbox for the server to retrieve
         final_response = runtime.harness.get_last_message_user_content()
-        
+
         # Fall back to completion answer or last assistant message if no message_user was called
         if not final_response:
             final_response = runtime.agent_loop.state.final_response
