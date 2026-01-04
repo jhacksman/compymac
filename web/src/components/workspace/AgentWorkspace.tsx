@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Settings, Globe, Terminal, CheckSquare, Share2, BookOpen } from 'lucide-react'
 import { BrowserPanel } from './BrowserPanel'
 import { TerminalPanel } from './TerminalPanel'
@@ -8,8 +7,9 @@ import { TodosPanel } from './TodosPanel'
 import { KnowledgeGraphPanel } from './KnowledgeGraphPanel'
 import { LibraryPanel } from './LibraryPanel'
 import { cn } from '@/lib/utils'
+import { useSessionStore, type WorkspaceTab } from '@/store/session'
 
-type TabId = 'browser' | 'cli' | 'todos' | 'knowledge' | 'library'
+type TabId = WorkspaceTab
 
 interface Tab {
   id: TabId
@@ -55,7 +55,8 @@ export function AgentWorkspace({
   onEditTodo,
   onDeleteTodo,
 }: AgentWorkspaceProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('browser')
+  // Use store's tab state so openCitation can switch to library tab
+  const { activeWorkspaceTab: activeTab, setActiveWorkspaceTab: setActiveTab } = useSessionStore()
 
   return (
     <div className="flex flex-col h-full bg-slate-950">
