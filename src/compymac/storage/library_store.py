@@ -361,15 +361,23 @@ class LibraryStore:
             else:
                 combined_score = keyword_score
 
+            # Include chunk metadata and doc_format for citation locator building
+            chunk_metadata = chunk.get("metadata", {})
             results.append({
                 "document_id": doc.id,
                 "document_title": doc.title,
                 "chunk_id": chunk_id,
                 "content": chunk.get("content", ""),
-                "page": chunk.get("metadata", {}).get("page", 0),
+                "page": chunk_metadata.get("page", 0),
                 "score": combined_score,
                 "vector_score": vector_score,
                 "keyword_score": keyword_score,
+                # Include metadata for citation locator building (EPUB href, format, etc.)
+                "metadata": {
+                    **chunk_metadata,
+                    "format": doc.doc_format,  # "epub" or "pdf"
+                },
+                "doc_format": doc.doc_format,
             })
 
         # Sort by combined score and return top_k
