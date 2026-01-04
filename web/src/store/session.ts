@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import type { Citation, LibraryJumpRequest } from '@/types/citation'
 
+export interface WebCitation {
+  num: number
+  url: string
+  title: string
+  retrieved_at: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -8,6 +15,7 @@ export interface Message {
   timestamp: Date
   toolCalls?: ToolCall[]
   citations?: Citation[]
+  webCitations?: WebCitation[]
 }
 
 export interface ToolCall {

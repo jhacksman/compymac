@@ -468,6 +468,8 @@ async def handle_send_message(
 
         # Collect citations from librarian tool results
         collected_citations: list[dict[str, Any]] = []
+        # Collect web citations from browser tool results
+        collected_web_citations: list[dict[str, Any]] = []
 
         while runtime.agent_loop.state.step_count < max_steps:
             # Run one step in executor (blocking LLM call)
@@ -495,6 +497,24 @@ async def handle_send_message(
                                     collected_citations.extend(citations)
                         except (json.JSONDecodeError, TypeError) as e:
                             print(f"[CITATION DEBUG] JSON parse failed for librarian: {e}", flush=True)
+                            pass
+
+                    # Extract web citations from browser tool results
+                    # Browser tools append __WEB_CITATIONS__: {...} to their output
+                    web_citations_match = re.search(r'__WEB_CITATIONS__:\s*(\[.*?\])', content, re.DOTALL)
+                    if web_citations_match:
+                        try:
+                            web_citations = json.loads(web_citations_match.group(1))
+                            if isinstance(web_citations, list) and web_citations:
+                                print(f"[WEB CITATION DEBUG] Found {len(web_citations)} web citations", flush=True)
+                                # Merge with existing, avoiding duplicates by URL
+                                existing_urls = {c.get("url") for c in collected_web_citations}
+                                for wc in web_citations:
+                                    if wc.get("url") not in existing_urls:
+                                        collected_web_citations.append(wc)
+                                        existing_urls.add(wc.get("url"))
+                        except (json.JSONDecodeError, TypeError) as e:
+                            print(f"[WEB CITATION DEBUG] JSON parse failed: {e}", flush=True)
                             pass
 
             # Check for todo changes and broadcast
@@ -559,6 +579,8 @@ async def handle_send_message(
         }
         if collected_citations:
             assistant_msg["citations"] = collected_citations
+        if collected_web_citations:
+            assistant_msg["webCitations"] = collected_web_citations
         runtime.messages.append(assistant_msg)
         await send_event(websocket, "message_complete", {"message": assistant_msg})
 

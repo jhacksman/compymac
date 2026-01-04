@@ -106,7 +106,40 @@ class PdfCitationLocator:
         )
 
 
-CitationLocator = EpubCitationLocator | PdfCitationLocator
+@dataclass
+class WebCitationLocator:
+    """
+    Web Citation Locator - for opening external URLs in a new browser tab.
+
+    Used when the agent browses web pages and wants to cite them.
+    """
+
+    type: Literal["web_url"] = "web_url"
+    url: str = ""
+    title: str = ""
+    retrieved_at: str = ""  # ISO timestamp
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "type": self.type,
+            "url": self.url,
+            "title": self.title,
+            "retrieved_at": self.retrieved_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WebCitationLocator":
+        """Create from dictionary."""
+        return cls(
+            type=data.get("type", "web_url"),
+            url=data.get("url", ""),
+            title=data.get("title", ""),
+            retrieved_at=data.get("retrieved_at", ""),
+        )
+
+
+CitationLocator = EpubCitationLocator | PdfCitationLocator | WebCitationLocator
 
 
 def parse_citation_locator(data: dict) -> CitationLocator | None:
@@ -116,6 +149,8 @@ def parse_citation_locator(data: dict) -> CitationLocator | None:
         return EpubCitationLocator.from_dict(data)
     elif locator_type == "pdf_text":
         return PdfCitationLocator.from_dict(data)
+    elif locator_type == "web_url":
+        return WebCitationLocator.from_dict(data)
     return None
 
 
@@ -170,3 +205,8 @@ def is_epub_locator(locator: CitationLocator) -> bool:
 def is_pdf_locator(locator: CitationLocator) -> bool:
     """Type guard for PDF locator."""
     return isinstance(locator, PdfCitationLocator)
+
+
+def is_web_locator(locator: CitationLocator) -> bool:
+    """Type guard for Web URL locator."""
+    return isinstance(locator, WebCitationLocator)

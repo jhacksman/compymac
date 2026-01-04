@@ -49,9 +49,24 @@ export interface PdfCitationLocator {
 }
 
 /**
+ * Web Citation Locator - for opening external URLs in a new browser tab.
+ * 
+ * Used when the agent browses web pages and wants to cite them.
+ */
+export interface WebCitationLocator {
+  type: 'web_url'
+  /** The URL to open */
+  url: string
+  /** Page title for display */
+  title: string
+  /** ISO timestamp when the page was retrieved */
+  retrieved_at: string
+}
+
+/**
  * Union type for all citation locator types.
  */
-export type CitationLocator = EpubCitationLocator | PdfCitationLocator
+export type CitationLocator = EpubCitationLocator | PdfCitationLocator | WebCitationLocator
 
 /**
  * Full citation with document reference and locator.
@@ -127,4 +142,11 @@ export function isEpubLocator(locator: CitationLocator): locator is EpubCitation
  */
 export function isPdfLocator(locator: CitationLocator): locator is PdfCitationLocator {
   return locator.type === 'pdf_text'
+}
+
+/**
+ * Type guard for Web URL locator.
+ */
+export function isWebLocator(locator: CitationLocator): locator is WebCitationLocator {
+  return locator.type === 'web_url'
 }

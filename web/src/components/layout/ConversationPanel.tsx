@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Send, Mic, ChevronRight, User, Bot, Loader2, Wifi, WifiOff, BookOpen } from 'lucide-react'
-import { useSessionStore, type Message, type ToolCall } from '@/store/session'
+import { Send, Mic, ChevronRight, User, Bot, Loader2, Wifi, WifiOff, BookOpen, Globe } from 'lucide-react'
+import { useSessionStore, type Message, type ToolCall, type WebCitation } from '@/store/session'
 import { cn } from '@/lib/utils'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import type { Citation } from '@/types/citation'
@@ -39,6 +39,41 @@ function CitationChip({ citation, index, onClick }: CitationChipProps) {
     >
       <BookOpen className="w-3 h-3" />
       [{index + 1}] {citation.doc_title}
+    </button>
+  )
+}
+
+interface WebCitationChipProps {
+  citation: WebCitation
+  onClick: (citation: WebCitation) => void
+}
+
+function WebCitationChip({ citation, onClick }: WebCitationChipProps) {
+  const handleClick = () => {
+    // Open URL in new browser tab
+    window.open(citation.url, '_blank', 'noopener,noreferrer')
+    onClick(citation)
+  }
+
+  // Extract domain for display
+  const domain = (() => {
+    try {
+      return new URL(citation.url).hostname.replace('www.', '')
+    } catch {
+      return citation.url
+    }
+  })()
+
+  return (
+    <button
+      onClick={handleClick}
+      className="inline-flex items-center gap-1 px-2 py-0.5 
+                 bg-blue-500/20 text-blue-300 rounded text-xs
+                 hover:bg-blue-500/30 transition-colors"
+      title={`${citation.title}\n${citation.url}`}
+    >
+      <Globe className="w-3 h-3" />
+      [{citation.num}] {domain}
     </button>
   )
 }
@@ -82,6 +117,17 @@ function MessageBubble({ message }: { message: Message }) {
                 citation={citation}
                 index={i}
                 onClick={openCitation}
+              />
+            ))}
+          </div>
+        )}
+        {message.webCitations && message.webCitations.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1 text-left">
+            {message.webCitations.map((webCitation) => (
+              <WebCitationChip
+                key={`web-${webCitation.num}`}
+                citation={webCitation}
+                onClick={() => {}}
               />
             ))}
           </div>

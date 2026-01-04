@@ -1336,17 +1336,43 @@ class LocalHarness(Harness):
 
     def register_browser_tools(self) -> None:
         """Register browser automation tools using SyncBrowserService."""
+        import json
+        from datetime import UTC, datetime
+
         from compymac.browser import SyncBrowserService
 
         # Lazy initialization of browser service
         if not hasattr(self, "_browser_service"):
             self._browser_service: SyncBrowserService | None = None
 
+        # Track web citations for numbering [1], [2], etc.
+        if not hasattr(self, "_web_citations"):
+            self._web_citations: list[dict] = []
+
         def _ensure_browser() -> SyncBrowserService:
             if self._browser_service is None:
                 self._browser_service = SyncBrowserService()
                 self._browser_service.initialize()
             return self._browser_service
+
+        def _add_web_citation(url: str, title: str) -> int:
+            """Add a web citation and return its number (1-indexed)."""
+            timestamp = datetime.now(UTC).isoformat()
+            citation_num = len(self._web_citations) + 1
+            citation = {
+                "num": citation_num,
+                "url": url,
+                "title": title,
+                "retrieved_at": timestamp,
+            }
+            self._web_citations.append(citation)
+            return citation_num
+
+        def _format_citation_block() -> str:
+            """Format all web citations as a JSON block for the frontend."""
+            if not self._web_citations:
+                return ""
+            return f"\n\n__WEB_CITATIONS__: {json.dumps(self._web_citations)}"
 
         def browser_navigate(url: str, tab_idx: int | None = None) -> str:
             browser = _ensure_browser()
@@ -1355,11 +1381,20 @@ class LocalHarness(Harness):
                 return f"Error: {result.error}"
             page_state = result.page_state
             if page_state:
+                # Add citation for this page
+                citation_num = _add_web_citation(page_state.url, page_state.title)
+
                 elements_info = "\n".join(
                     f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
                 )
-                return f"Navigated to {url}\n\nPage title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
+                return (
+                    f"Navigated to {url} [{citation_num}]\n\n"
+                    f"Page title: {page_state.title}\n"
+                    f"URL: {page_state.url}\n\n"
+                    f"Interactive elements:\n{elements_info}"
+                    f"{_format_citation_block()}"
+                )
             return f"Navigated to {url}"
 
         def browser_view(tab_idx: int | None = None, reload_window: bool = False) -> str:
@@ -1369,11 +1404,26 @@ class LocalHarness(Harness):
                 return f"Error: {result.error}"
             page_state = result.page_state
             if page_state:
+                # Check if we already have a citation for this URL
+                existing = next(
+                    (c for c in self._web_citations if c["url"] == page_state.url),
+                    None
+                )
+                if existing:
+                    citation_num = existing["num"]
+                else:
+                    citation_num = _add_web_citation(page_state.url, page_state.title)
+
                 elements_info = "\n".join(
                     f"  [{e.element_id}] {e.tag}: {e.text[:50] if e.text else ''}"
                     for e in page_state.elements[:20]
                 )
-                return f"Page title: {page_state.title}\nURL: {page_state.url}\n\nInteractive elements:\n{elements_info}"
+                return (
+                    f"Page title: {page_state.title} [{citation_num}]\n"
+                    f"URL: {page_state.url}\n\n"
+                    f"Interactive elements:\n{elements_info}"
+                    f"{_format_citation_block()}"
+                )
             return "No page content available"
 
         def browser_click(

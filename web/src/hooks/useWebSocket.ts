@@ -26,6 +26,13 @@ interface BrowserState {
   }>
 }
 
+interface WebCitationData {
+  num: number
+  url: string
+  title: string
+  retrieved_at: string
+}
+
 interface WebSocketMessage {
   type: string
   event?: {
@@ -47,6 +54,7 @@ interface WebSocketMessage {
           suffix?: string
         }
       }>
+      webCitations?: WebCitationData[]
     }
     todos?: Array<{
       id: string
@@ -81,6 +89,7 @@ interface WebSocketMessage {
           suffix?: string
         }
       }>
+      webCitations?: WebCitationData[]
     }
   }>
   error?: string
@@ -137,6 +146,7 @@ export function useWebSocket(sessionId: string | null) {
               content: evt.message.content,
               timestamp: new Date(evt.message.timestamp),
               citations: evt.message.citations,
+              webCitations: evt.message.webCitations,
             })
             setIsStreaming(false)
           } else if (evt.type === 'todos_updated' && evt.todos) {
@@ -187,6 +197,7 @@ export function useWebSocket(sessionId: string | null) {
                 content: evt.message.content,
                 timestamp: new Date(evt.message.timestamp),
                 citations: evt.message.citations,
+                webCitations: evt.message.webCitations,
               })
             }
           })
