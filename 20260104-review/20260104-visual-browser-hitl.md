@@ -87,30 +87,9 @@ Key findings:
 
 ### 1.3 Technical Architecture Patterns
 
-#### Pattern 1: VNC + noVNC (Browser-Use MCP Server)
+#### Pattern 1: Screenshot Polling (Recommended for macOS)
 
-From github.com/co-browser/browser-use-mcp-server:
-
-Architecture:
-```
-Docker Container
-├── Xvfb (X Virtual Framebuffer) - virtual display
-├── Openbox (window manager)
-├── Chromium (browser)
-├── Playwright/Puppeteer (automation)
-├── x11vnc (captures display, streams over network)
-└── noVNC (HTML5 client for browser viewing)
-```
-
-Benefits:
-- User can view browser in any web browser via noVNC
-- Full interaction capability (click, type, scroll)
-- Works with any browser automation library
-- Containerized and portable
-
-#### Pattern 2: Screenshot Polling
-
-Simple approach used by many agents:
+Simple approach used by many agents, works natively on any platform including macOS:
 ```
 while task_running:
     screenshot = browser.screenshot()
@@ -122,31 +101,65 @@ Benefits:
 - Simple to implement
 - Low bandwidth
 - Works with headless browsers
+- No external dependencies
+- Native macOS support
 
 Drawbacks:
-- Not real-time
-- No interaction capability
+- Not real-time (~2-5 FPS typical)
+- No direct interaction capability (requires action routing)
 - Latency in feedback
 
-#### Pattern 3: CDP (Chrome DevTools Protocol) Streaming
+#### Pattern 2: CDP (Chrome DevTools Protocol) Streaming (Recommended for Real-Time)
 
-Used by some advanced implementations:
-```
-cdp_session.send("Page.startScreencast", {
-    format: "jpeg",
-    quality: 80,
-    everyNthFrame: 1
+Used by advanced implementations, works natively with Chromium on macOS:
+```python
+# Playwright CDP access
+cdp_session = await page.context.new_cdp_session(page)
+await cdp_session.send("Page.startScreencast", {
+    "format": "jpeg",
+    "quality": 80,
+    "everyNthFrame": 1
 })
+
+# Handle frames
+cdp_session.on("Page.screencastFrame", handle_frame)
 ```
 
 Benefits:
-- Real-time frame streaming
+- Real-time frame streaming (10-30 FPS)
 - Lower latency than polling
-- Native Chrome support
+- Native Chromium support (no external dependencies)
+- Works on macOS natively
 
-#### Pattern 4: WebRTC Streaming
+Drawbacks:
+- Chromium-only (not Firefox/WebKit)
+- Requires CDP session management
 
-Most advanced approach for real-time streaming:
+#### Pattern 3: Headful Mode with Action Routing (Recommended for Takeover)
+
+For human takeover on macOS, use headful Playwright with action routing through the existing API:
+```python
+# Run browser in headful mode on macOS
+config = BrowserConfig(mode=BrowserMode.HEADFUL)
+browser = BrowserService(config)
+
+# User sees the actual browser window on their Mac
+# Actions routed through existing click/type/scroll endpoints
+```
+
+Benefits:
+- User sees real browser window (no streaming needed if local)
+- Full interaction via existing Playwright tools
+- No VNC/Docker complexity
+- Native macOS experience
+
+Drawbacks:
+- Only works when agent runs on user's machine
+- Requires UI to route user actions to Playwright
+
+#### Pattern 4: WebRTC Streaming (Future Enhancement)
+
+Most advanced approach for remote real-time streaming:
 ```
 Browser → WebRTC → User's Browser
 ```
@@ -159,6 +172,7 @@ Benefits:
 Drawbacks:
 - Complex to implement
 - Requires STUN/TURN servers for NAT traversal
+- Overkill for local macOS deployment
 
 ### 1.4 LangGraph Human-in-the-Loop
 
@@ -328,66 +342,121 @@ async def resume_session(session_id: str):
 
 **Estimated effort**: 2-3 days
 
-### Phase 3: Human Takeover
+### Phase 3: Human Takeover (Native macOS)
 
 **Goal**: Allow user to take control of browser and perform actions
 
-**Approach**: Headful mode with VNC streaming (like browser-use MCP server)
+**Approach**: Headful mode with action routing through existing Playwright tools (no Docker/VNC)
 
 **Implementation**:
 
-1. Add VNC support via Docker:
-```dockerfile
-# Dockerfile.browser
-FROM mcr.microsoft.com/playwright/python:v1.40.0
-
-# Install VNC
-RUN apt-get update && apt-get install -y \
-    x11vnc \
-    xvfb \
-    openbox \
-    novnc \
-    websockify
-
-# Start script
-COPY start-vnc.sh /start-vnc.sh
-RUN chmod +x /start-vnc.sh
-
-EXPOSE 5900 6080
-CMD ["/start-vnc.sh"]
-```
-
-2. Start script:
-```bash
-#!/bin/bash
-# start-vnc.sh
-Xvfb :99 -screen 0 1280x720x24 &
-export DISPLAY=:99
-openbox &
-x11vnc -display :99 -forever -shared -rfbport 5900 &
-websockify --web /usr/share/novnc 6080 localhost:5900 &
-python -m compymac.browser --headful
-```
-
-3. Add takeover mode to BrowserService:
+1. Add headful mode switching to BrowserService:
 ```python
+# In browser.py
 async def enable_takeover(self) -> dict:
-    """Enable human takeover mode."""
-    # Pause automation
+    """Enable human takeover mode - switches to headful browser on macOS."""
     self._takeover_mode = True
     
-    # Return VNC connection info
+    # If currently headless, restart in headful mode
+    if self.config.mode == BrowserMode.HEADLESS:
+        await self._restart_headful()
+    
+    # Pause automation
+    await self._pause_automation()
+    
     return {
-        "vnc_url": f"http://localhost:6080/vnc.html",
-        "status": "takeover_enabled"
+        "status": "takeover_enabled",
+        "mode": "headful",
+        "message": "Browser window is now visible. Use the action panel to interact."
     }
+
+async def _restart_headful(self) -> None:
+    """Restart browser in headful mode."""
+    # Save current URL
+    current_url = self._page.url if self._page else None
+    
+    # Close current browser
+    await self.close()
+    
+    # Restart with headful config
+    self.config.mode = BrowserMode.HEADFUL
+    await self.initialize()
+    
+    # Navigate back to saved URL
+    if current_url:
+        await self.navigate(current_url)
 
 async def disable_takeover(self) -> None:
     """Return control to agent."""
     self._takeover_mode = False
+    await self._resume_automation()
 ```
 
-**Estimated effort**: 3-5 days
+2. Add action routing endpoints for user interaction:
+```python
+# In api/server.py
+@app.post("/api/sessions/{session_id}/browser/action")
+async def browser_action(session_id: str, action: BrowserActionRequest):
+    """Route user actions to browser during takeover mode."""
+    browser = get_browser_for_session(session_id)
+    
+    if not browser._takeover_mode:
+        raise HTTPException(400, "Takeover mode not enabled")
+    
+    if action.type == "click":
+        return await browser.click(
+            element_id=action.element_id,
+            coordinates=action.coordinates
+        )
+    elif action.type == "type":
+        return await browser.type_text(
+            text=action.text,
+            element_id=action.element_id
+        )
+    elif action.type == "scroll":
+        return await browser.scroll(
+            direction=action.direction,
+            amount=action.amount
+        )
+    elif action.type == "navigate":
+        return await browser.navigate(action.url)
+```
+
+3. UI action panel component:
+```javascript
+// Browser takeover panel - sends actions to Playwright
+function BrowserTakeoverPanel({ sessionId, onAction }) {
+    const handleClick = async (e) => {
+        // Get click coordinates relative to browser viewport
+        const rect = e.target.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        await fetch(`/api/sessions/${sessionId}/browser/action`, {
+            method: 'POST',
+            body: JSON.stringify({ type: 'click', coordinates: [x, y] })
+        });
+    };
+    
+    return (
+        <div onClick={handleClick}>
+            <img src={screenshotUrl} alt="Browser view" />
+            <input 
+                onKeyDown={(e) => handleKeyPress(e, sessionId)}
+                placeholder="Type here to send keystrokes"
+            />
+        </div>
+    );
+}
+```
+
+**Benefits over Docker/VNC approach**:
+- Native macOS experience
+- No container overhead
+- Uses existing Playwright infrastructure
+- Simpler deployment
+
+**Estimated effort**: 2-3 days
 
 ### Phase 4: CAPTCHA Detection and Escalation
 
@@ -489,15 +558,22 @@ Key files to study:
 Repository: https://github.com/co-browser/browser-use-mcp-server
 
 Key features:
-- Dockerized Playwright + Chromium + VNC
+- Playwright + Chromium automation
 - Supports stdio & resumable HTTP
-- noVNC for browser viewing
+- Reference for pause/resume patterns
 
-### 4.3 Playwright VNC
+Note: This project uses Docker for deployment, but the core patterns (pause/resume, screenshot streaming) can be implemented natively on macOS without Docker.
 
-Repository: https://github.com/Grommash9/playwright_vnc
+### 4.3 Playwright CDP Screencast
 
-Simple example of Playwright with VNC for visual access.
+Playwright provides native access to Chrome DevTools Protocol for real-time screen capture:
+
+Documentation: https://playwright.dev/docs/api/class-cdpsession
+
+Key methods:
+- `page.context.new_cdp_session(page)` - Create CDP session
+- `Page.startScreencast` - Start real-time frame streaming
+- `Page.screencastFrame` - Receive frames
 
 ### 4.4 LangGraph
 
@@ -530,9 +606,9 @@ Key concepts:
    - Requires Phase 2
 
 4. **Phase 3: Human Takeover** (Lower priority)
-   - Full VNC is complex
+   - Native macOS headful mode + action routing
+   - Simpler than VNC approach
    - May not be needed if pause/resume works well
-   - Consider as future enhancement
 
 ### Minimum Viable Implementation
 
@@ -554,7 +630,8 @@ This provides the core "see and intervene" capability without the complexity of 
 The browser streaming implementation has minimal memory impact:
 - JPEG screenshots: ~50-200KB per frame
 - WebSocket buffer: ~1MB
-- VNC (if used): ~50-100MB for x11vnc + noVNC
+- Headful Chromium: ~200-500MB additional vs headless
+- CDP screencast buffer: ~5-10MB
 
 This should not significantly impact the memory budget regardless of which constraint is authoritative.
 
