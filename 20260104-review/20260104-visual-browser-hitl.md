@@ -135,27 +135,33 @@ Drawbacks:
 - Chromium-only (not Firefox/WebKit)
 - Requires CDP session management
 
-#### Pattern 3: Headful Mode with Action Routing (Recommended for Takeover)
+#### Pattern 3: Input Proxy (Required for Human Takeover)
 
-For human takeover on macOS, use headful Playwright with action routing through the existing API:
+For human takeover in a browser-based UI, route user input events back to headless Playwright:
 ```python
-# Run browser in headful mode on macOS
-config = BrowserConfig(mode=BrowserMode.HEADFUL)
-browser = BrowserService(config)
+# User clicks on streamed frame in browser UI
+# UI captures coordinates and sends to server
+# Server routes to Playwright
 
-# User sees the actual browser window on their Mac
-# Actions routed through existing click/type/scroll endpoints
+async def handle_user_click(x: int, y: int):
+    await page.mouse.click(x, y)
+
+async def handle_user_type(text: str):
+    await page.keyboard.type(text)
+
+async def handle_user_key(key: str):
+    await page.keyboard.press(key)
 ```
 
 Benefits:
-- User sees real browser window (no streaming needed if local)
-- Full interaction via existing Playwright tools
+- Works with browser-based UI (like Devin)
+- Browser stays headless on server
+- Full interaction via existing Playwright primitives
 - No VNC/Docker complexity
-- Native macOS experience
 
 Drawbacks:
-- Only works when agent runs on user's machine
-- Requires UI to route user actions to Playwright
+- Requires coordinate mapping between UI and browser viewport
+- Latency between user action and visual feedback
 
 #### Pattern 4: WebRTC Streaming (Future Enhancement)
 
@@ -342,121 +348,195 @@ async def resume_session(session_id: str):
 
 **Estimated effort**: 2-3 days
 
-### Phase 3: Human Takeover (Native macOS)
+### Phase 3: Human Takeover (Input Proxy)
 
-**Goal**: Allow user to take control of browser and perform actions
+**Goal**: Allow user to take control of browser and perform actions through the browser-based UI
 
-**Approach**: Headful mode with action routing through existing Playwright tools (no Docker/VNC)
+**Approach**: Frame streaming (from Phase 1) + input proxy routing user events back to headless Playwright
+
+**Architecture** (like Devin):
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Browser-Based UI                          │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Browser Panel (canvas/img showing streamed frames) │    │
+│  │  - onClick → POST /browser/action {type: click}     │    │
+│  │  - onKeyDown → POST /browser/action {type: key}     │    │
+│  │  - onScroll → POST /browser/action {type: scroll}   │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                    WebSocket (frames down)
+                    HTTP (actions up)
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    CompyMac Server                           │
+│  ┌─────────────────┐    ┌─────────────────────────────┐     │
+│  │ Frame Streamer  │    │ Input Proxy                 │     │
+│  │ (CDP/screenshot)│    │ - click(x, y)               │     │
+│  │       │         │    │ - type(text)                │     │
+│  │       ▼         │    │ - scroll(direction, amount) │     │
+│  │  WebSocket out  │    │ - mouse_move(x, y)          │     │
+│  └─────────────────┘    │ - key_press(key)            │     │
+│                         └─────────────────────────────┘     │
+│                                    │                         │
+│                                    ▼                         │
+│                    ┌───────────────────────────┐             │
+│                    │ Headless Playwright/CDP   │             │
+│                    │ (Chromium)                │             │
+│                    └───────────────────────────┘             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 **Implementation**:
 
-1. Add headful mode switching to BrowserService:
+1. Add takeover mode to BrowserService:
 ```python
 # In browser.py
 async def enable_takeover(self) -> dict:
-    """Enable human takeover mode - switches to headful browser on macOS."""
+    """Enable human takeover mode."""
     self._takeover_mode = True
     
-    # If currently headless, restart in headful mode
-    if self.config.mode == BrowserMode.HEADLESS:
-        await self._restart_headful()
-    
-    # Pause automation
-    await self._pause_automation()
+    # Ensure streaming is active so user can see
+    if not self._streaming:
+        await self.start_streaming()
     
     return {
         "status": "takeover_enabled",
-        "mode": "headful",
-        "message": "Browser window is now visible. Use the action panel to interact."
+        "message": "You can now interact with the browser panel."
     }
-
-async def _restart_headful(self) -> None:
-    """Restart browser in headful mode."""
-    # Save current URL
-    current_url = self._page.url if self._page else None
-    
-    # Close current browser
-    await self.close()
-    
-    # Restart with headful config
-    self.config.mode = BrowserMode.HEADFUL
-    await self.initialize()
-    
-    # Navigate back to saved URL
-    if current_url:
-        await self.navigate(current_url)
 
 async def disable_takeover(self) -> None:
     """Return control to agent."""
     self._takeover_mode = False
-    await self._resume_automation()
 ```
 
-2. Add action routing endpoints for user interaction:
+2. Add comprehensive input proxy endpoints:
 ```python
 # In api/server.py
 @app.post("/api/sessions/{session_id}/browser/action")
 async def browser_action(session_id: str, action: BrowserActionRequest):
-    """Route user actions to browser during takeover mode."""
+    """Route user input events to headless browser."""
     browser = get_browser_for_session(session_id)
     
-    if not browser._takeover_mode:
-        raise HTTPException(400, "Takeover mode not enabled")
-    
     if action.type == "click":
-        return await browser.click(
-            element_id=action.element_id,
-            coordinates=action.coordinates
-        )
+        # Click at coordinates (from user clicking on streamed frame)
+        return await browser.click(coordinates=(action.x, action.y))
+    
+    elif action.type == "mouse_move":
+        # Mouse movement for hover effects
+        return await browser.move_mouse(coordinates=(action.x, action.y))
+    
+    elif action.type == "mouse_down":
+        # For drag operations
+        await browser._page.mouse.down()
+        return {"status": "ok"}
+    
+    elif action.type == "mouse_up":
+        await browser._page.mouse.up()
+        return {"status": "ok"}
+    
     elif action.type == "type":
-        return await browser.type_text(
-            text=action.text,
-            element_id=action.element_id
-        )
+        # Type text into focused element
+        return await browser.type_text(text=action.text)
+    
+    elif action.type == "key":
+        # Single key press (Enter, Tab, Escape, etc.)
+        return await browser.press_key(action.key)
+    
     elif action.type == "scroll":
         return await browser.scroll(
             direction=action.direction,
             amount=action.amount
         )
+    
     elif action.type == "navigate":
         return await browser.navigate(action.url)
 ```
 
-3. UI action panel component:
+3. UI browser panel with input capture:
 ```javascript
-// Browser takeover panel - sends actions to Playwright
-function BrowserTakeoverPanel({ sessionId, onAction }) {
+// Browser panel component - displays streamed frames, captures user input
+function BrowserPanel({ sessionId, wsUrl }) {
+    const canvasRef = useRef(null);
+    const [ws, setWs] = useState(null);
+    
+    // Receive frames via WebSocket
+    useEffect(() => {
+        const socket = new WebSocket(wsUrl);
+        socket.onmessage = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+            };
+            img.src = URL.createObjectURL(event.data);
+        };
+        setWs(socket);
+        return () => socket.close();
+    }, [wsUrl]);
+    
+    // Send click events
     const handleClick = async (e) => {
-        // Get click coordinates relative to browser viewport
-        const rect = e.target.getBoundingClientRect();
+        const rect = canvasRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         
         await fetch(`/api/sessions/${sessionId}/browser/action`, {
             method: 'POST',
-            body: JSON.stringify({ type: 'click', coordinates: [x, y] })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'click', x, y })
+        });
+    };
+    
+    // Send keyboard events
+    const handleKeyDown = async (e) => {
+        e.preventDefault();
+        await fetch(`/api/sessions/${sessionId}/browser/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'key', key: e.key })
+        });
+    };
+    
+    // Send scroll events
+    const handleWheel = async (e) => {
+        e.preventDefault();
+        await fetch(`/api/sessions/${sessionId}/browser/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                type: 'scroll', 
+                direction: e.deltaY > 0 ? 'down' : 'up',
+                amount: Math.abs(e.deltaY)
+            })
         });
     };
     
     return (
-        <div onClick={handleClick}>
-            <img src={screenshotUrl} alt="Browser view" />
-            <input 
-                onKeyDown={(e) => handleKeyPress(e, sessionId)}
-                placeholder="Type here to send keystrokes"
-            />
-        </div>
+        <canvas
+            ref={canvasRef}
+            width={1280}
+            height={720}
+            onClick={handleClick}
+            onKeyDown={handleKeyDown}
+            onWheel={handleWheel}
+            tabIndex={0}  // Make canvas focusable for keyboard events
+            style={{ cursor: 'pointer' }}
+        />
     );
 }
 ```
 
-**Benefits over Docker/VNC approach**:
-- Native macOS experience
-- No container overhead
-- Uses existing Playwright infrastructure
-- Simpler deployment
+**Key points**:
+- Browser stays headless on server
+- Frames streamed to browser-based UI via WebSocket
+- User interactions captured in UI, sent to server via HTTP
+- Server routes actions to Playwright
+- No Docker, no VNC, no headful mode
 
-**Estimated effort**: 2-3 days
+**Estimated effort**: 3-4 days
 
 ### Phase 4: CAPTCHA Detection and Escalation
 
@@ -605,10 +685,10 @@ Key concepts:
    - Reduces failed tasks
    - Requires Phase 2
 
-4. **Phase 3: Human Takeover** (Lower priority)
-   - Native macOS headful mode + action routing
-   - Simpler than VNC approach
-   - May not be needed if pause/resume works well
+4. **Phase 3: Human Takeover** (Medium priority)
+   - Input proxy: route user events from UI to headless Playwright
+   - Builds on frame streaming from Phase 1
+   - Enables CAPTCHA solving, auth, and manual intervention
 
 ### Minimum Viable Implementation
 
@@ -630,8 +710,8 @@ This provides the core "see and intervene" capability without the complexity of 
 The browser streaming implementation has minimal memory impact:
 - JPEG screenshots: ~50-200KB per frame
 - WebSocket buffer: ~1MB
-- Headful Chromium: ~200-500MB additional vs headless
 - CDP screencast buffer: ~5-10MB
+- Headless Chromium: ~200-400MB (already required for browser automation)
 
 This should not significantly impact the memory budget regardless of which constraint is authoritative.
 
