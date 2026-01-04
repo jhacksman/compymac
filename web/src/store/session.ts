@@ -10,12 +10,32 @@ export interface WebCitation {
 
 export interface Message {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'activity'
   content: string
   timestamp: Date
   toolCalls?: ToolCall[]
   citations?: Citation[]
   webCitations?: WebCitation[]
+  // Rich formatting support
+  format?: 'plain' | 'markdown'
+  // Activity message specific fields
+  activityType?: 'plan' | 'search' | 'browse' | 'code' | 'progress' | 'complete'
+  activityData?: ActivityData
+}
+
+// Activity message data for rich progress display
+export interface ActivityData {
+  title?: string
+  items?: ActivityItem[]
+  progress?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface ActivityItem {
+  id: string
+  label: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  detail?: string
 }
 
 export interface ToolCall {
