@@ -37,6 +37,7 @@ export interface Todo {
 }
 
 export type WorkspacePanel = 'browser' | 'cli' | 'todos' | 'knowledge'
+export type WorkspaceTab = 'browser' | 'cli' | 'todos' | 'knowledge' | 'library'
 export type AutonomyLevel = 'high' | 'medium' | 'low'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -61,6 +62,7 @@ interface SessionState {
   
   // Phase 5: Citation Linking
   pendingCitationJump: LibraryJumpRequest | null
+  activeWorkspaceTab: WorkspaceTab
   
   maximizedPanel: WorkspacePanel | null
   historySidebarCollapsed: boolean
@@ -95,6 +97,7 @@ interface SessionState {
   // Phase 5: Citation Linking
   openCitation: (citation: Citation) => void
   clearPendingCitationJump: () => void
+  setActiveWorkspaceTab: (tab: WorkspaceTab) => void
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -117,6 +120,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   
   // Phase 5: Citation Linking
   pendingCitationJump: null,
+  activeWorkspaceTab: 'browser',
   
   maximizedPanel: null,
   historySidebarCollapsed: false,
@@ -281,8 +285,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       locator: citation.locator,
       citation,
     }
-    set({ pendingCitationJump: jumpRequest })
+    // Set the jump request AND switch to library tab (per design doc Phase 7)
+    set({ pendingCitationJump: jumpRequest, activeWorkspaceTab: 'library' })
   },
   
   clearPendingCitationJump: () => set({ pendingCitationJump: null }),
+  
+  setActiveWorkspaceTab: (tab) => set({ activeWorkspaceTab: tab }),
 }))

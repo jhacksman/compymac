@@ -377,9 +377,11 @@ class LibrarianAgent:
 
             locator = self._build_citation_locator(result, doc_format)
 
+            # Note: search_chunks returns "document_id" and "document_title"
+            # (not "doc_id" and "doc_title")
             citation = Citation(
-                doc_id=result.get("doc_id", ""),
-                doc_title=result.get("doc_title", ""),
+                doc_id=result.get("document_id", result.get("doc_id", "")),
+                doc_title=result.get("document_title", result.get("doc_title", "")),
                 chunk_id=result.get("chunk_id", result.get("id", "")),
                 score=result.get("score", 0.0),
                 excerpt=content[:200].strip() + ("..." if len(content) > 200 else ""),
@@ -408,7 +410,7 @@ class LibrarianAgent:
 
             result_summary = []
             for i, result in enumerate(search_results[:5], 1):
-                doc_title = result.get("doc_title", "Unknown")
+                doc_title = result.get("document_title", result.get("doc_title", "Unknown"))
                 page = result.get("page", result.get("metadata", {}).get("page", "?"))
                 content = result.get("content", result.get("text", ""))[:150]
                 result_summary.append(f"{i}. From '{doc_title}' (page {page}): {content}...")
@@ -418,7 +420,7 @@ class LibrarianAgent:
         # Build context from search results
         context_parts = []
         for result in search_results[:5]:
-            doc_title = result.get("doc_title", "Unknown")
+            doc_title = result.get("document_title", result.get("doc_title", "Unknown"))
             page = result.get("page", result.get("metadata", {}).get("page", "?"))
             content = result.get("content", result.get("text", ""))
             context_parts.append(f"[From '{doc_title}', page {page}]\n{content}")
