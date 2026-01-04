@@ -80,6 +80,8 @@ TOOL_MODES: dict[str, ToolMode] = {
             "bash_output", "write_to_shell", "kill_shell", "wait",
             # Cross-cutting: research capabilities
             "web_search", "web_get_contents",
+            # Cross-cutting: browser subset for quick web verification (full browser in 'browser' mode)
+            "browser_navigate", "browser_view",
             # Cross-cutting: AI assistance for debugging
             "ask_smart_friend",
             # Cross-cutting: document library for code docs
@@ -89,7 +91,7 @@ TOOL_MODES: dict[str, ToolMode] = {
             # SWE-bench phase tools (for structured workflows)
             "advance_phase", "return_to_fix_phase", "analyze_test_failure", "get_phase_status",
         ],
-        description="You are working as a skilled software engineer in a codebase. Your goal is to understand existing code, make targeted improvements, verify changes with tests, and commit your work. This mode provides tools to read source code files, search for implementations, edit code precisely, run tests and builds, manage git commits, research documentation, and consult the document library for code docs. Use this when you need to fix bugs, implement features, refactor code, or investigate how existing code works. Remember: Read files before editing them, verify changes with tests, and commit with clear messages.",
+        description="You are working as a skilled software engineer in a codebase. Your goal is to understand existing code, make targeted improvements, verify changes with tests, and commit your work. This mode provides tools to read source code files, search for implementations, edit code precisely, run tests and builds, manage git commits, research documentation, and consult the document library for code docs. Use this when you need to fix bugs, implement features, refactor code, or investigate how existing code works. Remember: Read files before editing them, verify changes with tests, and commit with clear messages. For quick web verification, browser_navigate and browser_view are available; for full browser automation, enter 'browser' mode.",
     ),
     "library": ToolMode(
         name="library",
