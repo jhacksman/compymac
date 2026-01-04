@@ -221,6 +221,9 @@ def create_session_runtime(session_id: str) -> SessionRuntime:
     # Enable Library tools for document search and retrieval (Phase 1 RAG integration)
     harness.register_library_tools(library_store, session_id)
 
+    # Register browser tools for web automation (required for browser mode to work)
+    harness.register_browser_tools()
+
     llm_client = get_llm_client()
 
     # Create agent config with system prompt
