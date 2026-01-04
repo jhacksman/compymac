@@ -25,19 +25,19 @@ class PersistentMemoryConfig:
     max_memory_size: int = 1_000_000  # Maximum number of stored facts
     memory_chunk_size: int = 1000  # Facts per memory chunk
     
-    # VRAM optimization
-    vram_limit_gb: int = 64
+    # Memory optimization (128GB unified RAM on Apple Silicon)
+    memory_limit_gb: int = 128
     page_size: int = 4096  # Memory page size for attention
     
     def validate(self) -> None:
         """Validate configuration parameters."""
-        if self.vram_limit_gb > 64:
-            raise ValueError("VRAM limit cannot exceed 64GB")
+        if self.memory_limit_gb > 128:
+            raise ValueError("Memory limit cannot exceed 128GB")
             
         if self.quantization not in ["none", "int8", "int4"]:
             raise ValueError("Invalid quantization setting")
             
-        # Calculate approximate VRAM usage
+        # Calculate approximate memory usage
         param_bytes = 4  # Default float32
         if self.quantization == "int8":
             param_bytes = 1
@@ -50,9 +50,9 @@ class PersistentMemoryConfig:
             self.hidden_size * self.max_position_embeddings  # Embeddings
         )
         
-        vram_gb = (total_params * param_bytes) / (1024 ** 3)
-        if vram_gb > self.vram_limit_gb:
+        memory_gb = (total_params * param_bytes) / (1024 ** 3)
+        if memory_gb > self.memory_limit_gb:
             raise ValueError(
-                f"Configuration would use {vram_gb:.1f}GB VRAM, "
-                f"exceeding {self.vram_limit_gb}GB limit"
+                f"Configuration would use {memory_gb:.1f}GB memory, "
+                f"exceeding {self.memory_limit_gb}GB limit"
             )

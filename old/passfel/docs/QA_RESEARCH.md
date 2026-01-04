@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides comprehensive research on implementing on-the-fly Q&A and research capabilities for the PASSFEL (Personal ASSistant For Everyday Life) project. The research covers knowledge retrieval systems, data sources, LLM integration strategies, and implementation approaches that balance local processing with cloud services while respecting the 64GB VRAM constraint.
+This document provides comprehensive research on implementing on-the-fly Q&A and research capabilities for the PASSFEL (Personal ASSistant For Everyday Life) project. The research covers knowledge retrieval systems, data sources, LLM integration strategies, and implementation approaches that balance local processing with cloud services while respecting the 128GB unified RAM constraint.
 
 ## Research Methodology
 

@@ -106,8 +106,9 @@ Phase 4+: chromadb, sentence-transformers, faiss-cpu
 
 ---
 
-## 6. VRAM (64GB limit)
+## 6. Memory Budget (128GB Unified RAM)
 
 - sentence-transformers: ~500MB
 - Vision-LLM: 0 (Venice.ai API)
 - Total local: ~600MB
+- Note: CompyMac targets 128GB unified RAM (Apple Silicon), not discrete VRAM
