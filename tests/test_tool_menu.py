@@ -59,8 +59,11 @@ class TestToolMode:
         # Cross-cutting tools
         assert "web_search" in swe_mode.tool_list
         assert "ask_smart_friend" in swe_mode.tool_list
-        # SWE mode has 30 tools (core + cross-cutting)
-        assert len(swe_mode.tool_list) == 30
+        # Cross-cutting browser tools for quick web verification
+        assert "browser_navigate" in swe_mode.tool_list
+        assert "browser_view" in swe_mode.tool_list
+        # SWE mode has 32 tools (core + cross-cutting including browser subset)
+        assert len(swe_mode.tool_list) == 32
 
     def test_browser_mode_tools(self):
         """Test that browser mode has the expected tools."""
@@ -220,12 +223,12 @@ class TestMenuManager:
         expected_count = len(META_TOOLS) + len(swe_tools)
         assert len(visible) == expected_count
 
-    def test_swe_mode_has_36_tools(self):
-        """Test that SWE mode has exactly 36 tools (30 swe + 6 meta)."""
+    def test_swe_mode_has_38_tools(self):
+        """Test that SWE mode has exactly 38 tools (32 swe + 6 meta)."""
         manager = MenuManager()
         manager.enter_mode("swe")
         visible = manager.get_visible_tools()
-        assert len(visible) == 36  # 30 SWE tools + 6 meta-tools
+        assert len(visible) == 38  # 32 SWE tools + 6 meta-tools
 
     def test_list_menu_at_root(self):
         """Test list_menu output at ROOT."""
