@@ -311,6 +311,38 @@ class AgentLoop:
             messages_for_api.append(guided_message)
             logger.debug("[GUIDED_TEMPLATES] Injected structured reasoning template")
 
+        # Menu State Injection: Make current menu state salient to the agent
+        # This addresses the discoverability problem where agents don't know they need to navigate
+        # See docs/BROWSER_TOOL_DESIGN.md for rationale
+        if self.config.use_menu_system and hasattr(self.harness, 'get_menu_manager'):
+            menu_manager = self.harness.get_menu_manager()
+            current_mode = menu_manager.current_mode
+            if current_mode is None:
+                # At ROOT - remind agent to select a mode
+                available_modes = list(menu_manager.modes.keys())
+                menu_state_message = {
+                    "role": "system",
+                    "content": (
+                        f"[MENU_STATE: ROOT] You are at the ROOT menu level. "
+                        f"Only navigation tools are available. To access domain tools, "
+                        f"call menu_enter(mode=\"<mode>\") with one of: {', '.join(available_modes)}. "
+                        f"Use menu_list() to see mode descriptions."
+                    )
+                }
+                messages_for_api.append(menu_state_message)
+                logger.debug(f"[MENU_STATE] Injected ROOT state reminder, available modes: {available_modes}")
+            else:
+                # In a mode - show current mode
+                menu_state_message = {
+                    "role": "system",
+                    "content": (
+                        f"[MENU_STATE: {current_mode}] You are in '{current_mode}' mode. "
+                        f"Mode tools are available. Call menu_exit() to return to ROOT and switch modes."
+                    )
+                }
+                messages_for_api.append(menu_state_message)
+                logger.debug(f"[MENU_STATE] Injected mode state: {current_mode}")
+
         # Start LLM call span if tracing is enabled
         llm_span_id: str | None = None
         llm_input_artifact_hash: str | None = None
