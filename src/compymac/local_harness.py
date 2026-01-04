@@ -206,6 +206,10 @@ class LocalHarness(Harness):
         self._consecutive_think_calls = 0  # Track consecutive think() calls for 3-call limit
         self._think_disabled_until_action = False  # Enforced block after 3 consecutive thinks
 
+        # Message user outbox: stores full message content for frontend display
+        # The server drains this to get the actual message content (not truncated)
+        self._message_user_outbox: list[dict[str, Any]] = []
+
         # Register default tools
         self._register_default_tools()
 
@@ -2841,6 +2845,34 @@ class LocalHarness(Harness):
         self._completion_signaled = False
         self._completion_answer = ''
 
+    def get_message_user_outbox(self) -> list[dict[str, Any]]:
+        """Get all messages from the message_user outbox (public API).
+
+        Returns:
+            List of message dicts with 'content', 'attachments', 'block_on_user', 'timestamp'
+        """
+        return list(self._message_user_outbox)
+
+    def drain_message_user_outbox(self) -> list[dict[str, Any]]:
+        """Get and clear all messages from the message_user outbox (public API).
+
+        Returns:
+            List of message dicts, clearing the outbox
+        """
+        messages = list(self._message_user_outbox)
+        self._message_user_outbox.clear()
+        return messages
+
+    def get_last_message_user_content(self) -> str | None:
+        """Get the content of the last message_user call (public API).
+
+        Returns:
+            The last message content or None if no messages
+        """
+        if self._message_user_outbox:
+            return self._message_user_outbox[-1].get("content")
+        return None
+
     # Valid status transitions (state machine)
     _TODO_VALID_TRANSITIONS: dict[str, list[str]] = {
         "pending": ["in_progress"],
@@ -3588,9 +3620,9 @@ class LocalHarness(Harness):
         # In a real deployment, this would send to a UI/API
         output_parts = [f"\n[MESSAGE TO USER]\n{message}"]
 
+        valid_attachments = []
         if attachments:
             attachment_list = [a.strip() for a in attachments.split(",")]
-            valid_attachments = []
             for att in attachment_list:
                 if os.path.exists(att):
                     valid_attachments.append(att)
@@ -3606,6 +3638,16 @@ class LocalHarness(Harness):
             output_parts.append("\n[REQUESTING DEPLOYMENT APPROVAL]")
 
         print("\n".join(output_parts))
+
+        # Store full message in outbox for server to retrieve and send to frontend
+        self._message_user_outbox.append({
+            "content": message,
+            "attachments": valid_attachments,
+            "block_on_user": block_on_user,
+            "request_auth": request_auth,
+            "request_deploy": request_deploy,
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
 
         status_parts = []
         if block_on_user:
