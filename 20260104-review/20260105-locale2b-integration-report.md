@@ -163,10 +163,11 @@ Add to `.env.example`:
 # --------------------------------------
 # locale2b provides isolated Firecracker microVM sandboxes for command execution.
 # This is the self-hosted alternative to E2B used by Manus.
-# ALL CLI commands execute through locale2b - there is no local fallback.
+# ALL CLI commands execute through locale2b at the URL you configure below.
 
-LOCALE2B_BASE_URL=http://97.115.170.137:8080
-LOCALE2B_API_KEY=3216549870BB
+# REQUIRED: Set this to your locale2b server URL
+LOCALE2B_BASE_URL=http://localhost:8080
+LOCALE2B_API_KEY=your-api-key-here
 LOCALE2B_API_KEY_HEADER=X-API-Key
 
 # Sandbox defaults
@@ -669,5 +670,5 @@ Following AgentBay's pattern, consider:
 
 ### locale2b Documentation
 - [locale2b README](https://github.com/jhacksman/locale2b)
-- Server: 97.115.170.137:8080
-- API Key: 3216549870BB (X-API-Key header)
+- Server URL: Configure via `LOCALE2B_BASE_URL` in .env
+- API Key: Configure via `LOCALE2B_API_KEY` in .env (X-API-Key header)
