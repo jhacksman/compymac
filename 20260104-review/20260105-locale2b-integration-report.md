@@ -163,8 +163,8 @@ Add to `.env.example`:
 # --------------------------------------
 # locale2b provides isolated Firecracker microVM sandboxes for command execution.
 # This is the self-hosted alternative to E2B used by Manus.
+# ALL CLI commands execute through locale2b - there is no local fallback.
 
-LOCALE2B_ENABLED=true
 LOCALE2B_BASE_URL=http://97.115.170.137:8080
 LOCALE2B_API_KEY=3216549870BB
 LOCALE2B_API_KEY_HEADER=X-API-Key
@@ -381,12 +381,12 @@ Add sandbox initialization:
 
 ```python
 async def initialize_sandbox(runtime: SessionRuntime) -> str:
-    """Initialize sandbox for a session."""
+    """Initialize locale2b sandbox for a session.
+    
+    All CLI commands execute through locale2b - there is no local fallback.
+    """
     if runtime.sandbox_id is not None:
         return runtime.sandbox_id
-    
-    if not os.environ.get("LOCALE2B_ENABLED", "false").lower() == "true":
-        return None  # Sandbox disabled, use local execution
     
     config = Locale2bConfig.from_env()
     runtime.sandbox_client = Locale2bClient(config)
@@ -403,57 +403,39 @@ async def initialize_sandbox(runtime: SessionRuntime) -> str:
 
 ### 4.4 Phase 4: Command Routing (Day 3)
 
-Modify `handle_run_command`:
+Modify `handle_run_command` to execute all commands through locale2b:
 
 ```python
 async def handle_run_command(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
-    """Handle running a shell command."""
+    """Handle running a shell command through locale2b sandbox.
+    
+    All commands execute in the locale2b Firecracker microVM sandbox.
+    """
     command = message.get("command", "")
-    exec_dir = message.get("exec_dir", "/workspace")  # Changed default to /workspace
+    exec_dir = message.get("exec_dir", "/workspace")
 
     if not command:
         return
 
     try:
-        # Check if sandbox execution is enabled
-        if os.environ.get("LOCALE2B_ENABLED", "false").lower() == "true":
-            # Initialize sandbox if needed
-            sandbox_id = await initialize_sandbox(runtime)
-            
-            # Execute in sandbox
-            result = await runtime.sandbox_client.exec_command(
-                sandbox_id=sandbox_id,
-                command=command,
-                working_dir=exec_dir,
-            )
-            
-            output = result.stdout
-            if result.stderr:
-                output += f"\n[stderr]\n{result.stderr}"
-            if result.error:
-                output += f"\n[error]\n{result.error}"
-            exit_code = result.exit_code
-        else:
-            # Fall back to local execution
-            loop = asyncio.get_event_loop()
-            
-            def execute_bash() -> str:
-                tool_call = ToolCall(
-                    id=str(uuid.uuid4()),
-                    name="bash",
-                    arguments={
-                        "command": command,
-                        "exec_dir": exec_dir,
-                        "bash_id": "ui_terminal",
-                    },
-                )
-                result = runtime.harness.execute(tool_call)
-                return result.content
-            
-            output = await loop.run_in_executor(None, execute_bash)
-            exit_code = 0  # Local harness doesn't return exit code
+        # Initialize sandbox if needed
+        sandbox_id = await initialize_sandbox(runtime)
+        
+        # Execute command in locale2b sandbox
+        result = await runtime.sandbox_client.exec_command(
+            sandbox_id=sandbox_id,
+            command=command,
+            working_dir=exec_dir,
+        )
+        
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[stderr]\n{result.stderr}"
+        if result.error:
+            output += f"\n[error]\n{result.error}"
+        exit_code = result.exit_code
 
         # Add to terminal output
         terminal_entry = {
@@ -565,11 +547,14 @@ Following Manus's pattern, each CompyMac session gets one sandbox that persists 
 - Efficient resource usage (no sandbox spin-up per command)
 - Consistent environment for multi-step tasks
 
-### 6.2 Fallback to Local Execution
+### 6.2 locale2b is Required
 
-If `LOCALE2B_ENABLED=false` or locale2b is unavailable, commands fall back to local execution. This ensures:
-- Development works without locale2b running
-- Graceful degradation if sandbox service is down
+All CLI commands execute through locale2b - there is no local fallback. This ensures:
+- Consistent execution environment across all sessions
+- Proper isolation and security for all commands
+- Same behavior in development and production
+
+If locale2b is unavailable, commands will fail with an error rather than silently falling back to local execution.
 
 ### 6.3 Workspace ID = Session ID
 
