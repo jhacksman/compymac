@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Globe, RefreshCw, ChevronLeft, ChevronRight, Maximize2, Minimize2, User, Bot } from 'lucide-react'
+import { Globe, RefreshCw, ChevronLeft, ChevronRight, Maximize2, Minimize2, User, Bot, Monitor, Camera, ExternalLink, X } from 'lucide-react'
 import { useSessionStore } from '@/store/session'
 import { cn } from '@/lib/utils'
 
@@ -13,7 +13,17 @@ interface BrowserPanelProps {
 }
 
 export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl }: BrowserPanelProps) {
-  const { browserUrl, browserTitle, browserScreenshotUrl, browserControl } = useSessionStore()
+  const { 
+    browserUrl, 
+    browserTitle, 
+    browserScreenshotUrl, 
+    browserControl,
+    browserViewMode,
+    livePreviewUrl,
+    exposedPorts,
+    setBrowserViewMode,
+    closePort,
+  } = useSessionStore()
   const [urlInput, setUrlInput] = useState(browserUrl)
 
   const handleNavigate = () => {
@@ -47,8 +57,41 @@ export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl
         <div className="flex items-center gap-2">
           <Globe className="w-4 h-4 text-green-400" />
           <span className="text-sm font-medium text-white">Browser</span>
+          {exposedPorts.length > 0 && (
+            <span className="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+              {exposedPorts.length} port{exposedPorts.length > 1 ? 's' : ''} exposed
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
+          {exposedPorts.length > 0 && (
+            <div className="flex items-center gap-0.5 mr-2">
+              <button
+                onClick={() => setBrowserViewMode('screenshot')}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded-l text-xs font-medium transition-colors",
+                  browserViewMode === 'screenshot'
+                    ? "bg-purple-500/20 text-purple-400"
+                    : "bg-slate-700 text-slate-400 hover:text-white"
+                )}
+                title="Screenshot mode"
+              >
+                <Camera className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => setBrowserViewMode('live')}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded-r text-xs font-medium transition-colors",
+                  browserViewMode === 'live'
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-slate-700 text-slate-400 hover:text-white"
+                )}
+                title="Live preview mode"
+              >
+                <Monitor className="w-3 h-3" />
+              </button>
+            </div>
+          )}
           <button
             onClick={toggleControl}
             className={cn(
@@ -110,11 +153,33 @@ export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl
               <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
             </div>
             {!isMaximized && (
-              <span className="text-xs text-slate-500 truncate ml-2">{browserUrl || 'No page loaded'}</span>
+              <span className="text-xs text-slate-500 truncate ml-2">
+                {browserViewMode === 'live' && livePreviewUrl 
+                  ? livePreviewUrl 
+                  : browserUrl || 'No page loaded'}
+              </span>
+            )}
+            {browserViewMode === 'live' && livePreviewUrl && (
+              <a
+                href={livePreviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-auto text-slate-400 hover:text-blue-500 transition-colors"
+                title="Open in new tab"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             )}
           </div>
           <div className="flex-1 bg-white overflow-auto" style={{ height: 'calc(100% - 2rem)' }}>
-            {browserScreenshotUrl ? (
+            {browserViewMode === 'live' && livePreviewUrl ? (
+              <iframe
+                src={livePreviewUrl}
+                title="Live Preview"
+                className="w-full h-full border-0"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              />
+            ) : browserScreenshotUrl ? (
               <img 
                 src={`http://localhost:8000${browserScreenshotUrl}`} 
                 alt={browserTitle || 'Browser screenshot'} 
@@ -132,6 +197,46 @@ export function BrowserPanel({ isMaximized, onMaximize, onNavigate, onSetControl
           </div>
         </div>
       </div>
+
+      {exposedPorts.length > 0 && (
+        <div className="px-3 py-2 bg-slate-800 border-t border-slate-700">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-slate-400">Exposed ports:</span>
+            {exposedPorts.map((port) => (
+              <div
+                key={port.port}
+                className="flex items-center gap-1 px-2 py-0.5 bg-slate-700 rounded text-xs"
+              >
+                <button
+                  onClick={() => {
+                    setBrowserViewMode('live')
+                    useSessionStore.getState().setLivePreviewUrl(port.url)
+                  }}
+                  className="text-green-400 hover:text-green-300"
+                >
+                  :{port.port}
+                </button>
+                <a
+                  href={port.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-400 hover:text-blue-400"
+                  title={port.url}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+                <button
+                  onClick={() => closePort(port.port)}
+                  className="text-slate-400 hover:text-red-400"
+                  title="Close port"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

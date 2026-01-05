@@ -124,6 +124,25 @@ class FileInfo:
         )
 
 
+@dataclass
+class ExposedPortInfo:
+    """Information about an exposed port."""
+    port: int
+    url: str
+    tunnel_pid: int | None = None
+    already_exposed: bool = False
+
+    @classmethod
+    def from_api_response(cls, data: dict[str, Any]) -> "ExposedPortInfo":
+        """Parse exposed port info from API response."""
+        return cls(
+            port=data["port"],
+            url=data["url"],
+            tunnel_pid=data.get("tunnel_pid"),
+            already_exposed=data.get("already_exposed", False),
+        )
+
+
 class Locale2bClient:
     """
     Client for locale2b sandbox service.
@@ -266,7 +285,7 @@ class Locale2bClient:
         sandbox_id: str,
         command: str,
         working_dir: str = "/workspace",
-        timeout_ms: int = 30000,
+        timeout_ms: int = 120000,
     ) -> ExecResult:
         """Execute a command in a sandbox.
 
@@ -417,6 +436,87 @@ class Locale2bClient:
             return SandboxInfo.from_api_response(response.json())
         except httpx.HTTPStatusError as e:
             raise Locale2bError(f"Failed to resume sandbox: {e.response.text}") from e
+
+    def expose_port(self, sandbox_id: str, port: int) -> ExposedPortInfo:
+        """Expose a port from the sandbox to the internet via cloudflared tunnel.
+
+        Creates a public URL (*.trycloudflare.com) that tunnels traffic to the
+        specified port inside the sandbox. Useful for previewing web applications.
+
+        Args:
+            sandbox_id: ID of sandbox.
+            port: Port number to expose (e.g., 3000, 8080).
+
+        Returns:
+            ExposedPortInfo with the public URL.
+
+        Raises:
+            Locale2bError: If port exposure fails.
+        """
+        payload = {"port": port}
+
+        try:
+            response = self._client.post(
+                f"/sandboxes/{sandbox_id}/ports/expose",
+                json=payload,
+                timeout=httpx.Timeout(
+                    connect=DEFAULT_CONNECT_TIMEOUT,
+                    read=30.0,  # cloudflared tunnel setup can take time
+                    write=DEFAULT_WRITE_TIMEOUT,
+                    pool=DEFAULT_POOL_TIMEOUT,
+                ),
+            )
+            response.raise_for_status()
+            return ExposedPortInfo.from_api_response(response.json())
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise Locale2bError(f"Sandbox {sandbox_id} not found") from e
+            raise Locale2bError(f"Failed to expose port: {e.response.text}") from e
+
+    def list_exposed_ports(self, sandbox_id: str) -> list[ExposedPortInfo]:
+        """List all exposed ports for a sandbox.
+
+        Args:
+            sandbox_id: ID of sandbox.
+
+        Returns:
+            List of ExposedPortInfo for all exposed ports.
+
+        Raises:
+            Locale2bError: If listing fails.
+        """
+        try:
+            response = self._client.get(f"/sandboxes/{sandbox_id}/ports")
+            response.raise_for_status()
+            data = response.json()
+            return [ExposedPortInfo.from_api_response(p) for p in data.get("ports", [])]
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise Locale2bError(f"Sandbox {sandbox_id} not found") from e
+            raise Locale2bError(f"Failed to list exposed ports: {e.response.text}") from e
+
+    def close_port(self, sandbox_id: str, port: int) -> bool:
+        """Close an exposed port and stop its tunnel.
+
+        Args:
+            sandbox_id: ID of sandbox.
+            port: Port number to close.
+
+        Returns:
+            True if closed successfully.
+
+        Raises:
+            Locale2bError: If closing fails.
+        """
+        try:
+            response = self._client.delete(f"/sandboxes/{sandbox_id}/ports/{port}")
+            response.raise_for_status()
+            return True
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"Port {port} not found on sandbox {sandbox_id}")
+                return True
+            raise Locale2bError(f"Failed to close port: {e.response.text}") from e
 
     def close(self) -> None:
         """Close the HTTP client."""

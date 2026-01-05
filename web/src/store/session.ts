@@ -67,6 +67,13 @@ export interface Todo {
 export type WorkspacePanel = 'browser' | 'cli' | 'todos' | 'knowledge'
 export type WorkspaceTab = 'browser' | 'cli' | 'todos' | 'knowledge' | 'library'
 export type AutonomyLevel = 'high' | 'medium' | 'low'
+export type BrowserViewMode = 'screenshot' | 'live'
+
+export interface ExposedPort {
+  port: number
+  url: string
+  tunnel_pid?: number
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -82,6 +89,9 @@ interface SessionState {
   browserTitle: string
   browserScreenshotUrl: string | null
   browserControl: 'user' | 'agent'
+  browserViewMode: BrowserViewMode
+  exposedPorts: ExposedPort[]
+  livePreviewUrl: string | null
   
   terminalOutput: string[]
   terminalControl: 'user' | 'agent'
@@ -104,6 +114,12 @@ interface SessionState {
   setIsStreaming: (isStreaming: boolean) => void
   setBrowserState: (url: string, title: string, screenshotUrl: string | null) => void
   setBrowserControl: (control: 'user' | 'agent') => void
+  setBrowserViewMode: (mode: BrowserViewMode) => void
+  setExposedPorts: (ports: ExposedPort[]) => void
+  setLivePreviewUrl: (url: string | null) => void
+  exposePort: (port: number) => Promise<ExposedPort | null>
+  fetchExposedPorts: () => Promise<void>
+  closePort: (port: number) => Promise<boolean>
   addTerminalOutput: (output: string) => void
   setTerminalOutput: (output: string[]) => void
   setTerminalControl: (control: 'user' | 'agent') => void
@@ -140,6 +156,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   browserTitle: '',
   browserScreenshotUrl: null,
   browserControl: 'agent',
+  browserViewMode: 'screenshot',
+  exposedPorts: [],
+  livePreviewUrl: null,
   
   terminalOutput: [],
   terminalControl: 'agent',
@@ -162,6 +181,88 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setIsStreaming: (isStreaming) => set({ isStreaming }),
   setBrowserState: (url, title, screenshotUrl) => set({ browserUrl: url, browserTitle: title, browserScreenshotUrl: screenshotUrl }),
   setBrowserControl: (control) => set({ browserControl: control }),
+  setBrowserViewMode: (mode) => set({ browserViewMode: mode }),
+  setExposedPorts: (ports) => set({ exposedPorts: ports }),
+  setLivePreviewUrl: (url) => set({ livePreviewUrl: url }),
+  
+  exposePort: async (port: number) => {
+    const sessionId = get().currentSessionId
+    if (!sessionId) {
+      console.error('No current session')
+      return null
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/ports/expose?port=${port}`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        console.error('Failed to expose port:', response.statusText)
+        return null
+      }
+      const data = await response.json()
+      const exposedPort: ExposedPort = {
+        port: data.port,
+        url: data.url,
+        tunnel_pid: data.tunnel_pid,
+      }
+      set((state) => ({
+        exposedPorts: [...state.exposedPorts.filter(p => p.port !== port), exposedPort],
+        livePreviewUrl: data.url,
+        browserViewMode: 'live',
+      }))
+      return exposedPort
+    } catch (error) {
+      console.error('Error exposing port:', error)
+      return null
+    }
+  },
+  
+  fetchExposedPorts: async () => {
+    const sessionId = get().currentSessionId
+    if (!sessionId) return
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/ports`)
+      if (!response.ok) {
+        console.error('Failed to fetch exposed ports:', response.statusText)
+        return
+      }
+      const data = await response.json()
+      const ports: ExposedPort[] = data.ports || []
+      set({ exposedPorts: ports })
+      if (ports.length > 0 && !get().livePreviewUrl) {
+        set({ livePreviewUrl: ports[0].url })
+      }
+    } catch (error) {
+      console.error('Error fetching exposed ports:', error)
+    }
+  },
+  
+  closePort: async (port: number) => {
+    const sessionId = get().currentSessionId
+    if (!sessionId) return false
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/ports/${port}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        console.error('Failed to close port:', response.statusText)
+        return false
+      }
+      set((state) => {
+        const newPorts = state.exposedPorts.filter(p => p.port !== port)
+        return {
+          exposedPorts: newPorts,
+          livePreviewUrl: newPorts.length > 0 ? newPorts[0].url : null,
+          browserViewMode: newPorts.length > 0 ? 'live' : 'screenshot',
+        }
+      })
+      return true
+    } catch (error) {
+      console.error('Error closing port:', error)
+      return false
+    }
+  },
+  
   addTerminalOutput: (output) => set((state) => ({ terminalOutput: [...state.terminalOutput, output] })),
   setTerminalOutput: (output) => set({ terminalOutput: output }),
   setTerminalControl: (control) => set({ terminalControl: control }),

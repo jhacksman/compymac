@@ -2315,6 +2315,104 @@ async def get_active_sources(session_id: str) -> dict[str, Any]:
     }
 
 
+# Port forwarding endpoints for live web preview
+@app.post("/api/sessions/{session_id}/ports/expose")
+async def expose_port(session_id: str, port: int) -> dict[str, Any]:
+    """Expose a port from the sandbox to the internet via cloudflared tunnel.
+
+    Creates a public URL (*.trycloudflare.com) that tunnels traffic to the
+    specified port inside the sandbox. Useful for previewing web applications.
+
+    Args:
+        session_id: Session ID (sandbox must be initialized).
+        port: Port number to expose (e.g., 3000, 8080).
+
+    Returns:
+        Dict with port, url, tunnel_pid, and already_exposed fields.
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runtime = sessions[session_id]
+
+    if runtime.sandbox_client is None or runtime.sandbox_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Sandbox not initialized. Run a command first to initialize the sandbox.",
+        )
+
+    try:
+        result = runtime.sandbox_client.expose_port(runtime.sandbox_id, port)
+        return {
+            "port": result.port,
+            "url": result.url,
+            "tunnel_pid": result.tunnel_pid,
+            "already_exposed": result.already_exposed,
+        }
+    except Exception as e:
+        logger.error(f"Failed to expose port {port} for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/ports")
+async def list_exposed_ports(session_id: str) -> dict[str, Any]:
+    """List all exposed ports for a session's sandbox.
+
+    Args:
+        session_id: Session ID.
+
+    Returns:
+        Dict with ports list containing port, url, tunnel_pid for each exposed port.
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runtime = sessions[session_id]
+
+    if runtime.sandbox_client is None or runtime.sandbox_id is None:
+        return {"ports": [], "sandbox_id": None}
+
+    try:
+        ports = runtime.sandbox_client.list_exposed_ports(runtime.sandbox_id)
+        return {
+            "ports": [
+                {"port": p.port, "url": p.url, "tunnel_pid": p.tunnel_pid}
+                for p in ports
+            ],
+            "sandbox_id": runtime.sandbox_id,
+        }
+    except Exception as e:
+        logger.error(f"Failed to list exposed ports for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/sessions/{session_id}/ports/{port}")
+async def close_port(session_id: str, port: int) -> dict[str, Any]:
+    """Close an exposed port and stop its tunnel.
+
+    Args:
+        session_id: Session ID.
+        port: Port number to close.
+
+    Returns:
+        Dict with success status.
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    runtime = sessions[session_id]
+
+    if runtime.sandbox_client is None or runtime.sandbox_id is None:
+        return {"closed": False, "error": "Sandbox not initialized"}
+
+    try:
+        success = runtime.sandbox_client.close_port(runtime.sandbox_id, port)
+        return {"closed": success, "port": port}
+    except Exception as e:
+        logger.error(f"Failed to close port {port} for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Run the API server."""
     import uvicorn
