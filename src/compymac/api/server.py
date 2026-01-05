@@ -2351,7 +2351,7 @@ async def expose_port(session_id: str, port: int) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to expose port {port} for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/sessions/{session_id}/ports")
@@ -2383,7 +2383,7 @@ async def list_exposed_ports(session_id: str) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to list exposed ports for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.delete("/api/sessions/{session_id}/ports/{port}")
@@ -2410,7 +2410,7 @@ async def close_port(session_id: str, port: int) -> dict[str, Any]:
         return {"closed": success, "port": port}
     except Exception as e:
         logger.error(f"Failed to close port {port} for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8000) -> None:
