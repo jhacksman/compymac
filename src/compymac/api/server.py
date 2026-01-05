@@ -35,11 +35,11 @@ from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.browser import BrowserConfig, BrowserMode, BrowserService
 from compymac.config import LLMConfig
 from compymac.harness import HarnessConfig
-from compymac.locale2b import Locale2bClient, Locale2bConfig, Locale2bError
 from compymac.ingestion.chunker import DocumentChunker
 from compymac.ingestion.parsers import DocumentParser
 from compymac.llm import LLMClient
 from compymac.local_harness import LocalHarness, ToolCategory
+from compymac.locale2b import Locale2bClient, Locale2bConfig
 from compymac.session import Session
 from compymac.storage.library_store import DocumentStatus, LibraryStore
 from compymac.storage.run_store import RunStatus, RunStore
