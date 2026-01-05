@@ -35,6 +35,7 @@ from compymac.agent_loop import AgentConfig, AgentLoop
 from compymac.browser import BrowserConfig, BrowserMode, BrowserService
 from compymac.config import LLMConfig
 from compymac.harness import HarnessConfig
+from compymac.locale2b import Locale2bClient, Locale2bConfig, Locale2bError
 from compymac.ingestion.chunker import DocumentChunker
 from compymac.ingestion.parsers import DocumentParser
 from compymac.llm import LLMClient
@@ -142,6 +143,9 @@ class SessionRuntime:
     is_paused: bool = False
     pause_reason: str = ""
     audit_events: list[dict[str, Any]] = field(default_factory=list)
+    # locale2b sandbox state - all CLI commands execute through locale2b
+    sandbox_client: Locale2bClient | None = None
+    sandbox_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.created_at:
@@ -271,6 +275,32 @@ async def initialize_browser(runtime: SessionRuntime) -> BrowserService:
         runtime.browser_service = BrowserService(config)
         await runtime.browser_service.initialize()
     return runtime.browser_service
+
+
+def initialize_sandbox(runtime: SessionRuntime) -> str:
+    """Initialize locale2b sandbox for a session.
+
+    All CLI commands execute through locale2b - there is no local fallback.
+
+    Returns:
+        sandbox_id: The ID of the created/existing sandbox.
+
+    Raises:
+        Locale2bError: If sandbox creation fails.
+    """
+    if runtime.sandbox_id is not None:
+        return runtime.sandbox_id
+
+    config = Locale2bConfig.from_env()
+    runtime.sandbox_client = Locale2bClient(config)
+
+    sandbox = runtime.sandbox_client.create_sandbox(
+        workspace_id=runtime.session_id
+    )
+    runtime.sandbox_id = sandbox.sandbox_id
+
+    logger.info(f"Created sandbox {sandbox.sandbox_id} for session {runtime.session_id}")
+    return sandbox.sandbox_id
 
 
 async def get_browser_state(runtime: SessionRuntime) -> dict[str, Any]:
@@ -656,9 +686,13 @@ async def handle_subscribe(websocket: WebSocket, runtime: SessionRuntime) -> Non
 async def handle_run_command(
     websocket: WebSocket, runtime: SessionRuntime, message: dict[str, Any]
 ) -> None:
-    """Handle running a shell command."""
+    """Handle running a shell command through locale2b sandbox.
+
+    All commands execute in the locale2b Firecracker microVM sandbox.
+    There is no local fallback.
+    """
     command = message.get("command", "")
-    exec_dir = message.get("exec_dir", "/home/ubuntu")
+    exec_dir = message.get("exec_dir", "/workspace")
 
     if not command:
         return
@@ -666,20 +700,25 @@ async def handle_run_command(
     try:
         loop = asyncio.get_event_loop()
 
-        def execute_bash() -> str:
-            tool_call = ToolCall(
-                id=str(uuid.uuid4()),
-                name="bash",
-                arguments={
-                    "command": command,
-                    "exec_dir": exec_dir,
-                    "bash_id": "ui_terminal",
-                },
-            )
-            result = runtime.harness.execute(tool_call)
-            return result.content
+        def execute_in_sandbox() -> tuple[str, int]:
+            """Execute command in locale2b sandbox."""
+            sandbox_id = initialize_sandbox(runtime)
 
-        output = await loop.run_in_executor(None, execute_bash)
+            result = runtime.sandbox_client.exec_command(
+                sandbox_id=sandbox_id,
+                command=command,
+                working_dir=exec_dir,
+            )
+
+            output = result.stdout
+            if result.stderr:
+                output += f"\n[stderr]\n{result.stderr}"
+            if result.error:
+                output += f"\n[error]\n{result.error}"
+
+            return output, result.exit_code
+
+        output, exit_code = await loop.run_in_executor(None, execute_in_sandbox)
 
         # Add to terminal output
         terminal_entry = {
@@ -687,7 +726,7 @@ async def handle_run_command(
             "command": command,
             "output": output,
             "timestamp": datetime.utcnow().isoformat(),
-            "exit_code": 0,
+            "exit_code": exit_code,
         }
         runtime.terminal_output.append(terminal_entry)
 
@@ -1614,6 +1653,25 @@ async def delete_session(session_id: str) -> dict[str, Any]:
 
     # Also remove from active sessions if present
     if session_id in sessions:
+        runtime = sessions[session_id]
+
+        # Cleanup sandbox if exists
+        if runtime.sandbox_client and runtime.sandbox_id:
+            try:
+                runtime.sandbox_client.destroy_sandbox(runtime.sandbox_id)
+                logger.info(f"Destroyed sandbox {runtime.sandbox_id} for session {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to destroy sandbox {runtime.sandbox_id}: {e}")
+            finally:
+                runtime.sandbox_client.close()
+
+        # Cleanup browser if exists
+        if runtime.browser_service:
+            try:
+                await runtime.browser_service.close()
+            except Exception as e:
+                logger.error(f"Failed to close browser for session {session_id}: {e}")
+
         del sessions[session_id]
 
     return {
