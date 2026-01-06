@@ -1,89 +1,71 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
-import { HistorySidebar } from '@/components/layout/HistorySidebar'
-import { ConversationPanel } from '@/components/layout/ConversationPanel'
-import { AgentWorkspace } from '@/components/workspace/AgentWorkspace'
-import { StatusBar } from '@/components/layout/StatusBar'
-import { useWebSocket } from '@/hooks/useWebSocket'
+import { useRouter } from 'next/navigation'
 import { useSessionStore } from '@/store/session'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function Home() {
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const { setTodos, setTerminalOutput, setBrowserState, setBrowserControl, setCurrentSession } = useSessionStore()
-  
-  // Create session on mount
+  const router = useRouter()
+  const [isCreating, setIsCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { fetchSessions } = useSessionStore()
+
+  // Create a new session and redirect to its permalink
   useEffect(() => {
-    const createSession = async () => {
+    const createAndRedirect = async () => {
+      if (isCreating) return
+      setIsCreating(true)
+      
       try {
-        const response = await fetch('http://localhost:8000/sessions', {
+        const response = await fetch(`${API_BASE}/sessions`, {
           method: 'POST',
         })
+        
+        if (!response.ok) {
+          throw new Error(`Failed to create session: ${response.statusText}`)
+        }
+        
         const data = await response.json()
-        setSessionId(data.id)
-        // Also set in Zustand store so ConversationPanel's WebSocket connects
-        setCurrentSession(data.id)
-        // Clear initial mock data
-        setTodos([])
-        setTerminalOutput([])
-        setBrowserState('', '', null)
-        setBrowserControl('user')
-      } catch (error) {
-        console.error('Failed to create session:', error)
-        // Use a fallback session ID for development
-        const fallbackId = 'dev-session-' + Date.now()
-        setSessionId(fallbackId)
-        setCurrentSession(fallbackId)
+        
+        // Redirect to the session permalink
+        router.push(`/chat/${data.id}`)
+      } catch (err) {
+        console.error('Failed to create session:', err)
+        setError(err instanceof Error ? err.message : 'Failed to create session')
+        
+        // Fallback: create a dev session ID and redirect
+        const fallbackId = `dev-session-${Date.now()}`
+        router.push(`/chat/${fallbackId}`)
       }
     }
-    createSession()
-  }, [setTodos, setTerminalOutput, setBrowserState, setBrowserControl, setCurrentSession])
+    
+    createAndRedirect()
+  }, [router, isCreating])
 
-  const {
-    runCommand,
-    browserNavigate,
-    setBrowserControlMode,
-    createTodo,
-    updateTodo,
-    // Human intervention handlers
-    pauseSession,
-    resumeSession,
-    approveTodo,
-    rejectTodo,
-    addTodoNote,
-    editTodo,
-    deleteTodo,
-  } = useWebSocket(sessionId)
+  // Fetch sessions in background for sidebar
+  useEffect(() => {
+    fetchSessions()
+  }, [fetchSessions])
+
+  if (error) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-950 text-white">
+        <div className="text-center">
+          <p className="text-red-400 mb-2">Error: {error}</p>
+          <p className="text-slate-400">Redirecting to fallback session...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="h-screen flex flex-col bg-slate-950">
-      <div className="flex-1 flex min-h-0">
-        <HistorySidebar />
-        <PanelGroup direction="horizontal" className="flex-1">
-          <Panel defaultSize={40} minSize={30}>
-            <ConversationPanel />
-          </Panel>
-          <PanelResizeHandle className="w-1 bg-slate-800 hover:bg-blue-500 transition-colors cursor-col-resize" />
-          <Panel defaultSize={60} minSize={40}>
-            <AgentWorkspace 
-              onRunCommand={runCommand}
-              onBrowserNavigate={browserNavigate}
-              onSetBrowserControl={setBrowserControlMode}
-              onCreateTodo={createTodo}
-              onUpdateTodo={updateTodo}
-              onPauseSession={pauseSession}
-              onResumeSession={resumeSession}
-              onApproveTodo={approveTodo}
-              onRejectTodo={rejectTodo}
-              onAddTodoNote={addTodoNote}
-              onEditTodo={editTodo}
-              onDeleteTodo={deleteTodo}
-            />
-          </Panel>
-        </PanelGroup>
+    <div className="h-screen flex items-center justify-center bg-slate-950 text-white">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <p className="text-slate-400">Creating new session...</p>
       </div>
-      <StatusBar />
     </div>
   )
 }

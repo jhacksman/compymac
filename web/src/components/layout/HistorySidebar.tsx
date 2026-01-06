@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Plus, Clock, Play, Trash2, Loader2 } from 'lucide-react'
 import { useSessionStore } from '@/store/session'
 import { cn } from '@/lib/utils'
@@ -79,9 +81,9 @@ export function HistorySidebar() {
         </button>
         <div className="mt-4 flex flex-col gap-2">
           {sessions.slice(0, 5).map((session) => (
-            <button
+            <Link
               key={session.id}
-              onClick={() => setCurrentSession(session.id)}
+              href={`/chat/${session.id}`}
               className={cn(
                 "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors",
                 currentSessionId === session.id
@@ -90,7 +92,7 @@ export function HistorySidebar() {
               )}
             >
               {session.title.charAt(0)}
-            </button>
+            </Link>
           ))}
         </div>
       </div>
@@ -125,11 +127,11 @@ export function HistorySidebar() {
           </div>
         ) : (
           sessions.map((session) => (
-            <div
+            <Link
               key={session.id}
-              onClick={() => setCurrentSession(session.id)}
+              href={`/chat/${session.id}`}
               className={cn(
-                "w-full px-4 py-3 text-left transition-colors cursor-pointer group",
+                "block w-full px-4 py-3 text-left transition-colors cursor-pointer group",
                 currentSessionId === session.id
                   ? "bg-slate-800 border-l-2 border-blue-500"
                   : "hover:bg-slate-800/50"
@@ -188,19 +190,19 @@ export function HistorySidebar() {
                   )} />
                 </div>
               </div>
-            </div>
+            </Link>
           ))
         )}
       </div>
 
       <div className="p-4 border-t border-slate-700">
-        <button
-          onClick={() => createSession('New Session')}
+        <Link
+          href="/"
           className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
           <span className="text-sm">New Session</span>
-        </button>
+        </Link>
       </div>
     </div>
   )
